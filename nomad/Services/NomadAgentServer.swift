@@ -1307,13 +1307,48 @@ final class NomadAgentServer: ObservableObject {
                 try {
                     const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
                     let fn;
+                    // 1. If it parses as a direct expression, return it
                     try {
                         fn = new AsyncFunction("return (" + code + ");");
-                    } catch (_) {
+                        const val = await fn.call(window);
+                        return { __nomad_ok: true, value: val };
+                    } catch (_) {}
+
+                    // 2. If it contains an explicit return statement, execute as function body
+                    if (code.includes("return ") || code.includes("return;")) {
                         fn = new AsyncFunction(code);
+                        const val = await fn.call(window);
+                        return { __nomad_ok: true, value: val };
                     }
-                    const val = await fn.call(window);
-                    return { __nomad_ok: true, value: val };
+
+                    // 3. Multi-statement code without explicit return:
+                    // Try evaluating with eval to capture completion value of last expression
+                    try {
+                        const val = await window.eval(code);
+                        return { __nomad_ok: true, value: val };
+                    } catch (evalErr) {
+                        // 4. If window.eval fails (e.g. top-level await or strict CSP), try wrapping last statement in return
+                        let lastLineRetried = false;
+                        let val;
+                        let lines = code.trim().split("\\n");
+                        if (lines.length > 0) {
+                            let last = lines[lines.length - 1].trim();
+                            if (last && !last.startsWith("return ") && !last.startsWith("const ") && !last.startsWith("let ") && !last.startsWith("var ") && !last.startsWith("if ") && !last.startsWith("for ") && !last.startsWith("while ") && !last.startsWith("class ") && !last.startsWith("function ")) {
+                                let expr = last.endsWith(";") ? last.slice(0, -1) : last;
+                                let modified = lines.slice(0, -1).concat(["return (" + expr + ");"]);
+                                try {
+                                    let fnTry = new AsyncFunction(modified.join("\\n"));
+                                    val = await fnTry.call(window);
+                                    lastLineRetried = true;
+                                } catch (_) {}
+                            }
+                        }
+                        if (!lastLineRetried) {
+                            fn = new AsyncFunction(code);
+                            val = await fn.call(window);
+                        }
+                        return { __nomad_ok: true, value: val };
+                    }
                 } catch (err) {
                     return {
                         __nomad_ok: false,
@@ -1339,11 +1374,31 @@ final class NomadAgentServer: ObservableObject {
                 if let dict = evalResult as? [String: Any], dict["__nomad_ok"] as? Bool == false {
                     let errMsg = dict["error"] as? String ?? "JavaScript evaluation failed"
                     let errStack = dict["stack"] as? String
-                    let errName = dict["name"] as? String ?? "EVAL_ERROR"
+                    let rawName = dict["name"] as? String ?? "Error"
+
+                    let isCSP = rawName == "EvalError" || errMsg.contains("Content Security Policy") || errMsg.contains("CSP") || errMsg.contains("Refused to evaluate")
+                    let isSyntax = rawName == "SyntaxError" || errMsg.contains("SyntaxError") || errMsg.contains("Unexpected token")
+                    let isType = rawName == "TypeError"
+                    let isRef = rawName == "ReferenceError"
+
+                    let errCode: String
+                    if isCSP {
+                        errCode = "EVAL_CSP"
+                    } else if isSyntax {
+                        errCode = "SYNTAX_ERROR"
+                    } else if isType {
+                        errCode = "TYPE_ERROR"
+                    } else if isRef {
+                        errCode = "REFERENCE_ERROR"
+                    } else {
+                        errCode = "EVAL_ERROR"
+                    }
+
                     var resp: [String: Any] = [
                         "success": false,
                         "error": errMsg,
-                        "code": errName
+                        "code": errCode,
+                        "name": rawName
                     ]
                     if let stack = errStack { resp["stack"] = stack }
                     sendJSON(connection: connection, object: resp, origin: origin)

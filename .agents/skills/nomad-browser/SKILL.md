@@ -201,8 +201,7 @@ For environments driving Nomad directly without MCP (e.g. `curl`, Python, Node.j
 | `GET` | `/cookies` | Query: `domain` (filter by target domain), `allDomains=true`, `tabId` |
 | `POST` | `/cookies` | Body: `{ "action": "set"|"get"|"clear", "domain"?: string, "name"?: string, "value"?: string, "cookies"?: [...], "allDomains"?: bool }` |
 | `DELETE` | `/cookies` | Query / Body: `domain` (clears cookies for domain), `allDomains=true` (clears all profile cookies) |
-| `GET` / `POST` | `/screenshot` | Query / Body: `labeled=true`, `elementId=eN`, `clip=x,y,w,h` |
-| `POST` | `/evaluate` | Body: `{ "script": string }` (alias: `expression`), `world`: `"page"` \| `"isolated"` (returns structured error with `code: "SYNTAX_ERROR"|"EVAL_CSP"` on failure) |
+| `POST` | `/evaluate` | Body: `{ "script": string }` (alias: `expression`), `world`: `"page"` \| `"isolated"` (supports expressions and multi-statement scripts; returns structured uppercase `code: "SYNTAX_ERROR"|"EVAL_CSP"|"TYPE_ERROR"|"REFERENCE_ERROR"|"EVAL_ERROR"` and `name` on failure) |
 | `GET` / `POST` | `/dialog` | Body / Query: `{ "policy"?: "accept"|"dismiss"|"wait", "action"?: "accept"|"dismiss", "response"?: string }` (default safe policy is `"dismiss"`; `"wait"` holds dialogs for inspection; invalid policies reject with 400 Bad Request) |
 | `GET` | `/console` | Query: `level=all|log|warn|error`, `clear=true`, `tabId` |
 | `GET` | `/network` | Query: `statusFilter=all|errors|success`, `clear=true`, `tabId` |
