@@ -62,9 +62,17 @@ enum URLParser {
         }
 
         // Otherwise, treat as a search query using the configured search engine
-        let encodedQuery = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? trimmed
+        let encodedQuery = encodeQueryComponent(trimmed)
         let searchBase = SettingsStore.shared.searchEngineBaseURL
-        return URL(string: "\(searchBase)\(encodedQuery)")!
+        return URL(string: "\(searchBase)\(encodedQuery)") ?? URL(string: "https://duckduckgo.com/?q=\(encodedQuery)")!
+    }
+
+    /// Percent-encodes a user query string for inclusion in a search engine URL query parameter,
+    /// escaping characters like '+', '&', '=', '?', and '#' to prevent query parameter corruption.
+    static func encodeQueryComponent(_ query: String) -> String {
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: "+&=?#/")
+        return query.addingPercentEncoding(withAllowedCharacters: allowed) ?? query
     }
 
     /// Checks if a string looks like a web address or domain name rather than search keywords.

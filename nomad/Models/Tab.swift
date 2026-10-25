@@ -658,8 +658,9 @@ final class Tab: NSObject, Identifiable, ObservableObject {
                 self.isZapperActive = false
                 return
             }
-            if let sel = dict["selector"] as? String, let host = dict["host"] as? String {
-                ZapperStore.shared.addSelector(sel, for: host)
+            guard let currentHost = self.url?.host?.lowercased(), !currentHost.isEmpty else { return }
+            if let sel = dict["selector"] as? String {
+                ZapperStore.shared.addSelector(sel, for: currentHost)
             }
         } else if name == "nomadFrameBridge" {
             // Frame registration and lifecycle message from sub-frame execution context

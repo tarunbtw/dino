@@ -2320,7 +2320,11 @@ extension Tab {
         }
         return { count: 0 };
         """
-        _ = try? await webView.callAsyncJavaScript(syncScript, arguments: [:], in: nil, in: .page)
+        await withCheckedContinuation { continuation in
+            webView.callAsyncJavaScript(syncScript, arguments: [:], in: nil, in: .page) { _ in
+                continuation.resume()
+            }
+        }
 
         var opts: [String: Any] = ["limit": limit, "offset": offset, "viewportOnly": viewportOnly, "includeText": includeText]
         if let r = role, !r.isEmpty { opts["role"] = r }
@@ -2940,7 +2944,11 @@ extension Tab {
             }
             return { count: 0 };
             """
-            _ = try? await webView.callAsyncJavaScript(syncScript, arguments: [:], in: nil, in: .page)
+            await withCheckedContinuation { continuation in
+                webView.callAsyncJavaScript(syncScript, arguments: [:], in: nil, in: .page) { _ in
+                    continuation.resume()
+                }
+            }
         }
 
         // Flush layout and apply sensitive input blurring (plus visual badges if labeled == true)

@@ -278,6 +278,7 @@ private enum Swap {
         case wrongApp(expected: String, got: String)
         case notNewer(installed: Int, incoming: Int)
         case moveFailed(String)
+        case signatureInvalid(String)
 
         var errorDescription: String? {
             switch self {
@@ -297,6 +298,8 @@ private enum Swap {
                 return "Incoming build (\(inc)) is not newer than currently installed build (\(inst))."
             case .moveFailed(let msg):
                 return "Could not swap application bundles: \(msg)"
+            case .signatureInvalid(let msg):
+                return "Incoming application bundle signature validation failed: \(msg)"
             }
         }
     }
@@ -396,13 +399,10 @@ private enum Swap {
     }
 
     static func digest(of file: URL) throws -> String {
-        let handle = try FileHandle(forReadingFrom: file)
-        defer { try? handle.close() }
-        var sha = SHA256()
-        while let chunk = try handle.read(upToCount: 1 << 20), !chunk.isEmpty {
-            sha.update(data: chunk)
+        guard let hex = DownloadManager.computeSHA256(for: file) else {
+            throw Refused.archive("Failed to compute SHA-256 digest for \(file.lastPathComponent)")
         }
-        return sha.finalize().map { String(format: "%02x", $0) }.joined()
+        return hex
     }
 
     static func extract(_ zip: URL, into folder: URL) throws {
@@ -436,6 +436,25 @@ private enum Swap {
         let incomingBuild = Int(info["CFBundleVersion"] as? String ?? "") ?? 0
         guard incomingBuild > Updater.currentBuild else {
             throw Refused.notNewer(installed: Updater.currentBuild, incoming: incomingBuild)
+        }
+
+        var staticCode: SecStaticCode?
+        let status = SecStaticCodeCreateWithPath(bundle as CFURL, [], &staticCode)
+        var hostCode: SecCode?
+        let hostIsSigned = SecCodeCopySelf([], &hostCode) == errSecSuccess
+        if hostIsSigned {
+            guard status == errSecSuccess, let code = staticCode else {
+                throw Refused.signatureInvalid("Incoming bundle is unsigned (status \(status))")
+            }
+            let validity = SecStaticCodeCheckValidity(code, SecCSFlags(rawValue: kSecCSBasicValidateOnly), nil)
+            guard validity == errSecSuccess else {
+                throw Refused.signatureInvalid("Code signature check failed (status \(validity))")
+            }
+        } else if status == errSecSuccess, let code = staticCode {
+            let validity = SecStaticCodeCheckValidity(code, SecCSFlags(rawValue: kSecCSBasicValidateOnly), nil)
+            guard validity == errSecSuccess else {
+                throw Refused.signatureInvalid("Code signature check failed (status \(validity))")
+            }
         }
     }
 

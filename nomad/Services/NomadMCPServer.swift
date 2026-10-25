@@ -17,7 +17,7 @@ final class NomadMCPServer {
            let p = Int(envStr) {
             return p
         }
-        return 9222
+        return Int(NomadAgentServer.defaultPort)
     }
 
     private static func loadToken() -> String? {

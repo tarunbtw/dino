@@ -79,7 +79,7 @@ struct OmniboxSuggestionsView: View {
 
         // 3. Search Engine Fallback suggestion
         let searchBase = settings.searchEngineBaseURL
-        let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? trimmed
+        let encoded = URLParser.encodeQueryComponent(trimmed)
         if let searchURL = URL(string: "\(searchBase)\(encoded)") {
             results.append(OmniboxSuggestionItem(
                 kind: .search,

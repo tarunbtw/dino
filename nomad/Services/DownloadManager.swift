@@ -307,12 +307,9 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
         guard let handle = try? FileHandle(forReadingFrom: fileURL) else { return nil }
         defer { try? handle.close() }
         var hasher = SHA256()
-        while autoreleasepool(invoking: {
-            let chunk = handle.readData(ofLength: 1024 * 1024)
-            if chunk.isEmpty { return false }
+        while let chunk = try? handle.read(upToCount: 1024 * 1024), !chunk.isEmpty {
             hasher.update(data: chunk)
-            return true
-        }) {}
+        }
         let digest = hasher.finalize()
         return digest.map { String(format: "%02x", $0) }.joined()
     }

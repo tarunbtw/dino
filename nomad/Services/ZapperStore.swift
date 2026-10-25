@@ -19,10 +19,7 @@ final class ZapperStore: ObservableObject {
     private let fileURL: URL
 
     private init() {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let nomadDir = appSupport.appendingPathComponent("nomad", isDirectory: true)
-        try? FileManager.default.createDirectory(at: nomadDir, withIntermediateDirectories: true)
-        self.fileURL = nomadDir.appendingPathComponent("zapped_elements.json")
+        self.fileURL = FileManager.nomadApplicationSupportDirectory.appendingPathComponent("zapped_elements.json")
         load()
     }
 
@@ -45,7 +42,8 @@ final class ZapperStore: ObservableObject {
     /// Records a newly zapped selector for a specific domain host
     func addSelector(_ selector: String, for host: String) {
         let clean = selector.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !clean.isEmpty, !host.isEmpty, !clean.contains("\n"), !clean.contains("\r"), clean.count <= 500 else { return }
+        guard !clean.isEmpty, !host.isEmpty, !clean.contains("\n"), !clean.contains("\r"),
+              !clean.contains("{"), !clean.contains("}"), clean.count <= 500 else { return }
         var current = zappedByHost[host] ?? []
         if !current.contains(clean) {
             current.append(clean)

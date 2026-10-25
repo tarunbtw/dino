@@ -40,11 +40,13 @@ final class NomadAgentServer: ObservableObject {
             return true
         }
         let lower = origin.lowercased()
-        if lower.hasPrefix("http://127.0.0.1") || lower.hasPrefix("https://127.0.0.1") { return true }
-        if lower.hasPrefix("http://localhost") || lower.hasPrefix("https://localhost") { return true }
-        if lower.hasPrefix("http://[::1]") || lower.hasPrefix("https://[::1]") { return true }
-        if lower.hasPrefix("chrome-extension://") { return true }
-        return false
+        if lower.hasPrefix("chrome-extension://") || lower.hasPrefix("nomad://") { return true }
+        guard let url = URL(string: origin),
+              let scheme = url.scheme?.lowercased(), (scheme == "http" || scheme == "https"),
+              let host = url.host?.lowercased() else {
+            return false
+        }
+        return host == "127.0.0.1" || host == "localhost" || host == "::1" || host == "[::1]"
     }
 
     @Published private(set) var isRunning: Bool = false
@@ -469,6 +471,32 @@ final class NomadAgentServer: ObservableObject {
             sendJSON(connection: connection, object: ["success": true, "deletedCount": deletedCount, "domain": host], origin: origin)
         }
 
+        func executeGetCookies(tab: Tab, targetDomain: String?, allDomains: Bool) async {
+            let cookieStore = tab.webView.configuration.websiteDataStore.httpCookieStore
+            let allCookies = await cookieStore.allCookies()
+            let host = (targetDomain?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 } ?? tab.url?.host ?? ""
+            let cleanHost = host.trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            let matched = allCookies.filter { cookie in
+                if allDomains { return true }
+                let cleanDomain = cookie.domain.trimmingCharacters(in: CharacterSet(charactersIn: "."))
+                return cleanHost.isEmpty || cleanDomain == cleanHost || cleanHost.hasSuffix("." + cleanDomain) || cleanDomain.hasSuffix("." + cleanHost)
+            }.map { cookie -> [String: Any] in
+                var dict: [String: Any] = [
+                    "name": cookie.name,
+                    "value": cookie.value,
+                    "domain": cookie.domain,
+                    "path": cookie.path,
+                    "isSecure": cookie.isSecure,
+                    "isHTTPOnly": cookie.isHTTPOnly
+                ]
+                if let exp = cookie.expiresDate {
+                    dict["expires"] = exp.timeIntervalSince1970
+                }
+                return dict
+            }
+            sendJSON(connection: connection, object: ["cookies": matched, "domain": host, "allDomains": allDomains], origin: origin)
+        }
+
         switch (method, cleanPath) {
         case ("GET", "/tabs"):
             let tabsList: [[String: Any]] = store.tabs.map { tab -> [String: Any] in
@@ -559,10 +587,9 @@ final class NomadAgentServer: ObservableObject {
             let tid = (json["tabId"] as? String) ?? queryItem("tabId")
             guard let activeTab = requireTab(id: tid) else { return }
             let action = (json["action"] as? String)?.lowercased()
-            switch action {
-            case "back", "forward", "reload":
-                handleNavAction(action!, tab: activeTab)
-            default:
+            if let action = action, ["back", "forward", "reload"].contains(action) {
+                handleNavAction(action, tab: activeTab)
+            } else {
                 guard let urlStr = json["url"] as? String, let url = URL(string: urlStr), let scheme = url.scheme?.lowercased() else {
                     sendResponse(connection: connection, status: "400 Bad Request", body: "{\"error\":\"Missing or invalid url in body\",\"code\":\"INVALID_URL\",\"success\":false}", origin: origin)
                     return
@@ -582,8 +609,12 @@ final class NomadAgentServer: ObservableObject {
                         sendResponse(connection: connection, status: "404 Not Found", body: "{\"error\":\"File not found at path '\(filePath)'\",\"code\":\"FILE_NOT_FOUND\",\"success\":false}", origin: origin)
                         return
                     }
-                    let pathLower = filePath.lowercased()
-                    if pathLower.contains("/.ssh") || pathLower.contains("/.nomad") || pathLower.contains("/library/keychains") || pathLower.contains("/etc/master.passwd") || pathLower.contains("/etc/sudoers") {
+                    let rawLower = filePath.lowercased()
+                    let canonicalLower = URL(fileURLWithPath: filePath).resolvingSymlinksInPath().standardized.path.lowercased()
+                    let isSensitive = [rawLower, canonicalLower].contains { p in
+                        p.contains("/.ssh") || p.contains("/.nomad") || p.contains("/library/keychains") || p.contains("/etc/master.passwd") || p.contains("/etc/sudoers")
+                    }
+                    if isSensitive {
                         sendResponse(connection: connection, status: "403 Forbidden", body: "{\"error\":\"Access to sensitive directory or credential file is blocked by Nomad security policy.\",\"code\":\"ACCESS_DENIED\",\"success\":false}", origin: origin)
                         return
                     }
@@ -790,7 +821,7 @@ final class NomadAgentServer: ObservableObject {
                         // 2. URL changed away from initialUrl and loading is false, OR
                         // 3. Navigation finished after wait call was received (lastNavigationFinishTime >= startTime)
                         let urlChanged = (!initialUrl.isEmpty && curUrl != initialUrl)
-                        let finishedAfterStart = (activeTab.lastNavigationFinishTime != nil && activeTab.lastNavigationFinishTime! >= startTime)
+                        let finishedAfterStart = activeTab.lastNavigationFinishTime.map { $0 >= startTime } ?? false
                         if (didStartNavigating || urlChanged || finishedAfterStart) && !activeTab.isLoading {
                             sendJSON(connection: connection, object: ["success": true, "message": "Navigation finished", "url": curUrl], origin: origin)
                             return
@@ -810,31 +841,7 @@ final class NomadAgentServer: ObservableObject {
 
         case ("GET", "/cookies"):
             guard let activeTab = requireTab(id: queryItem("tabId")) else { return }
-            let cookieStore = activeTab.webView.configuration.websiteDataStore.httpCookieStore
-            let allCookies = await cookieStore.allCookies()
-            let domainParam = queryItem("domain")?.trimmingCharacters(in: .whitespacesAndNewlines)
-            let host = (domainParam != nil && !domainParam!.isEmpty) ? domainParam! : (activeTab.url?.host ?? "")
-            let allDomains = queryBool("allDomains")
-            let cleanHost = host.trimmingCharacters(in: CharacterSet(charactersIn: "."))
-            let matched = allCookies.filter { cookie in
-                if allDomains { return true }
-                let cleanDomain = cookie.domain.trimmingCharacters(in: CharacterSet(charactersIn: "."))
-                return cleanHost.isEmpty || cleanDomain == cleanHost || cleanHost.hasSuffix("." + cleanDomain) || cleanDomain.hasSuffix("." + cleanHost)
-            }.map { cookie -> [String: Any] in
-                var dict: [String: Any] = [
-                    "name": cookie.name,
-                    "value": cookie.value,
-                    "domain": cookie.domain,
-                    "path": cookie.path,
-                    "isSecure": cookie.isSecure,
-                    "isHTTPOnly": cookie.isHTTPOnly
-                ]
-                if let exp = cookie.expiresDate {
-                    dict["expires"] = exp.timeIntervalSince1970
-                }
-                return dict
-            }
-            sendJSON(connection: connection, object: ["cookies": matched, "domain": host, "allDomains": allDomains], origin: origin)
+            await executeGetCookies(tab: activeTab, targetDomain: queryItem("domain"), allDomains: queryBool("allDomains"))
 
         case ("POST", "/cookies"):
             guard let bodyData = bodyData, !bodyData.isEmpty else {
@@ -851,7 +858,7 @@ final class NomadAgentServer: ObservableObject {
             let action = (json["action"] as? String)?.lowercased()
             let allDomains = queryBool("allDomains") || (json["allDomains"] as? Bool == true)
             let domainParam = (json["domain"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? queryItem("domain")?.trimmingCharacters(in: .whitespacesAndNewlines)
-            let targetDomain = (domainParam != nil && !domainParam!.isEmpty) ? domainParam! : (activeTab.url?.host ?? "")
+            let targetDomain = (domainParam?.isEmpty == false ? domainParam : nil) ?? (activeTab.url?.host ?? "")
 
             if action == "clear" || action == "delete" {
                 await executeClearCookies(tab: activeTab, targetDomain: targetDomain, allDomains: allDomains)
@@ -859,28 +866,7 @@ final class NomadAgentServer: ObservableObject {
             }
 
             if action == "get" {
-                let cookieStore = activeTab.webView.configuration.websiteDataStore.httpCookieStore
-                let allCookies = await cookieStore.allCookies()
-                let cleanHost = targetDomain.trimmingCharacters(in: CharacterSet(charactersIn: "."))
-                let matched = allCookies.filter { cookie in
-                    if allDomains { return true }
-                    let cleanDomain = cookie.domain.trimmingCharacters(in: CharacterSet(charactersIn: "."))
-                    return cleanHost.isEmpty || cleanDomain == cleanHost || cleanHost.hasSuffix("." + cleanDomain) || cleanDomain.hasSuffix("." + cleanHost)
-                }.map { cookie -> [String: Any] in
-                    var dict: [String: Any] = [
-                        "name": cookie.name,
-                        "value": cookie.value,
-                        "domain": cookie.domain,
-                        "path": cookie.path,
-                        "isSecure": cookie.isSecure,
-                        "isHTTPOnly": cookie.isHTTPOnly
-                    ]
-                    if let exp = cookie.expiresDate {
-                        dict["expires"] = exp.timeIntervalSince1970
-                    }
-                    return dict
-                }
-                sendJSON(connection: connection, object: ["cookies": matched, "domain": targetDomain, "allDomains": allDomains], origin: origin)
+                await executeGetCookies(tab: activeTab, targetDomain: targetDomain, allDomains: allDomains)
                 return
             }
 
@@ -928,7 +914,7 @@ final class NomadAgentServer: ObservableObject {
             sendJSON(connection: connection, object: ["success": true, "setCount": setCount], origin: origin)
 
         case ("DELETE", "/cookies"):
-            let json = (bodyData != nil && !bodyData!.isEmpty) ? (try? JSONSerialization.jsonObject(with: bodyData!)) as? [String: Any] : nil
+            let json = bodyData.flatMap { !$0.isEmpty ? (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] : nil }
             let tid = (json?["tabId"] as? String) ?? queryItem("tabId")
             guard let activeTab = requireTab(id: tid) else { return }
             var allDomains = queryBool("allDomains")
@@ -1317,28 +1303,30 @@ final class NomadAgentServer: ObservableObject {
 
             let trimmed = script.trimmingCharacters(in: .whitespacesAndNewlines)
             let wrappedScript = """
-            return await (async () => {
+            return await (async (code) => {
                 try {
-                    var __nomad_res;
+                    const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
+                    let fn;
                     try {
-                        __nomad_res = await (async () => (\(trimmed)))();
-                    } catch(__syntax_err) {
-                        __nomad_res = await (async () => { \(trimmed) })();
+                        fn = new AsyncFunction("return (" + code + ");");
+                    } catch (_) {
+                        fn = new AsyncFunction(code);
                     }
-                    return { __nomad_ok: true, value: __nomad_res };
-                } catch(__nomad_eval_err) {
+                    const val = await fn.call(window);
+                    return { __nomad_ok: true, value: val };
+                } catch (err) {
                     return {
                         __nomad_ok: false,
-                        error: (__nomad_eval_err && __nomad_eval_err.message) ? __nomad_eval_err.message : String(__nomad_eval_err),
-                        stack: (__nomad_eval_err && __nomad_eval_err.stack) ? __nomad_eval_err.stack : null,
-                        name: (__nomad_eval_err && __nomad_eval_err.name) ? __nomad_eval_err.name : 'Error'
+                        error: (err && err.message) ? err.message : String(err),
+                        stack: (err && err.stack) ? err.stack : null,
+                        name: (err && err.name) ? err.name : 'Error'
                     };
                 }
-            })();
+            })(code);
             """
             do {
                 let evalResult: Any? = try await withCheckedThrowingContinuation { continuation in
-                    activeTab.webView.callAsyncJavaScript(wrappedScript, arguments: [:], in: nil, in: contentWorld) { result in
+                    activeTab.webView.callAsyncJavaScript(wrappedScript, arguments: ["code": trimmed], in: nil, in: contentWorld) { result in
                         switch result {
                         case .success(let val):
                             continuation.resume(returning: val)

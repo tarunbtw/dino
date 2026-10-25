@@ -21,9 +21,7 @@ final class ExtensionManager: NSObject, ObservableObject {
 
     /// Application Support/nomad/Extensions/ directory.
     static var extensionsFolder: URL {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let nomadDir = appSupport.appendingPathComponent("nomad", isDirectory: true)
-        return nomadDir.appendingPathComponent("Extensions", isDirectory: true)
+        FileManager.nomadApplicationSupportDirectory.appendingPathComponent("Extensions", isDirectory: true)
     }
 
     private static var listFileURL: URL {

@@ -7,15 +7,26 @@
 
 import Foundation
 
+extension FileManager {
+    /// Guaranteed ~/Library/Application Support/nomad directory URL.
+    static var nomadApplicationSupportDirectory: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        let nomadDir = base.appendingPathComponent("nomad", isDirectory: true)
+        if !FileManager.default.fileExists(atPath: nomadDir.path) {
+            try? FileManager.default.createDirectory(at: nomadDir, withIntermediateDirectories: true)
+        }
+        return nomadDir
+    }
+}
+
 /// Coordinates persisting and restoring open tabs across app launches.
 @MainActor
 final class SessionManager {
     static let shared = SessionManager()
 
     private static var sessionFileURL: URL {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let nomadDir = appSupport.appendingPathComponent("nomad", isDirectory: true)
-        return nomadDir.appendingPathComponent("session.json")
+        FileManager.nomadApplicationSupportDirectory.appendingPathComponent("session.json")
     }
 
     private init() {}

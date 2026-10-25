@@ -35,9 +35,7 @@ final class HistoryStore: ObservableObject {
     @Published private(set) var items: [HistoryItem] = []
 
     private static var storageURL: URL {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let nomadDir = appSupport.appendingPathComponent("nomad", isDirectory: true)
-        return nomadDir.appendingPathComponent("history.json")
+        FileManager.nomadApplicationSupportDirectory.appendingPathComponent("history.json")
     }
 
     private init() {
