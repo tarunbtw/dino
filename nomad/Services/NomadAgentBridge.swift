@@ -23,6 +23,7 @@ struct NomadSnapshot: Codable {
     /// Pre-formatted dense semantic tree for LLM prompt ingestion (~300 tokens).
     let summary: String
     var tokenEstimate: Int?
+    var warning: String?
 }
 
 /// A single interactive element discovered on the page.
@@ -63,6 +64,8 @@ struct NomadBounds: Codable {
 struct NomadAction: Codable {
     var action: String = "click" // "click", "hover", "type", "clear", "press", "selectOption", "scroll", "drag", "highlight", "upload", "native_click", "native_type", ...
     var target: String? // e.g. "e1", "e2", or CSS selector fallback
+    var selector: String?
+    var elementId: String?
     var text: String?
     var key: String? // "Enter", "Escape", "Tab", or chords "Meta+A", "Control+Enter"
     var direction: String? // "up", "down", "left", "right"
@@ -89,9 +92,11 @@ struct NomadAction: Codable {
         paths ?? []
     }
 
-    init(action: String = "click", target: String? = nil, text: String? = nil, key: String? = nil, direction: String? = nil, amount: CGFloat? = nil, submit: Bool? = nil, blur: Bool? = nil, change: Bool? = nil, force: Bool? = nil, native: Bool? = nil, x: CGFloat? = nil, y: CGFloat? = nil, toX: CGFloat? = nil, toY: CGFloat? = nil, scrollDeltaY: CGFloat? = nil, scrollDeltaX: CGFloat? = nil, optionValue: String? = nil, optionText: String? = nil, modifiers: [String]? = nil, paths: [String]? = nil, dialogPolicy: String? = nil, dialogResponse: String? = nil) {
+    init(action: String = "click", target: String? = nil, selector: String? = nil, elementId: String? = nil, text: String? = nil, key: String? = nil, direction: String? = nil, amount: CGFloat? = nil, submit: Bool? = nil, blur: Bool? = nil, change: Bool? = nil, force: Bool? = nil, native: Bool? = nil, x: CGFloat? = nil, y: CGFloat? = nil, toX: CGFloat? = nil, toY: CGFloat? = nil, scrollDeltaY: CGFloat? = nil, scrollDeltaX: CGFloat? = nil, optionValue: String? = nil, optionText: String? = nil, modifiers: [String]? = nil, paths: [String]? = nil, dialogPolicy: String? = nil, dialogResponse: String? = nil) {
         self.action = action
-        self.target = target
+        self.target = target ?? elementId ?? selector
+        self.selector = selector
+        self.elementId = elementId
         self.text = text
         self.key = key
         self.direction = direction
@@ -136,7 +141,9 @@ struct NomadAction: Codable {
             throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Unknown action type '\(rawAction)'"))
         }
         self.action = rawAction
-        self.target = try c.decodeIfPresent(String.self, forKey: .target) ?? c.decodeIfPresent(String.self, forKey: .elementId) ?? c.decodeIfPresent(String.self, forKey: .selector)
+        self.selector = try c.decodeIfPresent(String.self, forKey: .selector)
+        self.elementId = try c.decodeIfPresent(String.self, forKey: .elementId)
+        self.target = try c.decodeIfPresent(String.self, forKey: .target) ?? self.elementId ?? self.selector
         self.text = try c.decodeIfPresent(String.self, forKey: .text)
         self.key = try c.decodeIfPresent(String.self, forKey: .key)
         self.submit = try c.decodeIfPresent(Bool.self, forKey: .submit)
@@ -187,6 +194,8 @@ struct NomadAction: Codable {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(action, forKey: .action)
         try c.encodeIfPresent(target, forKey: .target)
+        try c.encodeIfPresent(selector, forKey: .selector)
+        try c.encodeIfPresent(elementId, forKey: .elementId)
         try c.encodeIfPresent(text, forKey: .text)
         try c.encodeIfPresent(key, forKey: .key)
         try c.encodeIfPresent(direction, forKey: .direction)
@@ -1623,6 +1632,17 @@ enum NomadDOMScript {
                 }
 
                 if (targetId && !el && action !== 'scroll' && action !== 'press') {
+                    var isExplicitSelector = Boolean(actionObj.selector && !actionObj.elementId);
+                    var isRefPattern = /^(f[0-9]+:)?[e][0-9]+$/i.test(targetId);
+                    if (isExplicitSelector || !isRefPattern) {
+                        return {
+                            success: false,
+                            staleRef: false,
+                            code: 'SELECTOR_NOT_FOUND',
+                            message: "Target element matching selector '" + targetId + "' not found in DOM.",
+                            elementId: targetId
+                        };
+                    }
                     return {
                         success: false,
                         staleRef: true,
@@ -2516,11 +2536,17 @@ extension Tab {
                 isTargetEditable = rect["isEditable"] as? Bool ?? false
                 targetTagName = (rect["tagName"] as? String ?? "").lowercased()
             } else {
+                let isRef = (target.range(of: "^(f[0-9]+:)?[e][0-9]+$", options: .regularExpression) != nil)
+                let isExplicitSelector = (action.selector != nil)
+                let code = (isExplicitSelector || !isRef) ? "SELECTOR_NOT_FOUND" : "ELEMENT_NOT_FOUND"
+                let message = (isExplicitSelector || !isRef)
+                    ? "Target element matching selector '\(target)' not found in DOM."
+                    : "Cannot execute native action: target element '\(target)' not found or has zero geometry in viewport."
                 return NomadActionResult(
                     success: false,
-                    message: "Cannot execute native action: target element '\(target)' not found or has zero geometry in viewport.",
+                    message: message,
                     elementId: target,
-                    code: "ELEMENT_NOT_FOUND"
+                    code: code
                 )
             }
         }

@@ -46,7 +46,7 @@ Nomad is an ultra-lightweight, native macOS WebKit browser engine featuring an e
 // Navigate to page (pass allowLocalFiles: true for file:// URLs)
 nomad_navigate({ "url": "https://example.com" })
 
-// Check status or verify active tab
+// Check status or verify active tab (on engine launch, poll /status until ready)
 nomad_status({})
 ```
 
@@ -70,6 +70,10 @@ nomad_snapshot({ "limit": 40, "offset": 0, "viewportOnly": true, "includeText": 
 // Or full JSON AST element array:
 nomad_snapshot({ "mode": "json" })
 ```
+
+> [!WARNING]
+> **JSON Mode Token Cost Guard:**
+> Full JSON AST mode serializes coordinates, tags, roles, attributes, and bounds for every element (~110 tokens/element vs ~20 in text mode). On a 1,000-element page, JSON mode consumes ~100k+ tokens. To prevent runaway context exhaustion, `mode: "json"` defaults to a 250-element limit and includes a `warning` field. To intentionally bypass this clamp, pass `"unrestricted": true` (or `"force": true`). For normal agent loops, always use the default `mode: "text"`.
 
 > [!NOTE]
 > **URL Display & Filter Totals in Header:** Snapshot headers echo the current page URL for context grounding. `totalElements` (and `filteredTotal`) reflects the count of elements matching any active filters (`role`, `text`, `viewportOnly`), while `unfilteredTotal` returns the raw element count on the page.
@@ -120,8 +124,9 @@ Supported action types:
 > - Call `nomad_downloads({ "limit": 20 })` to inspect recent completed or in-progress downloads.
 
 > [!TIP]
-> **Ref Self-Healing & Stale Ref Protection:**
+> **Ref Self-Healing, Stale Ref & Selector Protection:**
 > When asynchronous DOM shifts alter element indices between calls, Nomad automatically executes semantic signature matching (by ID, testId, name, or aria-label) to find the intended control. If an element reference is no longer in the DOM, was snapshotted as a non-editable tag, or resolves to an incompatible node (e.g. attempting to type into a shifted image, link, or checkbox), Nomad strictly returns `{ "success": false, "staleRef": true, "code": "STALE_REF" }` prompting you to call `nomad_snapshot` for fresh element refs instead of silently executing actions on arbitrary elements.
+> If an explicit CSS selector is provided (or a non-ref target fails to match in the live DOM), Nomad returns `{ "success": false, "staleRef": false, "code": "SELECTOR_NOT_FOUND", "message": "Target element matching selector '...' not found in DOM." }` providing a distinct, actionable error code.
 
 > [!NOTE]
 > **JavaScript Evaluation (`nomad_evaluate`):**
@@ -178,7 +183,7 @@ For environments driving Nomad directly without MCP (e.g. `curl`, Python, Node.j
 | Method | Endpoint | Description / Parameters |
 | :--- | :--- | :--- |
 | `GET` | `/status` | Engine health, capabilities, tab counts (`tabsCount`, `tabCount`), active URL (`activeURL`, `activeUrl`) |
-| `GET` | `/tabs` | List open tabs (`id`, `title`, `url`, `active`, `isActive`, `isLoading`, `isIncognito`) |
+| `GET` | `/tabs` | List open tabs (`id`, `title`, `url`, `active`, `isActive`, `isLoading`, `isIncognito`, `tabsCount`, `tabCount`) |
 | `POST` | `/tabs/new` | Body: `{ "url"?: string, "select"?: bool, "isIncognito"?: bool }` |
 | `POST` | `/tabs/switch` | Body: `{ "id": string }` |
 | `POST` | `/tabs/close` | Body: `{ "id": string }` |

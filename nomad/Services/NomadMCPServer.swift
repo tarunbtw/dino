@@ -153,6 +153,8 @@ final class NomadMCPServer {
             if let r = args["role"] as? String { qs.append("role=\(r.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? r)") }
             if let txt = args["text"] as? String { qs.append("text=\(txt.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? txt)") }
             if let t = args["tabId"] as? String { qs.append("tabId=\(t.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? t)") }
+            if let u = args["unrestricted"] as? Bool, u { qs.append("unrestricted=true") }
+            if let f = args["force"] as? Bool, f { qs.append("force=true") }
             let path = qs.isEmpty ? "/snapshot" : "/snapshot?" + qs.joined(separator: "&")
             callNomad(method: "GET", path: path) { res, err in
                 if let err = err {
@@ -511,6 +513,7 @@ final class NomadMCPServer {
                     "role": ["type": "string", "description": "Optional filter: match elements by role or tag (e.g. 'button', 'input', 'heading')"],
                     "text": ["type": "string", "description": "Optional filter: case-insensitive substring match against element text/value/label"],
                     "mode": ["type": "string", "enum": ["text", "json"], "description": "Perception output format. 'text' returns compact markdown summary; 'json' returns raw element array (default: 'text')"] as [String: Any],
+                    "unrestricted": ["type": "boolean", "description": "When true, bypasses the 250 element limit in JSON mode (warning: token-heavy)"],
                     "tabId": ["type": "string", "description": "Optional tab UUID to inspect instead of the active tab"]
                 ] as [String: Any],
                 "additionalProperties": false

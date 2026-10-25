@@ -281,11 +281,6 @@ final class NomadAgentServer: ObservableObject {
     private func routeRequest(method: String, path: String, queryString: String, headers: [String: String], bodyData: Data?, connection: NWConnection) async {
         let origin = headers["origin"]
 
-        guard let store = self.store else {
-            sendResponse(connection: connection, status: "503 Service Unavailable", body: "{\"error\":\"BrowserStore not connected\",\"code\":\"SERVICE_UNAVAILABLE\",\"success\":false}", origin: origin)
-            return
-        }
-
         // Validate Origin header against DNS rebinding & cross-site exfiltration attacks
         if !Self.isAllowedOrigin(origin) {
             print("🛡️ [NomadAgentServer] Blocked cross-origin request from untrusted origin: \(origin ?? "unknown")")
@@ -315,6 +310,8 @@ final class NomadAgentServer: ObservableObject {
             return val == "true" || val == "1"
         }
 
+        let cleanPath = (path.count > 1 && path.hasSuffix("/")) ? String(path.dropLast()) : path
+
         // Token Auth check (bypassed if NOMAD_DISABLE_AUTH=1 in environment)
         let authDisabled = ProcessInfo.processInfo.environment["NOMAD_DISABLE_AUTH"] == "1"
         var isAuthenticated = authDisabled
@@ -333,7 +330,7 @@ final class NomadAgentServer: ObservableObject {
         }
 
         // Unauthenticated access is strictly limited to minimal health check probe without sensitive page data
-        let isPublicHealthCheck = (method == "GET" && (path == "/" || path == "/status"))
+        let isPublicHealthCheck = (method == "GET" && (path == "/" || path == "/status" || cleanPath == "/" || cleanPath == "/status"))
         if !isAuthenticated {
             if isPublicHealthCheck {
                 let publicStatusObj: [String: Any] = [
@@ -348,6 +345,47 @@ final class NomadAgentServer: ObservableObject {
                 sendResponse(connection: connection, status: "401 Unauthorized", body: "{\"error\":\"Unauthorized: valid Bearer token required in Authorization header or ~/.nomad/agent-token\",\"code\":\"UNAUTHORIZED\",\"success\":false}", origin: origin)
                 return
             }
+        }
+
+        // Health check probes ("GET /" or "GET /status") can respond immediately even before BrowserStore finishes attaching
+        if method == "GET" && (cleanPath == "/" || cleanPath == "/status") {
+            let capabilities: [String: Any] = [
+                "waitModes": ["stability", "selector", "timeout", "networkidle", "navigation", "url"],
+                "actions": ["click", "hover", "type", "clear", "press", "selectOption", "scroll", "drag", "highlight", "upload", "native_click", "native_type", "native_press", "native_drag", "native_hover"],
+                "upload": ["files", "paths"],
+                "downloads": ["list", "last", "wait"],
+                "hardwareInput": ["isTrusted", "cgEvent", "appKit"],
+                "frames": ["crossOrigin", "piercing", "subframes"],
+                "screenshot": ["full", "labeled", "clip", "elementId"],
+                "evaluateWorlds": ["page", "isolated"],
+                "snapshotModes": ["text", "json"],
+                "cookies": ["get", "set", "clear"],
+                "console": ["log", "warn", "error"],
+                "network": ["fetch", "xhr", "status", "timing"],
+                "dialogPolicies": ["accept", "dismiss", "wait"]
+            ]
+            let liveTitle = (self.store?.activeTab?.webView.title?.isEmpty == false ? self.store?.activeTab?.webView.title : self.store?.activeTab?.title) ?? ""
+            let liveURL = (self.store?.activeTab?.webView.url?.absoluteString ?? self.store?.activeTab?.url?.absoluteString) ?? ""
+            let statusObj: [String: Any] = [
+                "nomad": "active",
+                "version": "1.0",
+                "port": self.port,
+                "tabsCount": self.store?.tabs.count ?? 0,
+                "tabCount": self.store?.tabs.count ?? 0,
+                "activeTabId": self.store?.activeTabId?.uuidString ?? "",
+                "activeURL": liveURL,
+                "activeTitle": liveTitle,
+                "lastDialog": (self.store?.activeTab?.lastDialog as Any?) ?? NSNull(),
+                "hasPendingDialog": self.store?.activeTab?.pendingDialog != nil,
+                "capabilities": capabilities
+            ]
+            sendJSON(connection: connection, object: statusObj, origin: origin)
+            return
+        }
+
+        guard let store = self.store else {
+            sendResponse(connection: connection, status: "503 Service Unavailable", body: "{\"error\":\"BrowserStore not connected\",\"code\":\"SERVICE_UNAVAILABLE\",\"success\":false}", origin: origin)
+            return
         }
 
         func resolveTab(id: String?) -> Tab? {
@@ -431,55 +469,27 @@ final class NomadAgentServer: ObservableObject {
             sendJSON(connection: connection, object: ["success": true, "deletedCount": deletedCount, "domain": host], origin: origin)
         }
 
-        let cleanPath = (path.count > 1 && path.hasSuffix("/")) ? String(path.dropLast()) : path
-
         switch (method, cleanPath) {
-        case ("GET", "/"), ("GET", "/status"):
-            let capabilities: [String: Any] = [
-                "waitModes": ["stability", "selector", "timeout", "networkidle", "navigation", "url"],
-                "actions": ["click", "hover", "type", "clear", "press", "selectOption", "scroll", "drag", "highlight", "upload", "native_click", "native_type", "native_press", "native_drag", "native_hover"],
-                "upload": ["files", "paths"],
-                "downloads": ["list", "last", "wait"],
-                "hardwareInput": ["isTrusted", "cgEvent", "appKit"],
-                "frames": ["crossOrigin", "piercing", "subframes"],
-                "screenshot": ["full", "labeled", "clip", "elementId"],
-                "evaluateWorlds": ["page", "isolated"],
-                "snapshotModes": ["text", "json"],
-                "cookies": ["get", "set", "clear"],
-                "console": ["log", "warn", "error"],
-                "network": ["fetch", "xhr", "status", "timing"],
-                "dialogPolicies": ["accept", "dismiss", "wait"]
-            ]
-            let liveTitle = (store.activeTab?.webView.title?.isEmpty == false ? store.activeTab?.webView.title : store.activeTab?.title) ?? ""
-            let liveURL = (store.activeTab?.webView.url?.absoluteString ?? store.activeTab?.url?.absoluteString) ?? ""
-            let statusObj: [String: Any] = [
-                "nomad": "active",
-                "version": "1.0",
-                "port": self.port,
-                "tabsCount": store.tabs.count,
-                "activeTabId": store.activeTabId?.uuidString ?? "",
-                "activeURL": liveURL,
-                "activeTitle": liveTitle,
-                "lastDialog": (store.activeTab?.lastDialog as Any?) ?? NSNull(),
-                "hasPendingDialog": store.activeTab?.pendingDialog != nil,
-                "capabilities": capabilities
-            ]
-            sendJSON(connection: connection, object: statusObj, origin: origin)
-
         case ("GET", "/tabs"):
             let tabsList: [[String: Any]] = store.tabs.map { tab -> [String: Any] in
                 let title = (tab.webView.title?.isEmpty == false ? tab.webView.title : tab.title) ?? ""
                 let urlStr = (tab.webView.url?.absoluteString ?? tab.url?.absoluteString) ?? ""
+                let isActive = tab.id == store.activeTabId
                 return [
                     "id": tab.id.uuidString,
                     "title": title,
                     "url": urlStr,
                     "isIncognito": tab.isIncognito,
-                    "isActive": tab.id == store.activeTabId,
+                    "active": isActive,
+                    "isActive": isActive,
                     "isLoading": tab.isLoading
                 ]
             }
-            sendJSON(connection: connection, object: ["tabs": tabsList, "tabsCount": store.tabs.count], origin: origin)
+            sendJSON(connection: connection, object: [
+                "tabs": tabsList,
+                "tabsCount": store.tabs.count,
+                "tabCount": store.tabs.count
+            ], origin: origin)
 
         case ("POST", "/tabs/new"):
             var targetURL: URL? = nil
@@ -503,7 +513,8 @@ final class NomadAgentServer: ObservableObject {
                 "tabId": newTab.id.uuidString,
                 "title": newTitle,
                 "url": newURL,
-                "tabsCount": store.tabs.count
+                "tabsCount": store.tabs.count,
+                "tabCount": store.tabs.count
             ], origin: origin)
 
         case ("POST", "/tabs/switch"):
@@ -519,7 +530,7 @@ final class NomadAgentServer: ObservableObject {
                 return
             }
             store.selectTab(id: id)
-            sendJSON(connection: connection, object: ["success": true, "activeTabId": id.uuidString, "tabsCount": store.tabs.count], origin: origin)
+            sendJSON(connection: connection, object: ["success": true, "activeTabId": id.uuidString, "tabsCount": store.tabs.count, "tabCount": store.tabs.count], origin: origin)
 
         case ("POST", "/tabs/close"):
             guard let bodyData = bodyData,
@@ -534,7 +545,7 @@ final class NomadAgentServer: ObservableObject {
                 return
             }
             store.closeTab(id: id)
-            sendJSON(connection: connection, object: ["success": true, "closedTabId": id.uuidString, "tabsCount": store.tabs.count], origin: origin)
+            sendJSON(connection: connection, object: ["success": true, "closedTabId": id.uuidString, "tabsCount": store.tabs.count, "tabCount": store.tabs.count], origin: origin)
 
         case ("POST", "/navigate"):
             guard let bodyData = bodyData, !bodyData.isEmpty else {
@@ -941,6 +952,7 @@ final class NomadAgentServer: ObservableObject {
             var mode = queryItem("mode")?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
             var roleFilter = queryItem("role")?.trimmingCharacters(in: .whitespacesAndNewlines)
             var textFilter = queryItem("text")?.trimmingCharacters(in: .whitespacesAndNewlines)
+            var isUnrestricted = queryBool("unrestricted") || queryBool("force")
             if let bodyData = bodyData,
                let json = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any] {
                 if let l = json["limit"] as? Int { limit = l }
@@ -950,6 +962,8 @@ final class NomadAgentServer: ObservableObject {
                 if let m = json["mode"] as? String { mode = m.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
                 if let r = json["role"] as? String { roleFilter = r.trimmingCharacters(in: .whitespacesAndNewlines) }
                 if let t = json["text"] as? String { textFilter = t.trimmingCharacters(in: .whitespacesAndNewlines) }
+                if let u = json["unrestricted"] as? Bool { isUnrestricted = u }
+                if let f = json["force"] as? Bool { isUnrestricted = isUnrestricted || f }
             }
             if let m = mode, !m.isEmpty {
                 guard ["text", "summary", "json", "full"].contains(m) else {
@@ -957,6 +971,14 @@ final class NomadAgentServer: ObservableObject {
                     return
                 }
             }
+
+            var snapshotWarning: String? = nil
+            if (mode == "json" || mode == "full") && !isUnrestricted && limit > 250 {
+                let originalLimit = limit
+                limit = 250
+                snapshotWarning = "JSON mode limit was clamped from \(originalLimit) to 250 elements to prevent excessive token consumption (~110 tokens/element). Pass 'unrestricted=true' to bypass, or use default mode='text' (~20 tokens/element) for ~100x lower cost."
+            }
+
             do {
                 let snapshot = try await activeTab.getSemanticTree(
                     limit: limit,
@@ -972,6 +994,11 @@ final class NomadAgentServer: ObservableObject {
                     let rawData = try JSONEncoder().encode(snapshot)
                     let fullTokens = max(1, Int(ceil(Double(rawData.count) / 4.0)))
                     fullSnapshot.tokenEstimate = fullTokens
+                    if let w = snapshotWarning {
+                        fullSnapshot.warning = w
+                    } else if fullTokens > 20_000 {
+                        fullSnapshot.warning = "High token count (\(fullTokens) tokens). Consider using text mode (summary) or adding filters (e.g., viewportOnly=true, role=a, text=...) for ~100x token savings."
+                    }
                     let data = try JSONEncoder().encode(fullSnapshot)
                     sendRaw(connection: connection, contentType: "application/json; charset=utf-8", data: data, origin: origin)
                 } else {
@@ -987,6 +1014,7 @@ final class NomadAgentServer: ObservableObject {
                     if let te = snapshot.totalElements { resp["totalElements"] = te }
                     if let ft = snapshot.filteredTotal { resp["filteredTotal"] = ft }
                     if let ut = snapshot.unfilteredTotal { resp["unfilteredTotal"] = ut }
+                    if let w = snapshot.warning ?? snapshotWarning { resp["warning"] = w }
                     sendJSON(connection: connection, object: resp, origin: origin)
                 }
             } catch {

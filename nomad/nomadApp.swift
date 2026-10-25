@@ -45,6 +45,7 @@ struct nomadApp: App {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
+        NomadAgentServer.shared.start()
         Updater.shared.checkIfDue()
     }
 

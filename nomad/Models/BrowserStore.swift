@@ -25,6 +25,7 @@ final class BrowserStore: ObservableObject {
         // Start with an initial clean blank tab
         _ = newTab(url: nil, select: true, lazy: false)
         ExtensionManager.shared.start(with: self)
+        NomadAgentServer.shared.start(store: self)
     }
 
     /// Persists open session tabs to disk.
