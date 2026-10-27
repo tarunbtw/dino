@@ -152,6 +152,9 @@ final class NomadMCPServer {
             if let m = args["mode"] as? String { qs.append("mode=\(m.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? m)") }
             if let r = args["role"] as? String { qs.append("role=\(r.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? r)") }
             if let txt = args["text"] as? String { qs.append("text=\(txt.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? txt)") }
+            if let tgt = args["target"] as? String { qs.append("target=\(tgt.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? tgt)") }
+            if let d = args["depth"] as? Int { qs.append("depth=\(d)") }
+            if let trk = args["track"] as? Bool, trk { qs.append("track=true") }
             if let t = args["tabId"] as? String { qs.append("tabId=\(t.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? t)") }
             if let u = args["unrestricted"] as? Bool, u { qs.append("unrestricted=true") }
             if let f = args["force"] as? Bool, f { qs.append("force=true") }
@@ -512,6 +515,9 @@ final class NomadMCPServer {
                     "includeText": ["type": "boolean", "description": "When true (default), include non-interactive text content (li, p, td, th) for outcome verification"],
                     "role": ["type": "string", "description": "Optional filter: match elements by role or tag (e.g. 'button', 'input', 'heading')"],
                     "text": ["type": "string", "description": "Optional filter: case-insensitive substring match against element text/value/label"],
+                    "target": ["type": "string", "description": "CSS selector or element ID (e.g. '#modal', 'e5') to scope snapshot perception to that subtree"],
+                    "depth": ["type": "number", "description": "Maximum tree depth relative to target/root (e.g. 1 for direct children, 2 for grandchildren)"],
+                    "track": ["type": "boolean", "description": "Track element mutations across snapshots. Tags new elements with [NEW] and returns mutation counts"],
                     "mode": ["type": "string", "enum": ["text", "json"], "description": "Perception output format. 'text' returns compact markdown summary; 'json' returns raw element array (default: 'text')"] as [String: Any],
                     "unrestricted": ["type": "boolean", "description": "When true, bypasses the 250 element limit in JSON mode (warning: token-heavy)"],
                     "tabId": ["type": "string", "description": "Optional tab UUID to inspect instead of the active tab"]

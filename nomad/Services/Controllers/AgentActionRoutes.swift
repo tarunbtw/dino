@@ -119,8 +119,8 @@ extension NomadAgentServer {
                     return true
                 }
             }
-            let worldParam = (json["world"] as? String)?.lowercased() ?? "page"
-            let contentWorld: WKContentWorld = (worldParam == "isolated") ? .defaultClient : .page
+            let worldParam = (json["world"] as? String)?.lowercased() ?? "isolated"
+            let contentWorld: WKContentWorld = (worldParam == "page") ? .page : .defaultClient
 
             let trimmed = script.trimmingCharacters(in: .whitespacesAndNewlines)
             let wrappedScript = """
@@ -180,16 +180,62 @@ extension NomadAgentServer {
                 }
             })(code);
             """
+            enum EvalRaceResult {
+                case evaluated(Any?)
+                case dialogAppeared(Tab.PendingDialog)
+            }
+
             do {
-                let evalResult: Any? = try await withCheckedThrowingContinuation { continuation in
-                    activeTab.webView.callAsyncJavaScript(wrappedScript, arguments: ["code": trimmed], in: nil, in: contentWorld) { result in
-                        switch result {
-                        case .success(let val):
-                            continuation.resume(returning: val)
-                        case .failure(let error):
-                            continuation.resume(throwing: error)
+                let raceResult: EvalRaceResult = try await withCheckedThrowingContinuation { continuation in
+                    var resumed = false
+                    let lock = NSLock()
+
+                    activeTab.onDialogAppeared = { pending in
+                        lock.lock()
+                        defer { lock.unlock() }
+                        if !resumed {
+                            resumed = true
+                            activeTab.onDialogAppeared = nil
+                            continuation.resume(returning: .dialogAppeared(pending))
                         }
                     }
+
+                    activeTab.webView.callAsyncJavaScript(wrappedScript, arguments: ["code": trimmed], in: nil, in: contentWorld) { result in
+                        lock.lock()
+                        defer { lock.unlock() }
+                        if !resumed {
+                            resumed = true
+                            activeTab.onDialogAppeared = nil
+                            switch result {
+                            case .success(let val):
+                                continuation.resume(returning: .evaluated(val))
+                            case .failure(let error):
+                                continuation.resume(throwing: error)
+                            }
+                        }
+                    }
+                }
+
+                let evalResult: Any?
+                switch raceResult {
+                case .dialogAppeared(let pending):
+                    var pDict: [String: Any] = [
+                        "type": pending.type.rawValue,
+                        "message": pending.message
+                    ]
+                    if let def = pending.defaultText { pDict["defaultText"] = def }
+                    let resp: [String: Any] = [
+                        "success": true,
+                        "code": "PENDING_DIALOG",
+                        "hasPendingDialog": true,
+                        "lastDialog": (activeTab.lastDialog as Any?) ?? NSNull(),
+                        "pendingDialog": pDict
+                    ]
+                    sendJSON(connection: connection, object: resp, origin: origin)
+                    return true
+
+                case .evaluated(let val):
+                    evalResult = val
                 }
 
                 if let dict = evalResult as? [String: Any], dict["__nomad_ok"] as? Bool == false {

@@ -19,6 +19,8 @@ struct NomadSnapshot: Codable {
     var totalElements: Int?
     var filteredTotal: Int?
     var unfilteredTotal: Int?
+    var target: String?
+    var tracked: [String: Int]?
     let elements: [NomadElement]
     /// Pre-formatted dense semantic tree for LLM prompt ingestion (~300 tokens).
     let summary: String
@@ -49,6 +51,8 @@ struct NomadElement: Codable {
     var src: String?
     var alt: String?
     var href: String?
+    var isNew: Bool?
+    var depth: Int?
 }
 
 /// Bounding rectangle in viewport coordinates.
@@ -258,6 +262,28 @@ struct NomadActionResult: Codable {
         self.lastDialog = lastDialog
         self.hasPendingDialog = hasPendingDialog
     }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(success, forKey: .success)
+        try container.encode(message, forKey: .message)
+        try container.encodeIfPresent(elementId, forKey: .elementId)
+        if obscured == true { try container.encode(true, forKey: .obscured) }
+        try container.encodeIfPresent(interceptedBy, forKey: .interceptedBy)
+        if healed == true { try container.encode(true, forKey: .healed) }
+        if staleRef == true { try container.encode(true, forKey: .staleRef) }
+        try container.encodeIfPresent(code, forKey: .code)
+        try container.encodeIfPresent(stack, forKey: .stack)
+        if let err = error, err != message {
+            try container.encode(err, forKey: .error)
+        }
+        try container.encodeIfPresent(files, forKey: .files)
+        try container.encodeIfPresent(count, forKey: .count)
+        if native == true { try container.encode(true, forKey: .native) }
+        if isTrusted == true { try container.encode(true, forKey: .isTrusted) }
+        try container.encodeIfPresent(lastDialog, forKey: .lastDialog)
+        if hasPendingDialog == true { try container.encode(true, forKey: .hasPendingDialog) }
+    }
 }
 
 // MARK: - In-Page Perception & Action Engine (JavaScript Core)
@@ -295,7 +321,17 @@ extension Tab {
 
     /// Extracts a dense, token-efficient semantic tree and element index from the active page.
     @MainActor
-    func getSemanticTree(limit: Int = 100, offset: Int = 0, viewportOnly: Bool = false, includeText: Bool = true, role: String? = nil, text: String? = nil) async throws -> NomadSnapshot {
+    func getSemanticTree(
+        limit: Int = 100,
+        offset: Int = 0,
+        viewportOnly: Bool = false,
+        includeText: Bool = true,
+        role: String? = nil,
+        text: String? = nil,
+        target: String? = nil,
+        depth: Int? = nil,
+        track: Bool = false
+    ) async throws -> NomadSnapshot {
         await waitForNavigationSettled(timeout: 0.6)
         await ensureNomadScriptInjected()
 
@@ -328,6 +364,9 @@ extension Tab {
         var opts: [String: Any] = ["limit": limit, "offset": offset, "viewportOnly": viewportOnly, "includeText": includeText]
         if let r = role, !r.isEmpty { opts["role"] = r }
         if let txt = text, !txt.isEmpty { opts["text"] = txt }
+        if let tgt = target, !tgt.isEmpty { opts["target"] = tgt }
+        if let d = depth { opts["depth"] = d }
+        if track { opts["track"] = true }
         let optsData = (try? JSONSerialization.data(withJSONObject: opts)) ?? Data()
         let optsJSON = String(data: optsData, encoding: .utf8) ?? "{}"
         let jsonString = try await webView.evaluateJavaScript("JSON.stringify(window.__nomad.getSemanticTree(\(optsJSON)))") as? String ?? "{}"
@@ -367,6 +406,18 @@ extension Tab {
             return NomadActionResult(success: false, message: "Cannot execute action '\(action.action)': active page is currently navigating. Wait for navigation to complete before dispatching actions.", elementId: action.target, lastDialog: self.lastDialog, hasPendingDialog: self.pendingDialog != nil)
         }
 
+        // If a pending dialog is already awaiting response, do not dispatch further actions
+        if let pending = self.pendingDialog {
+            return NomadActionResult(
+                success: false,
+                message: "A JavaScript dialog [\(pending.type.rawValue): \"\(pending.message)\"] is currently waiting for resolution. Resolve it via /dialog before dispatching actions.",
+                elementId: action.target,
+                code: "PENDING_DIALOG",
+                lastDialog: self.lastDialog,
+                hasPendingDialog: true
+            )
+        }
+
         // Native AppKit & CoreGraphics hardware input dispatch (isTrusted: true)
         // Note: 'hover' requires native cursor positioning and mouse moved event to activate CSS :hover pseudo-class
         let isNative = (action.native == true) || action.action.lowercased().hasPrefix("native_") || action.action.lowercased() == "hover"
@@ -404,40 +455,75 @@ extension Tab {
         guard let actionJSON = String(data: actionData, encoding: .utf8) else {
             throw NSError(domain: "NomadAgent", code: -2, userInfo: [NSLocalizedDescriptionKey: "Failed to encode action JSON"])
         }
-        do {
-            let resultString = try await webView.evaluateJavaScript("JSON.stringify(window.__nomad.performAction(\(actionJSON)))") as? String ?? "{}"
-            guard let resultData = resultString.data(using: .utf8) else {
-                return NomadActionResult(success: false, message: "Failed to parse action result JSON", elementId: action.target, code: "ACTION_PARSE_ERROR", lastDialog: self.lastDialog, hasPendingDialog: self.pendingDialog != nil)
-            }
-            var res = try JSONDecoder().decode(NomadActionResult.self, from: resultData)
-            if action.action.lowercased() == "upload" {
-                if res.success {
-                    res.files = action.resolvedPaths
-                    res.count = action.resolvedPaths.count
-                    res.message = "Successfully uploaded \(res.count ?? 1) file(s) to \(action.target ?? "element")"
-                } else {
-                    self.clearStagedUpload()
+
+        return await withCheckedContinuation { continuation in
+            var resumed = false
+            let lock = NSLock()
+
+            let safeResume: (NomadActionResult) -> Void = { res in
+                lock.lock()
+                defer { lock.unlock() }
+                if !resumed {
+                    resumed = true
+                    self.onDialogAppeared = nil
+                    continuation.resume(returning: res)
                 }
             }
-            res.lastDialog = self.lastDialog
-            if self.pendingDialog != nil {
-                res.hasPendingDialog = true
+
+            // If dialogPolicy is "wait" and a dialog appears while executing the action,
+            // immediately unblock the HTTP client so it can inspect and respond via /dialog!
+            self.onDialogAppeared = { [weak self] pending in
+                guard let self = self else { return }
+                let dialogResult = NomadActionResult(
+                    success: true,
+                    message: "Action triggered a JavaScript dialog: [\(pending.type.rawValue)] \"\(pending.message)\". Awaiting response via /dialog.",
+                    elementId: action.target,
+                    code: "PENDING_DIALOG",
+                    lastDialog: self.lastDialog,
+                    hasPendingDialog: true
+                )
+                safeResume(dialogResult)
             }
-            return res
-        } catch let decodeErr as DecodingError {
-            if action.action.lowercased() == "upload" { self.clearStagedUpload() }
-            return NomadActionResult(success: false, message: "Failed to decode action result: \(decodeErr.localizedDescription)", elementId: action.target, code: "ACTION_DECODE_ERROR", lastDialog: self.lastDialog, hasPendingDialog: self.pendingDialog != nil)
-        } catch {
-            if action.action.lowercased() == "upload" { self.clearStagedUpload() }
-            return NomadActionResult(
-                success: false,
-                message: "JavaScript evaluation failed: \(error.localizedDescription)",
-                elementId: action.target,
-                code: "ACTION_EVALUATION_ERROR",
-                error: error.localizedDescription,
-                lastDialog: self.lastDialog,
-                hasPendingDialog: self.pendingDialog != nil
-            )
+
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
+                do {
+                    let resultString = try await self.webView.evaluateJavaScript("JSON.stringify(window.__nomad.performAction(\(actionJSON)))") as? String ?? "{}"
+                    guard let resultData = resultString.data(using: .utf8) else {
+                        safeResume(NomadActionResult(success: false, message: "Failed to parse action result JSON", elementId: action.target, code: "ACTION_PARSE_ERROR", lastDialog: self.lastDialog, hasPendingDialog: self.pendingDialog != nil))
+                        return
+                    }
+                    var res = try JSONDecoder().decode(NomadActionResult.self, from: resultData)
+                    if action.action.lowercased() == "upload" {
+                        if res.success {
+                            res.files = action.resolvedPaths
+                            res.count = action.resolvedPaths.count
+                            res.message = "Successfully uploaded \(res.count ?? 1) file(s) to \(action.target ?? "element")"
+                        } else {
+                            self.clearStagedUpload()
+                        }
+                    }
+                    res.lastDialog = self.lastDialog
+                    if self.pendingDialog != nil {
+                        res.hasPendingDialog = true
+                    }
+                    safeResume(res)
+                } catch let decodeErr as DecodingError {
+                    if action.action.lowercased() == "upload" { self.clearStagedUpload() }
+                    safeResume(NomadActionResult(success: false, message: "Failed to decode action result: \(decodeErr.localizedDescription)", elementId: action.target, code: "ACTION_DECODE_ERROR", lastDialog: self.lastDialog, hasPendingDialog: self.pendingDialog != nil))
+                } catch {
+                    if action.action.lowercased() == "upload" { self.clearStagedUpload() }
+                    safeResume(NomadActionResult(
+                        success: false,
+                        message: "JavaScript evaluation failed: \(error.localizedDescription)",
+                        elementId: action.target,
+                        code: "ACTION_EVALUATION_ERROR",
+                        error: error.localizedDescription,
+                        lastDialog: self.lastDialog,
+                        hasPendingDialog: self.pendingDialog != nil
+                    ))
+                }
+            }
         }
     }
 
@@ -668,26 +754,36 @@ extension Tab {
                 webView.window?.sendEvent(moveEvent)
             }
 
-            // 4. Also dispatch synthetic pointer & mouse events to the target element in JS (covers Shadow DOM & custom listeners)
-            if let target = action.target, !target.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                let escapedTarget = target.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
-                let jsDispatch = """
-                (function() {
-                    try {
-                        var el = (window.__nomad && window.__nomad.elements && window.__nomad.elements["\(escapedTarget)"]) || (window.__nomad && window.__nomad.findInTree && window.__nomad.findInTree(document, "\(escapedTarget)")) || document.querySelector("[data-nomad-id='\(escapedTarget)']") || document.querySelector("\(escapedTarget)");
-                        if (el) {
-                            var elDoc = el.ownerDocument || document;
-                            var elWin = elDoc.defaultView || window;
-                            el.dispatchEvent(new elWin.PointerEvent('pointerover', { bubbles: true, cancelable: true, view: elWin }));
-                            el.dispatchEvent(new elWin.PointerEvent('pointerenter', { bubbles: false, cancelable: false, view: elWin }));
-                            el.dispatchEvent(new elWin.MouseEvent('mouseover', { bubbles: true, cancelable: true, view: elWin }));
-                            el.dispatchEvent(new elWin.MouseEvent('mousemove', { bubbles: true, cancelable: true, view: elWin }));
-                        }
-                    } catch(e) {}
-                })()
-                """
-                _ = try? await webView.evaluateJavaScript(jsDispatch)
-            }
+            // 4. Also dispatch synthetic pointer & mouse events to target or element at point in JS
+            let escapedTarget = (action.target ?? "").replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+            let jsDispatch = """
+            (function() {
+                try {
+                    var el = null;
+                    if ("\(escapedTarget)") {
+                        el = (window.__nomad && window.__nomad.elements && window.__nomad.elements["\(escapedTarget)"]) || (window.__nomad && window.__nomad.findInTree && window.__nomad.findInTree(document, "\(escapedTarget)")) || document.querySelector("[data-nomad-id='\(escapedTarget)']") || document.querySelector("\(escapedTarget)");
+                    }
+                    if (!el) {
+                        el = document.elementFromPoint(\(pt.x), \(pt.y));
+                    }
+                    if (el) {
+                        var elDoc = el.ownerDocument || document;
+                        var elWin = elDoc.defaultView || window;
+                        var rect = el.getBoundingClientRect();
+                        var cx = Math.round(rect.left + rect.width / 2) || \(Int(pt.x));
+                        var cy = Math.round(rect.top + rect.height / 2) || \(Int(pt.y));
+                        var evOpts = { bubbles: true, cancelable: true, view: elWin, clientX: cx, clientY: cy, screenX: \(Int(screenPoint.x)), screenY: \(Int(screenPoint.y)) };
+                        var enterOpts = { bubbles: false, cancelable: false, view: elWin, clientX: cx, clientY: cy, screenX: \(Int(screenPoint.x)), screenY: \(Int(screenPoint.y)) };
+                        el.dispatchEvent(new elWin.PointerEvent('pointerover', evOpts));
+                        el.dispatchEvent(new elWin.PointerEvent('pointerenter', enterOpts));
+                        el.dispatchEvent(new elWin.MouseEvent('mouseover', evOpts));
+                        el.dispatchEvent(new elWin.MouseEvent('mouseenter', enterOpts));
+                        el.dispatchEvent(new elWin.MouseEvent('mousemove', evOpts));
+                    }
+                } catch(e) {}
+            })()
+            """
+            _ = try? await webView.evaluateJavaScript(jsDispatch)
 
             try? await Task.sleep(nanoseconds: 30_000_000)
 
@@ -841,16 +937,22 @@ extension Tab {
             return NomadActionResult(success: true, message: "Native typing executed (\(text.count) chars) with isTrusted: true", elementId: action.target, code: "SUCCESS", native: true, isTrusted: true)
 
         case "press":
-            let keyName = (action.key ?? action.text ?? "Enter").trimmingCharacters(in: .whitespacesAndNewlines)
-            let (keyCode, charStr) = Self.keyCodeForKeyName(keyName)
-            if let keyDn = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: windowNumber, context: nil, characters: charStr, charactersIgnoringModifiers: charStr, isARepeat: false, keyCode: keyCode) {
+            let rawChord = (action.key ?? action.text ?? "Enter").trimmingCharacters(in: .whitespacesAndNewlines)
+            let (keyCode, charStr, modFlags) = Self.parseKeyChord(rawChord, explicitModifiers: action.modifiers)
+
+            // Direct native editing command triggers for Select All
+            if modFlags.contains(.command) && (charStr.lowercased() == "a") {
+                NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: webView)
+            }
+
+            if let keyDn = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: modFlags, timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: windowNumber, context: nil, characters: charStr, charactersIgnoringModifiers: charStr, isARepeat: false, keyCode: keyCode) {
                 webView.keyDown(with: keyDn)
             }
             try? await Task.sleep(nanoseconds: 25_000_000)
-            if let keyUp = NSEvent.keyEvent(with: .keyUp, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: windowNumber, context: nil, characters: charStr, charactersIgnoringModifiers: charStr, isARepeat: false, keyCode: keyCode) {
+            if let keyUp = NSEvent.keyEvent(with: .keyUp, location: .zero, modifierFlags: modFlags, timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: windowNumber, context: nil, characters: charStr, charactersIgnoringModifiers: charStr, isARepeat: false, keyCode: keyCode) {
                 webView.keyUp(with: keyUp)
             }
-            return NomadActionResult(success: true, message: "Native keypress '\(keyName)' dispatched with isTrusted: true", elementId: action.target, code: "SUCCESS", native: true, isTrusted: true)
+            return NomadActionResult(success: true, message: "Native keypress '\(rawChord)' dispatched with isTrusted: true", elementId: action.target, code: "SUCCESS", native: true, isTrusted: true)
 
         default:
             return NomadActionResult(success: false, message: "Native mode not supported for action type '\(action.action)'", elementId: action.target, code: "UNSUPPORTED_NATIVE_ACTION")
@@ -907,6 +1009,34 @@ extension Tab {
         case "\t": return 48
         default: return 0
         }
+    }
+
+    private static func parseKeyChord(_ chord: String, explicitModifiers: [String]? = nil) -> (UInt16, String, NSEvent.ModifierFlags) {
+        var flags: NSEvent.ModifierFlags = []
+        if let explicit = explicitModifiers {
+            for mod in explicit {
+                let m = mod.lowercased()
+                if m.contains("meta") || m.contains("cmd") || m.contains("command") { flags.insert(.command) }
+                if m.contains("ctrl") || m.contains("control") { flags.insert(.control) }
+                if m.contains("alt") || m.contains("option") { flags.insert(.option) }
+                if m.contains("shift") { flags.insert(.shift) }
+            }
+        }
+
+        let parts = chord.split(separator: "+").map { String($0).trimmingCharacters(in: .whitespaces) }
+        var mainKey = parts.last ?? chord
+        if parts.count > 1 {
+            for modPart in parts.dropLast() {
+                let m = modPart.lowercased()
+                if m == "meta" || m == "cmd" || m == "command" { flags.insert(.command) }
+                else if m == "ctrl" || m == "control" { flags.insert(.control) }
+                else if m == "alt" || m == "option" { flags.insert(.option) }
+                else if m == "shift" { flags.insert(.shift) }
+            }
+        }
+
+        let (keyCode, charStr) = keyCodeForKeyName(mainKey)
+        return (keyCode, charStr, flags)
     }
 
     private static func keyCodeForKeyName(_ name: String) -> (UInt16, String) {

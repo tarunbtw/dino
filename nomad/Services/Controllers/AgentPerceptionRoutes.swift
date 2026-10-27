@@ -27,6 +27,9 @@ extension NomadAgentServer {
             var mode = queryItem("mode")?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
             var roleFilter = queryItem("role")?.trimmingCharacters(in: .whitespacesAndNewlines)
             var textFilter = queryItem("text")?.trimmingCharacters(in: .whitespacesAndNewlines)
+            var target = queryItem("target")?.trimmingCharacters(in: .whitespacesAndNewlines)
+            var depth = queryItem("depth").flatMap(Int.init)
+            var track = queryBool("track")
             var isUnrestricted = queryBool("unrestricted") || queryBool("force")
             if let bodyData = bodyData,
                let json = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any] {
@@ -37,6 +40,9 @@ extension NomadAgentServer {
                 if let m = json["mode"] as? String { mode = m.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
                 if let r = json["role"] as? String { roleFilter = r.trimmingCharacters(in: .whitespacesAndNewlines) }
                 if let t = json["text"] as? String { textFilter = t.trimmingCharacters(in: .whitespacesAndNewlines) }
+                if let tgt = json["target"] as? String { target = tgt.trimmingCharacters(in: .whitespacesAndNewlines) }
+                if let d = json["depth"] as? Int { depth = d }
+                if let trk = json["track"] as? Bool { track = trk }
                 if let u = json["unrestricted"] as? Bool { isUnrestricted = u }
                 if let f = json["force"] as? Bool { isUnrestricted = isUnrestricted || f }
             }
@@ -61,7 +67,10 @@ extension NomadAgentServer {
                     viewportOnly: viewportOnly,
                     includeText: includeText,
                     role: (roleFilter?.isEmpty == false) ? roleFilter : nil,
-                    text: (textFilter?.isEmpty == false) ? textFilter : nil
+                    text: (textFilter?.isEmpty == false) ? textFilter : nil,
+                    target: (target?.isEmpty == false) ? target : nil,
+                    depth: depth,
+                    track: track
                 )
                 if mode == "json" || mode == "full" {
                     var fullSnapshot = snapshot
@@ -89,6 +98,8 @@ extension NomadAgentServer {
                     if let te = snapshot.totalElements { resp["totalElements"] = te }
                     if let ft = snapshot.filteredTotal { resp["filteredTotal"] = ft }
                     if let ut = snapshot.unfilteredTotal { resp["unfilteredTotal"] = ut }
+                    if let tgt = snapshot.target { resp["target"] = tgt }
+                    if let trk = snapshot.tracked { resp["tracked"] = trk }
                     if let w = snapshot.warning ?? snapshotWarning { resp["warning"] = w }
                     sendJSON(connection: connection, object: resp, origin: origin)
                 }
@@ -161,7 +172,6 @@ extension NomadAgentServer {
                 "success": true,
                 "policy": activeTab.dialogPolicy,
                 "response": activeTab.dialogPromptResponse,
-                "promptResponse": activeTab.dialogPromptResponse,
                 "lastDialog": (activeTab.lastDialog as Any?) ?? NSNull(),
                 "hasPendingDialog": activeTab.pendingDialog != nil
             ]

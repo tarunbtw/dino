@@ -71,6 +71,13 @@ nomad_snapshot({ "limit": 40, "offset": 0, "viewportOnly": true, "includeText": 
 nomad_snapshot({ "mode": "json" })
 ```
 
+#### Advanced Perception Parameters
+- **`target`**: CSS selector or element ID (e.g. `'#app'`, `'.modal'`, `'e5'`). Restricts scanning to this subtree only, saving tokens when automating focused UI components.
+- **`depth`**: Maximum hierarchy depth relative to root/target (e.g. `depth: 1` for direct children, `depth: 2` for grandchildren).
+- **`track`**: Set `track: true` to detect mutations across snapshots. Newly rendered elements are flagged with `[NEW]` badge in markdown summary (and `isNew: true` in JSON), returning mutation counts (`tracked: { added, removed, unchanged }`).
+- **`viewportOnly`**: Filter to elements currently visible in the on-screen viewport sorted top-to-bottom and left-to-right, without mutating document scroll position.
+- **`role` & `text`**: Filter by ARIA/HTML role (`role: 'link'`, `role: 'textbox'`, `role: 'button'`, `role: 'heading'`) or case-insensitive text match.
+
 > [!WARNING]
 > **JSON Mode Token Cost Guard:**
 > Full JSON AST mode serializes coordinates, tags, roles, attributes, and bounds for every element (~110 tokens/element vs ~20 in text mode). On a 1,000-element page, JSON mode consumes ~100k+ tokens. To prevent runaway context exhaustion, `mode: "json"` defaults to a 250-element limit and includes a `warning` field. To intentionally bypass this clamp, pass `"unrestricted": true` (or `"force": true`). For normal agent loops, always use the default `mode: "text"`.
@@ -190,8 +197,8 @@ For environments driving Nomad directly without MCP (e.g. `curl`, Python, Node.j
 | `POST` | `/navigate` | Body: `{ "url"?: string, "action"?: "url"|"back"|"forward"|"reload", "allowLocalFiles"?: bool }` (for `file://` URLs, pass `allowLocalFiles: true`; concurrent navigations automatically cancel superseded loads) |
 | `POST` | `/navigate/back` | Navigate back in browser history |
 | `POST` | `/navigate/forward`| Navigate forward in browser history |
-| `GET` / `POST` | `/snapshot` \| `/tree` | Query / Body: `limit`, `offset`, `viewportOnly=true`, `includeText=true`, `role="button"`, `text="Submit"`, `mode="text"|"json"`, `tabId` (invalid mode rejects with 400 `INVALID_MODE`) |
-| `POST` | `/action` | Body: `{ "type": "click"|"hover"|"type"|"clear"|"press"|"selectOption"|"scroll"|"drag"|"highlight"|"upload"|"native_click"|"native_type"`, `"elementId"?: string`, `"selector"?: string`, `"native"?: bool` (sets `isTrusted: true`), `"paths"?: string[]`, ... } |
+| `GET` / `POST` | `/snapshot` \| `/tree` | Query / Body: `limit`, `offset`, `viewportOnly=true`, `includeText=true`, `target="#modal"|"e5"`, `depth=2`, `track=true`, `role="link"|"textbox"|"button"|"heading"`, `text="..."`, `mode="text"|"json"`, `tabId` (invalid mode rejects with 400 `INVALID_MODE`) |
+| `POST` | `/action` | Body: `{ "type": "click"|"hover"|"type"|"clear"|"press"|"selectOption"|"scroll"|"drag"|"highlight"|"upload"|"native_click"|"native_type"`, `"elementId"?: string`, `"selector"?: string`, `"native"?: bool` (sets `isTrusted: true`), `"paths"?: string[]`, ... } (under `dialogPolicy: "wait"`, actions triggering modal dialogs return immediately with `hasPendingDialog: true` and `code: "PENDING_DIALOG"`) |
 | `POST` | `/upload` | Body: `{ "elementId": string, "paths": string[], "tabId"?: string }` (programmatic file upload without modal GUI sheets) |
 | `GET` | `/downloads` | Query: `limit=20`, returns list of recent file downloads (`filename`, `path`, `size`, `state`, `sha256`) |
 | `GET` | `/downloads/last` | Returns metadata of the most recent download |
@@ -201,8 +208,8 @@ For environments driving Nomad directly without MCP (e.g. `curl`, Python, Node.j
 | `GET` | `/cookies` | Query: `domain` (filter by target domain), `allDomains=true`, `tabId` |
 | `POST` | `/cookies` | Body: `{ "action": "set"|"get"|"clear", "domain"?: string, "name"?: string, "value"?: string, "cookies"?: [...], "allDomains"?: bool }` |
 | `DELETE` | `/cookies` | Query / Body: `domain` (clears cookies for domain), `allDomains=true` (clears all profile cookies) |
-| `POST` | `/evaluate` | Body: `{ "script": string }` (alias: `expression`), `world`: `"page"` \| `"isolated"` (supports expressions and multi-statement scripts; returns structured uppercase `code: "SYNTAX_ERROR"|"EVAL_CSP"|"TYPE_ERROR"|"REFERENCE_ERROR"|"EVAL_ERROR"` and `name` on failure) |
-| `GET` / `POST` | `/dialog` | Body / Query: `{ "policy"?: "accept"|"dismiss"|"wait", "action"?: "accept"|"dismiss", "response"?: string }` (default safe policy is `"dismiss"`; `"wait"` holds dialogs for inspection; invalid policies reject with 400 Bad Request) |
+| `POST` | `/evaluate` | Body: `{ "script": string }` (alias: `expression`), `world`: `"isolated"` (default, CSP-proof) \| `"page"`; returns structured uppercase `code: "SYNTAX_ERROR"|"EVAL_CSP"|"TYPE_ERROR"|"REFERENCE_ERROR"|"EVAL_ERROR"` on failure; unblocks immediately on dialog |
+| `GET` / `POST` | `/dialog` | Body / Query: `{ "policy"?: "accept"|"dismiss"|"wait", "action"?: "accept"|"dismiss", "response"?: string }` (default safe policy is `"dismiss"`; `"wait"` returns `hasPendingDialog: true` immediately so clients can synchronously inspect and respond without hanging) |
 | `GET` | `/console` | Query: `level=all|log|warn|error`, `clear=true`, `tabId` |
 | `GET` | `/network` | Query: `statusFilter=all|errors|success`, `clear=true`, `tabId` |
 

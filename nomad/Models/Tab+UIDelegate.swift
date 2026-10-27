@@ -29,11 +29,13 @@ extension Tab: WKUIDelegate {
         appendConsoleEntry(level: .info, message: "[Dialog Alert] \(message)")
         if dialogPolicy.lowercased() == "wait" {
             self.lastDialog = "[Alert: \(message)] -> waiting"
-            self.pendingDialog = PendingDialog(type: .alert, message: message, defaultText: nil, timestamp: Date(), resolve: { [weak self] _ in
+            let pending = PendingDialog(type: .alert, message: message, defaultText: nil, timestamp: Date(), resolve: { [weak self] _ in
                 self?.lastDialog = message
                 completionHandler()
             })
+            self.pendingDialog = pending
             scheduleDialogTimeout(for: message)
+            self.onDialogAppeared?(pending)
         } else {
             self.lastDialog = message
             completionHandler()
@@ -44,13 +46,15 @@ extension Tab: WKUIDelegate {
         appendConsoleEntry(level: .info, message: "[Dialog Confirm] \(message)")
         if dialogPolicy.lowercased() == "wait" {
             self.lastDialog = "[Confirm: \(message)] -> waiting"
-            self.pendingDialog = PendingDialog(type: .confirm, message: message, defaultText: nil, timestamp: Date(), resolve: { [weak self] result in
+            let pending = PendingDialog(type: .confirm, message: message, defaultText: nil, timestamp: Date(), resolve: { [weak self] result in
                 let shouldAccept = (result as? Bool) ?? false
                 self?.lastDialog = "[Confirm: \(message)] -> \(shouldAccept ? "accepted" : "dismissed")"
                 self?.appendConsoleEntry(level: .info, message: "[Dialog Confirm] \(message) -> \(shouldAccept ? "Accepted" : "Dismissed")")
                 completionHandler(shouldAccept)
             })
+            self.pendingDialog = pending
             scheduleDialogTimeout(for: message)
+            self.onDialogAppeared?(pending)
         } else {
             let shouldAccept = (dialogPolicy.lowercased() == "accept")
             self.lastDialog = "[Confirm: \(message)] -> \(shouldAccept ? "accepted" : "dismissed")"
@@ -63,7 +67,7 @@ extension Tab: WKUIDelegate {
         appendConsoleEntry(level: .info, message: "[Dialog Prompt] \(prompt)")
         if dialogPolicy.lowercased() == "wait" {
             self.lastDialog = "[Prompt: \(prompt)] -> waiting"
-            self.pendingDialog = PendingDialog(type: .prompt, message: prompt, defaultText: defaultText, timestamp: Date(), resolve: { [weak self] result in
+            let pending = PendingDialog(type: .prompt, message: prompt, defaultText: defaultText, timestamp: Date(), resolve: { [weak self] result in
                 if let respStr = result as? String {
                     self?.lastDialog = "[Prompt: \(prompt)] -> \"\(respStr)\""
                     self?.appendConsoleEntry(level: .info, message: "[Dialog Prompt] \(prompt) -> \"\(respStr)\"")
@@ -74,7 +78,9 @@ extension Tab: WKUIDelegate {
                     completionHandler(nil)
                 }
             })
+            self.pendingDialog = pending
             scheduleDialogTimeout(for: prompt)
+            self.onDialogAppeared?(pending)
         } else if dialogPolicy.lowercased() == "accept" {
             let resp = dialogPromptResponse.isEmpty ? (defaultText ?? "") : dialogPromptResponse
             self.lastDialog = "[Prompt: \(prompt)] -> \"\(resp)\""
@@ -90,9 +96,10 @@ extension Tab: WKUIDelegate {
     private func scheduleDialogTimeout(for message: String) {
         dialogTimeoutTask?.cancel()
         dialogTimeoutTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 30_000_000_000)
+            // 20s auto-dismiss safety guard for unhandled dialogs
+            try? await Task.sleep(nanoseconds: 20_000_000_000)
             guard !Task.isCancelled, let self = self, let pending = self.pendingDialog else { return }
-            self.appendConsoleEntry(level: .warn, message: "[Dialog Timeout] Unhandled \(pending.type.rawValue) dialog timed out after 30s. Auto-dismissing.")
+            self.appendConsoleEntry(level: .warn, message: "[Dialog Timeout] Unhandled \(pending.type.rawValue) dialog auto-dismissed after 20s.")
             self.pendingDialog = nil
             pending.resolve(nil)
         }

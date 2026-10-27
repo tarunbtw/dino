@@ -27,7 +27,7 @@
             return false;
         }
 
-        // Resolves an <input type="file"> from an element, associated <label>, aria-controls, or container
+        // Resolves an <input type="file"> from an element, associated <label>, aria-controls, container, or form
         function resolveFileInput(node) {
             if (!node) return null;
             if (node.tagName === 'INPUT' && (node.type || '').toLowerCase() === 'file') {
@@ -55,7 +55,44 @@
                     }
                 }
             }
-            return node.querySelector ? node.querySelector('input[type="file"]') : null;
+            if (node.querySelector) {
+                var directChild = node.querySelector('input[type="file"]');
+                if (directChild) return directChild;
+            }
+            // Check enclosing form or dropzone container
+            if (node.closest) {
+                var container = node.closest('form, [class*="drop"], [class*="upload"], [id*="drop"], [id*="upload"], section, div');
+                if (container && container.querySelector) {
+                    var containerInput = container.querySelector('input[type="file"]');
+                    if (containerInput) return containerInput;
+                }
+            }
+            // Document fallback if page has an input[type="file"]
+            var docFallback = node.ownerDocument || document;
+            return docFallback.querySelector ? docFallback.querySelector('input[type="file"]') : null;
+        }
+
+        // Checks whether an element is an upload dropzone target
+        function isDropzone(node) {
+            if (!node || !node.getAttribute) return false;
+            if (node.getAttribute('ondrop') !== null || node.getAttribute('ondragover') !== null) return true;
+            var cls = String(node.className || '').toLowerCase();
+            var nid = String(node.id || '').toLowerCase();
+            var aria = String(node.getAttribute('aria-label') || '').toLowerCase();
+            return cls.indexOf('drop') !== -1 || cls.indexOf('upload') !== -1 ||
+                   nid.indexOf('drop') !== -1 || nid.indexOf('upload') !== -1 ||
+                   aria.indexOf('drop') !== -1 || aria.indexOf('upload') !== -1;
+        }
+
+        // Checks if an element is a meaningful leaf text container (div/span/article without block children)
+        function isMeaningfulTextLeaf(node) {
+            if (!node || !node.tagName) return false;
+            var tag = node.tagName.toLowerCase();
+            if (tag !== 'div' && tag !== 'span' && tag !== 'article' && tag !== 'section') return false;
+            if (node.querySelector && node.querySelector('a, button, input, textarea, select, details, canvas, iframe')) return false;
+            if (node.querySelector && node.querySelector('div, p, ul, ol, table, form, h1, h2, h3, h4, h5, h6')) return false;
+            var txt = (node.innerText || node.textContent || '').trim();
+            return txt.length > 0 && txt.length <= 400;
         }
 
         // Luhn algorithm check for payment cards
@@ -360,10 +397,6 @@
                             } catch(e) {}
                         }
                         if (ifr) {
-                            try {
-                                if (ifr.scrollIntoViewIfNeeded) ifr.scrollIntoViewIfNeeded();
-                                else ifr.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-                            } catch(e) {}
                             var ifrRect = ifr.getBoundingClientRect();
                             if (eId) {
                                 // 1. Attempt live resolution in same-origin frame DOM
@@ -384,10 +417,6 @@
                                             try { subEl = fDoc.querySelector(eId); } catch(e) {}
                                         }
                                         if (subEl) {
-                                            try {
-                                                if (subEl.scrollIntoViewIfNeeded) subEl.scrollIntoViewIfNeeded();
-                                                else subEl.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-                                            } catch(e) {}
                                             var subRect = subEl.getBoundingClientRect();
                                             if (subRect.width > 0 && subRect.height > 0) {
                                                 return {
@@ -462,10 +491,6 @@
                         return { left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0, isEditable: false, tagName: '' };
                     }
                 }
-                try {
-                    if (element.scrollIntoViewIfNeeded) element.scrollIntoViewIfNeeded();
-                    else element.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-                } catch(e) {}
                 var r = element.getBoundingClientRect();
                 var curWin = (element.ownerDocument && element.ownerDocument.defaultView) ? element.ownerDocument.defaultView : window;
                 var x = r.left;
@@ -618,6 +643,9 @@
                 var includeText = options.includeText !== undefined ? Boolean(options.includeText) : true;
                 var roleFilter = options.role ? String(options.role).toLowerCase().trim() : null;
                 var textFilter = options.text ? String(options.text).toLowerCase().trim() : null;
+                var targetFilter = options.target ? String(options.target).trim() : null;
+                var depthLimit = (options.depth !== undefined && options.depth !== null) ? Number(options.depth) : null;
+                var trackMutations = Boolean(options.track);
 
                 if (!this.elements) this.elements = {};
                 if (!this.elementSignatures) this.elementSignatures = {};
@@ -634,6 +662,34 @@
                 var vpW = window.innerWidth;
                 var vpH = window.innerHeight;
 
+                // Scoping root resolution for target filter
+                var scopeRoot = document;
+                var resolvedTargetEl = null;
+                if (targetFilter) {
+                    if (this.elements && this.elements[targetFilter] && this.isNodeConnected(this.elements[targetFilter])) {
+                        resolvedTargetEl = this.elements[targetFilter];
+                    } else {
+                        try {
+                            resolvedTargetEl = (this.findInTree ? this.findInTree(document, targetFilter) : null) || document.querySelector(targetFilter);
+                        } catch(e) {}
+                    }
+                    if (resolvedTargetEl) {
+                        scopeRoot = resolvedTargetEl;
+                    }
+                }
+
+                // Relative tree depth calculator
+                function getNodeDepth(node, root) {
+                    if (!node || node === root) return 0;
+                    var d = 0;
+                    var cur = node;
+                    while (cur && cur !== root && cur !== document.documentElement && cur !== document.body) {
+                        d++;
+                        cur = cur.parentNode || (cur.getRootNode && cur.getRootNode().host);
+                    }
+                    return d;
+                }
+
                 // Recursive collector penetrating open Shadow DOM roots and same-origin / srcdoc iframes
                 function collectNodes(root, list) {
                     if (!root) return;
@@ -641,11 +697,14 @@
                     try {
                         var found = root.querySelectorAll(selector);
                         for (var i = 0; i < found.length; i++) {
-                            if (list.indexOf(found[i]) === -1) list.push(found[i]);
+                            var fn = found[i];
+                            if (depthLimit !== null && getNodeDepth(fn, scopeRoot) > depthLimit) continue;
+                            if (list.indexOf(fn) === -1) list.push(fn);
                         }
                         var all = root.querySelectorAll('*');
                         for (var j = 0; j < all.length; j++) {
                             var n = all[j];
+                            if (depthLimit !== null && getNodeDepth(n, scopeRoot) > depthLimit) continue;
                             if (n.shadowRoot) {
                                 collectNodes(n.shadowRoot, list);
                             } else if (n.tagName === 'IFRAME') {
@@ -653,11 +712,57 @@
                                     var fDoc = n.contentDocument || (n.contentWindow ? n.contentWindow.document : null);
                                     if (fDoc) collectNodes(fDoc, list);
                                 } catch(e) {}
-                            } else if (n.tagName === 'CANVAS' || n.draggable === true || n.id === 'hit' || (n.id && (n.id.indexOf('hit') !== -1 || n.id.indexOf('drag') !== -1 || n.id.indexOf('drop') !== -1))) {
+                            } else if (n.tagName === 'CANVAS' || n.draggable === true || n.id === 'hit' || (n.id && (n.id.indexOf('hit') !== -1 || n.id.indexOf('drag') !== -1 || n.id.indexOf('drop') !== -1)) || isMeaningfulTextLeaf(n) || isDropzone(n)) {
                                 if (list.indexOf(n) === -1) list.push(n);
                             }
                         }
                     } catch(e) {}
+                }
+
+                // Resolves implicit ARIA role based on W3C HTML-AAM mapping if not explicitly defined
+                function getImplicitAriaRole(el) {
+                    if (!el || !el.tagName) return 'generic';
+                    var explicit = el.getAttribute('role');
+                    if (explicit) return explicit.trim().toLowerCase();
+                    var tag = el.tagName.toLowerCase();
+                    if (tag === 'a' || tag === 'area') {
+                        return (el.hasAttribute('href') || el.href) ? 'link' : 'generic';
+                    }
+                    if (tag === 'button') return 'button';
+                    if (tag === 'input') {
+                        var type = (el.type || 'text').toLowerCase();
+                        if (type === 'button' || type === 'submit' || type === 'reset' || type === 'image') return 'button';
+                        if (type === 'checkbox') return 'checkbox';
+                        if (type === 'radio') return 'radio';
+                        if (type === 'search') return 'searchbox';
+                        if (type === 'number') return 'spinbutton';
+                        if (type === 'range') return 'slider';
+                        if (type === 'email' || type === 'password' || type === 'tel' || type === 'text' || type === 'url' || !type) return 'textbox';
+                        return type;
+                    }
+                    if (tag === 'textarea') return 'textbox';
+                    if (tag === 'select') return 'combobox';
+                    if (tag === 'option') return 'option';
+                    if (tag === 'summary') return 'button';
+                    if (tag === 'details') return 'group';
+                    if (tag === 'h1' || tag === 'h2' || tag === 'h3' || tag === 'h4' || tag === 'h5' || tag === 'h6') return 'heading';
+                    if (tag === 'img') return 'img';
+                    if (tag === 'li') return 'listitem';
+                    if (tag === 'ul' || tag === 'ol') return 'list';
+                    if (tag === 'table') return 'table';
+                    if (tag === 'tr') return 'row';
+                    if (tag === 'td') return 'cell';
+                    if (tag === 'th') return 'columnheader';
+                    if (tag === 'p' || tag === 'pre' || tag === 'code' || tag === 'blockquote') return 'paragraph';
+                    if (tag === 'nav') return 'navigation';
+                    if (tag === 'main') return 'main';
+                    if (tag === 'header') return 'banner';
+                    if (tag === 'footer') return 'contentinfo';
+                    if (tag === 'article') return 'article';
+                    if (tag === 'section') return 'region';
+                    if (tag === 'form') return 'form';
+                    if (isMeaningfulTextLeaf(el)) return 'text';
+                    return tag;
                 }
 
                 // Resolve accessible label using ARIA, label tags, placeholder, title, adjacent labels, and text
@@ -742,7 +847,18 @@
                 }
 
                 var allInteractive = [];
-                collectNodes(document, allInteractive);
+                if (scopeRoot !== document) {
+                    var rootSel = 'a, button, input, textarea, select, details, summary, h1, h2, h3, h4, h5, h6, img, li, p, td, th, pre, code, blockquote, canvas, [draggable], [ondragstart], [ondrop], [id*="hit"], [id*="drag"], [id*="drop"], [class*="drag"], [class*="drop"], [class*="dropzone"], [role="button"], [role="link"], [role="checkbox"], [role="radio"], [role="combobox"], [role="menuitem"], [role="tab"], [role="switch"], [role="option"], [role="heading"], [role="listitem"], [role="status"], [role="alert"], [role="cell"], [tabindex]:not([tabindex="-1"]), [contenteditable="true"]';
+                    if (scopeRoot.matches && (scopeRoot.matches(rootSel) || isMeaningfulTextLeaf(scopeRoot) || isDropzone(scopeRoot))) {
+                        allInteractive.push(scopeRoot);
+                    }
+                }
+                collectNodes(scopeRoot, allInteractive);
+
+                // Tracking initialization for mutation detection across snapshots
+                var prevTracked = (this._lastTrackedIds && typeof this._lastTrackedIds === 'object') ? this._lastTrackedIds : null;
+                var addedCount = 0;
+                var unchangedCount = 0;
 
                 // Pre-scan existing elements to preserve identity across DOM mutations
                 var assignedIds = {};
@@ -766,6 +882,9 @@
 
                 for (var i = 0; i < allInteractive.length; i++) {
                     var el = allInteractive[i];
+                    var d = getNodeDepth(el, scopeRoot);
+                    if (depthLimit !== null && d > depthLimit) continue;
+
                     var rect = this.getElementViewportRect(el);
                     var isInputToggle = (el.tagName === 'INPUT' && (el.type === 'checkbox' || el.type === 'radio'));
 
@@ -783,7 +902,7 @@
                         text = '[REDACTED]';
                     }
                     var tag = el.tagName.toLowerCase();
-                    var role = el.getAttribute('role') || tag;
+                    var role = getImplicitAriaRole(el);
                     var type = el.getAttribute('type') || null;
 
                     var isSensitive = isSensitiveField(el) || isSensitiveValue(el.value);
@@ -797,9 +916,9 @@
                         }
                     }
 
-                    var isHeading = (tag === 'h1' || tag === 'h2' || tag === 'h3' || el.getAttribute('role') === 'heading');
-                    var isImg = (tag === 'img');
-                    var isTextNode = (tag === 'li' || tag === 'p' || tag === 'td' || tag === 'th' || role === 'listitem' || role === 'status' || role === 'alert' || role === 'cell');
+                    var isHeading = (role === 'heading' || tag === 'h1' || tag === 'h2' || tag === 'h3' || tag === 'h4' || tag === 'h5' || tag === 'h6');
+                    var isImg = (role === 'img' || tag === 'img');
+                    var isTextNode = (tag === 'li' || tag === 'p' || tag === 'td' || tag === 'th' || role === 'listitem' || role === 'status' || role === 'alert' || role === 'cell' || role === 'text' || role === 'paragraph' || isMeaningfulTextLeaf(el));
 
                     // Filter out meaningless whitespace links or empty non-interactive anchors
                     if ((tag === 'a' || tag === 'button') && !text && !val && !el.querySelector('img, svg')) {
@@ -890,6 +1009,20 @@
                     var inShadow = Boolean(el.getRootNode && el.getRootNode().host);
                     var href = (tag === 'a' || tag === 'area') ? (el.getAttribute('href') || el.href || null) : null;
                     var domId = el.id ? String(el.id).trim() : null;
+                    var isNew = false;
+                    if (trackMutations) {
+                        if (prevTracked) {
+                            if (!prevTracked[id]) {
+                                isNew = true;
+                                addedCount++;
+                            } else {
+                                unchangedCount++;
+                            }
+                        } else {
+                            isNew = true;
+                            addedCount++;
+                        }
+                    }
 
                     results.push({
                         id: id,
@@ -898,6 +1031,8 @@
                         text: text,
                         value: val,
                         type: type,
+                        depth: d,
+                        isNew: isNew,
                         className: cls,
                         domId: domId,
                         rank: itemRank,
@@ -1011,13 +1146,38 @@
                 var summaryCandidates = results;
                 if (viewportOnly) {
                     summaryCandidates = summaryCandidates.filter(function(item) { return item.inViewport; });
+                    // Visual on-screen sorting: sort from top to bottom (Y coordinate), then left to right (X coordinate)
+                    summaryCandidates.sort(function(a, b) {
+                        var ya = (a.bounds && a.bounds.y !== undefined) ? a.bounds.y : 0;
+                        var yb = (b.bounds && b.bounds.y !== undefined) ? b.bounds.y : 0;
+                        var diffY = ya - yb;
+                        // For elements on approximately the same horizontal line (within 8px), sort left to right
+                        if (Math.abs(diffY) > 8) {
+                            return diffY;
+                        }
+                        var xa = (a.bounds && a.bounds.x !== undefined) ? a.bounds.x : 0;
+                        var xb = (b.bounds && b.bounds.x !== undefined) ? b.bounds.x : 0;
+                        return xa - xb;
+                    });
                 }
                 if (roleFilter) {
                     summaryCandidates = summaryCandidates.filter(function(item) {
                         var r = (item.role || '').toLowerCase();
                         var tg = (item.tag || '').toLowerCase();
                         var tp = (item.type || '').toLowerCase();
-                        return r === roleFilter || tg === roleFilter || tp === roleFilter;
+                        if (r === roleFilter || tg === roleFilter || tp === roleFilter) return true;
+                        // Semantic dual-direction mapping:
+                        if (roleFilter === 'link' && (tg === 'a' || tg === 'area')) return true;
+                        if ((roleFilter === 'a' || roleFilter === 'area') && r === 'link') return true;
+                        if (roleFilter === 'button' && (tg === 'button' || tp === 'submit' || tp === 'button' || tg === 'summary')) return true;
+                        if ((roleFilter === 'button' || roleFilter === 'submit') && (r === 'button' || tg === 'button')) return true;
+                        if (roleFilter === 'textbox' && (tg === 'input' || tg === 'textarea')) return true;
+                        if ((roleFilter === 'input' || roleFilter === 'textarea') && (r === 'textbox' || tg === 'input' || tg === 'textarea')) return true;
+                        if (roleFilter === 'heading' && (tg.indexOf('h') === 0 && tg.length === 2)) return true;
+                        if (roleFilter.indexOf('h') === 0 && roleFilter.length === 2 && r === 'heading') return true;
+                        if ((roleFilter === 'img' || roleFilter === 'image') && (tg === 'img' || r === 'img')) return true;
+                        if (roleFilter === 'text' && (r === 'text' || r === 'paragraph' || tg === 'p' || tg === 'span' || tg === 'div')) return true;
+                        return false;
                     });
                 }
                 if (textFilter) {
@@ -1041,15 +1201,45 @@
                     displayUrl = displayUrl.substring(0, 197) + '...';
                 }
 
+                // Compute tracking mutation counts
+                var curTrackedIds = {};
+                for (var rki = 0; rki < results.length; rki++) {
+                    if (results[rki] && results[rki].id) curTrackedIds[results[rki].id] = true;
+                }
+                var removedCount = 0;
+                if (trackMutations && prevTracked) {
+                    for (var prevKey in prevTracked) {
+                        if (!curTrackedIds[prevKey]) removedCount++;
+                    }
+                }
+                this._lastTrackedIds = curTrackedIds;
+
+                var trackedInfo = null;
+                if (trackMutations) {
+                    trackedInfo = {
+                        added: addedCount,
+                        removed: prevTracked ? removedCount : 0,
+                        unchanged: unchangedCount
+                    };
+                }
+
                 // Build compact markdown semantic summary for LLM prompt ingestion
+                var headerParts = ['Page: ' + (document.title || 'Untitled')];
+                if (targetFilter && resolvedTargetEl) headerParts.push('Target: ' + targetFilter);
+                if (depthLimit !== null) headerParts.push('MaxDepth: ' + depthLimit);
+                if (trackedInfo) headerParts.push('Tracked: +' + trackedInfo.added + ' -' + trackedInfo.removed);
+                headerParts.push('URL: ' + displayUrl);
+
                 var summaryLines = [
-                    '[Page: ' + (document.title || 'Untitled') + ' | URL: ' + displayUrl + ']',
+                    '[' + headerParts.join(' | ') + ']',
                     'Interactive Elements (' + pagedItems.length + ' of ' + totalCount + (totalCount > limit ? ' | pass limit/offset for more' : '') + '):'
                 ];
 
                 for (var j = 0; j < pagedItems.length; j++) {
                     var item = pagedItems[j];
                     var desc = '[' + item.id + ']';
+                    if (item.isNew) desc += ' [NEW]';
+                    if (item.depth !== undefined && item.depth > 0) desc += ' (d=' + item.depth + ')';
                     if (item.rank) desc += ' #' + item.rank;
                     desc += ' <' + item.tag;
                     if (item.domId) desc += ' id="' + item.domId + '"';
@@ -1094,6 +1284,8 @@
                 return {
                     title: document.title || '',
                     url: displayUrl,
+                    target: (targetFilter && resolvedTargetEl) ? targetFilter : null,
+                    tracked: trackedInfo,
                     viewportWidth: vpW,
                     viewportHeight: vpH,
                     totalElements: totalCount,
@@ -1282,7 +1474,7 @@
                             } else if (action === 'selectoption') {
                                 if (elTag !== 'select') isIncompatible = true;
                             } else if (action === 'upload') {
-                                if (!resolveFileInput(el)) isIncompatible = true;
+                                if (!resolveFileInput(el) && !isDropzone(el)) isIncompatible = true;
                             }
                         }
 
@@ -1643,6 +1835,49 @@
                         targetNode.dispatchEvent(kdown);
                         targetNode.dispatchEvent(kup);
 
+                        // Execute standard browser editing actions for chords like Meta+A, Backspace
+                        if (hasMeta && (normMain === 'a')) {
+                            if (typeof targetNode.select === 'function') {
+                                targetNode.select();
+                            } else {
+                                try {
+                                    var docSel = targetNode.ownerDocument || document;
+                                    var range = docSel.createRange();
+                                    range.selectNodeContents(targetNode);
+                                    var sel = (docSel.defaultView || window).getSelection();
+                                    if (sel) {
+                                        sel.removeAllRanges();
+                                        sel.addRange(range);
+                                    }
+                                } catch(e) {}
+                            }
+                        } else if (normMain === 'backspace' || normMain === 'delete') {
+                            if (isTextEditable(targetNode)) {
+                                if (targetNode.tagName === 'INPUT' || targetNode.tagName === 'TEXTAREA') {
+                                    var start = targetNode.selectionStart;
+                                    var end = targetNode.selectionEnd;
+                                    if (start !== null && end !== null && start !== end) {
+                                        var oldVal = targetNode.value || '';
+                                        targetNode.value = oldVal.slice(0, start) + oldVal.slice(end);
+                                        targetNode.selectionStart = targetNode.selectionEnd = start;
+                                        targetNode.dispatchEvent(new Event('input', { bubbles: true }));
+                                        targetNode.dispatchEvent(new Event('change', { bubbles: true }));
+                                    } else if (start !== null && start > 0) {
+                                        var oldVal = targetNode.value || '';
+                                        targetNode.value = oldVal.slice(0, start - 1) + oldVal.slice(start);
+                                        targetNode.selectionStart = targetNode.selectionEnd = start - 1;
+                                        targetNode.dispatchEvent(new Event('input', { bubbles: true }));
+                                        targetNode.dispatchEvent(new Event('change', { bubbles: true }));
+                                    }
+                                } else if (targetNode.isContentEditable) {
+                                    try {
+                                        var docCe = targetNode.ownerDocument || document;
+                                        docCe.execCommand('delete', false, null);
+                                    } catch(e) {}
+                                }
+                            }
+                        }
+
                         // If Enter is pressed, trigger form submit if inside a form
                         if (mainKey === 'Enter' || rawKey === 'Enter') {
                             var formNode = (targetNode && targetNode.form) || (targetNode && targetNode.closest ? targetNode.closest('form') : null);
@@ -1735,16 +1970,17 @@
                     case 'upload':
                         if (!el) return { success: false, code: 'MISSING_TARGET', message: 'No target element for upload action' };
                         var fileInput = resolveFileInput(el);
-                        if (!fileInput) {
+                        var isDrop = isDropzone(el);
+                        if (!fileInput && !isDrop) {
                             var tagDesc = el.tagName ? el.tagName.toLowerCase() : 'element';
                             return {
                                 success: false,
                                 code: 'INVALID_TARGET',
-                                message: "Target element '" + (targetId || 'element') + "' (<" + tagDesc + ">) is not an <input type='file'> and has no associated file input",
+                                message: "Target element '" + (targetId || 'element') + "' (<" + tagDesc + ">) is not an <input type='file'> or dropzone",
                                 elementId: targetId
                             };
                         }
-                        if (fileInput.disabled) {
+                        if (fileInput && fileInput.disabled) {
                             return {
                                 success: false,
                                 code: 'ELEMENT_DISABLED',
@@ -1753,18 +1989,41 @@
                             };
                         }
 
-                        if (fileInput.ownerDocument && fileInput.ownerDocument !== document && fileInput.ownerDocument.defaultView && fileInput.ownerDocument.defaultView.frameElement) {
-                            try { fileInput.ownerDocument.defaultView.frameElement.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch(e) {}
+                        // If element is a drag-and-drop dropzone, dispatch simulated HTML5 DragEvent sequence
+                        if (isDrop) {
+                            try {
+                                var elWinD = (el.ownerDocument && el.ownerDocument.defaultView) || window;
+                                var filePaths = actionObj.paths || actionObj.files || [];
+                                var fakeFiles = filePaths.map(function(p) {
+                                    var name = p.split('/').pop() || 'upload.bin';
+                                    return new elWinD.File([''], name, { type: 'application/octet-stream' });
+                                });
+                                var dt = new elWinD.DataTransfer();
+                                for (var fIdx = 0; fIdx < fakeFiles.length; fIdx++) {
+                                    dt.items.add(fakeFiles[fIdx]);
+                                }
+                                var dOpts = { bubbles: true, cancelable: true, view: elWinD, dataTransfer: dt };
+                                el.dispatchEvent(new elWinD.DragEvent('dragenter', dOpts));
+                                el.dispatchEvent(new elWinD.DragEvent('dragover', dOpts));
+                                el.dispatchEvent(new elWinD.DragEvent('drop', dOpts));
+                            } catch(dropErr) {}
                         }
-                        fileInput.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-                        try { fileInput.focus(); } catch(e) {}
 
-                        try {
-                            fileInput.click();
-                        } catch(e) {
-                            var elDocU = fileInput.ownerDocument || document;
-                            var elWinU = elDocU.defaultView || window;
-                            fileInput.dispatchEvent(new elWinU.MouseEvent('click', { bubbles: true, cancelable: true, view: elWinU }));
+                        // If an associated file input was resolved, scroll into view and trigger click to activate native staged file injection
+                        if (fileInput) {
+                            if (fileInput.ownerDocument && fileInput.ownerDocument !== document && fileInput.ownerDocument.defaultView && fileInput.ownerDocument.defaultView.frameElement) {
+                                try { fileInput.ownerDocument.defaultView.frameElement.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch(e) {}
+                            }
+                            fileInput.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+                            try { fileInput.focus(); } catch(e) {}
+
+                            try {
+                                fileInput.click();
+                            } catch(e) {
+                                var elDocU = fileInput.ownerDocument || document;
+                                var elWinU = elDocU.defaultView || window;
+                                fileInput.dispatchEvent(new elWinU.MouseEvent('click', { bubbles: true, cancelable: true, view: elWinU }));
+                            }
                         }
                         return { success: true, message: 'Triggered file upload on ' + (targetId || 'element'), elementId: targetId };
 

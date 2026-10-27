@@ -14,14 +14,14 @@ extension NomadAgentServer {
         switch action {
         case "back":
             if !tab.canGoBack {
-                sendJSON(connection: connection, object: ["success": false, "action": "back", "code": "CANNOT_GO_BACK", "error": "Cannot go back: navigation history is empty", "message": "Cannot go back: navigation history is empty"], origin: origin)
+                sendJSON(connection: connection, object: ["success": false, "action": "back", "code": "CANNOT_GO_BACK", "error": "Cannot go back: navigation history is empty"], origin: origin)
             } else {
                 store?.goBack()
                 sendJSON(connection: connection, object: ["success": true, "action": "back"], origin: origin)
             }
         case "forward":
             if !tab.canGoForward {
-                sendJSON(connection: connection, object: ["success": false, "action": "forward", "code": "CANNOT_GO_FORWARD", "error": "Cannot go forward: navigation history is empty", "message": "Cannot go forward: navigation history is empty"], origin: origin)
+                sendJSON(connection: connection, object: ["success": false, "action": "forward", "code": "CANNOT_GO_FORWARD", "error": "Cannot go forward: navigation history is empty"], origin: origin)
             } else {
                 store?.goForward()
                 sendJSON(connection: connection, object: ["success": true, "action": "forward"], origin: origin)
