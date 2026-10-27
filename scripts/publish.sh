@@ -43,6 +43,9 @@ if [ ! -d "$BUILT_APP" ]; then
   exit 1
 fi
 
+echo "==> Signing application bundle..."
+codesign --force --deep --sign - --entitlements nomad/nomad.entitlements "$BUILT_APP"
+
 echo "==> Packaging $ZIP_NAME..."
 ditto -c -k --keepParent "$BUILT_APP" "$OUT/$ZIP_NAME"
 
@@ -70,6 +73,32 @@ JSON
 
 cp "$OUT/appcast.json" ./appcast.json
 
+cat > "packaging/homebrew/nomad.rb" <<RUBY
+cask "nomad" do
+  version "$VERSION"
+  sha256 "$SHA256"
+
+  url "$DOWNLOAD_BASE/$ZIP_NAME"
+  name "Nomad"
+  desc "Ultra-lightweight native macOS WebKit browser engine and agent runtime"
+  homepage "https://github.com/tarunbtw/nomad"
+
+  depends_on macos: ">= :ventura"
+
+  app "nomad.app", target: "Nomad.app"
+  binary "#{appdir}/Nomad.app/Contents/MacOS/nomad", target: "nomad"
+  binary "#{appdir}/Nomad.app/Contents/MacOS/nomad", target: "nomadd"
+
+  zap trash: [
+    "~/.nomad",
+    "~/Library/Application Support/Nomad",
+    "~/Library/Caches/tarun.nomad",
+    "~/Library/Preferences/tarun.nomad.plist",
+    "~/Library/Saved Application State/tarun.nomad.savedState"
+  ]
+end
+RUBY
+
 echo ""
 echo "=========================================================="
 echo "  Nomad $VERSION (Build $BUILD) Ready for Distribution!"
@@ -77,5 +106,5 @@ echo "  Artifacts created in: $OUT/"
 echo "    - $OUT/$ZIP_NAME"
 echo "    - $OUT/$DMG_NAME"
 echo "    - $OUT/appcast.json"
-echo "  Updated ./appcast.json at project root."
+echo "  Updated ./appcast.json and ./packaging/homebrew/nomad.rb"
 echo "=========================================================="

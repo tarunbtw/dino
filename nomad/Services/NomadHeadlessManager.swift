@@ -17,9 +17,13 @@ import Combine
 final class NomadHeadlessManager: ObservableObject {
     static let shared = NomadHeadlessManager()
 
-    /// Determines if Nomad was launched in headless mode via CLI argument or environment variable.
+    /// Determines if Nomad was launched in headless mode via CLI argument, executable name, or environment variable.
     static let isHeadless: Bool = {
         let args = CommandLine.arguments
+        let execName = (args.first as NSString?)?.lastPathComponent.lowercased() ?? ""
+        if execName == "nomadd" || execName.contains("nomadd") {
+            return true
+        }
         if args.contains("--headless") || args.contains("headless") {
             return true
         }

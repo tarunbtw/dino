@@ -338,30 +338,152 @@ final class NomadAgentServer: ObservableObject {
         }
 
         // Unauthenticated access is strictly limited to minimal health check probe without sensitive page data
-        let isPublicHealthCheck = (method == "GET" && (path == "/" || path == "/status" || cleanPath == "/" || cleanPath == "/status" || cleanPath == "/daemon" || cleanPath == "/headless"))
+        let isPublicHealthCheck = (method == "GET" && (path == "/" || path == "/status" || cleanPath == "/" || cleanPath == "/status" || cleanPath == "/health" || cleanPath == "/version" || cleanPath == "/daemon" || cleanPath == "/headless" || cleanPath == "/socket")) || ((method == "POST" || method == "DELETE") && (cleanPath == "/socket" || cleanPath == "/daemon"))
         if !isAuthenticated {
             if isPublicHealthCheck {
-                let publicStatusObj: [String: Any] = [
-                    "nomad": "active",
-                    "version": "1.0",
-                    "port": self.port,
-                    "authRequired": true,
-                    "isHeadless": NomadHeadlessManager.isHeadless,
-                    "mode": NomadHeadlessManager.isHeadless ? "headless_daemon" : "gui"
-                ]
-                sendJSON(connection: connection, object: publicStatusObj, origin: origin)
-                return
+                // If it's a socket modification request, process it below
+                if !((method == "POST" || method == "DELETE") && (cleanPath == "/socket" || cleanPath == "/daemon")) {
+                    let socketPath = NomadUnixSocketBridge.defaultSocketPath
+                    let socketExists = FileManager.default.fileExists(atPath: socketPath)
+                    let publicStatusObj: [String: Any] = [
+                        "nomad": "active",
+                        "status": "healthy",
+                        "version": Updater.currentVersion,
+                        "build": Updater.currentBuild,
+                        "port": self.port,
+                        "authRequired": true,
+                        "isHeadless": NomadHeadlessManager.isHeadless,
+                        "mode": NomadHeadlessManager.isHeadless ? "headless_daemon" : "gui",
+                        "unixSocket": [
+                            "path": socketPath,
+                            "active": NomadUnixSocketBridge.shared.isListening,
+                            "exists": socketExists,
+                            "error": (NomadUnixSocketBridge.shared.lastError as Any?) ?? NSNull()
+                        ]
+                    ]
+                    sendJSON(connection: connection, object: publicStatusObj, origin: origin)
+                    return
+                }
             } else {
                 sendResponse(connection: connection, status: "401 Unauthorized", body: "{\"error\":\"Unauthorized: valid Bearer token required in Authorization header or ~/.nomad/agent-token\",\"code\":\"UNAUTHORIZED\",\"success\":false}", origin: origin)
                 return
             }
         }
 
+        // Dedicated version endpoint
+        if method == "GET" && cleanPath == "/version" {
+            sendJSON(connection: connection, object: [
+                "success": true,
+                "nomad": "active",
+                "version": Updater.currentVersion,
+                "build": Updater.currentBuild,
+                "isDevelopmentBuild": Updater.isDevelopmentBuild
+            ], origin: origin)
+            return
+        }
+
+        // Dedicated health probe endpoint (also aliases GET /socket)
+        if method == "GET" && (cleanPath == "/health" || cleanPath == "/socket") {
+            let socketPath = NomadUnixSocketBridge.defaultSocketPath
+            let socketExists = FileManager.default.fileExists(atPath: socketPath)
+            sendJSON(connection: connection, object: [
+                "success": true,
+                "status": "healthy",
+                "nomad": "active",
+                "version": Updater.currentVersion,
+                "build": Updater.currentBuild,
+                "port": self.port,
+                "unixSocket": [
+                    "path": socketPath,
+                    "active": NomadUnixSocketBridge.shared.isListening,
+                    "exists": socketExists,
+                    "error": (NomadUnixSocketBridge.shared.lastError as Any?) ?? NSNull()
+                ]
+            ], origin: origin)
+            return
+        }
+
+        // Dynamic socket binding, rebinding, or unbinding (DELETE /socket or POST /socket)
+        if (cleanPath == "/socket" || cleanPath == "/daemon") && (method == "POST" || method == "DELETE") {
+            var isUnbind = (method == "DELETE")
+            var requestedPath: String? = nil
+
+            if method == "POST" {
+                var jsonDict: [String: Any]? = nil
+                if let bodyData = bodyData,
+                   let parsed = try? JSONSerialization.jsonObject(with: bodyData) as? [String: Any] {
+                    jsonDict = parsed
+                }
+
+                if let json = jsonDict {
+                    if json.isEmpty {
+                        isUnbind = true
+                    } else if let action = json["action"] as? String, action == "stop" || action == "clear" || action == "unbind" {
+                        isUnbind = true
+                    } else if let enabled = json["enabled"] as? Bool, !enabled {
+                        isUnbind = true
+                    } else if let active = json["active"] as? Bool, !active {
+                        isUnbind = true
+                    } else {
+                        requestedPath = (json["socketPath"] as? String) ?? (json["path"] as? String)
+                    }
+                } else if bodyData == nil || bodyData?.isEmpty == true {
+                    if queryItem("socketPath") == nil && queryItem("path") == nil {
+                        isUnbind = true
+                    } else {
+                        requestedPath = queryItem("socketPath") ?? queryItem("path")
+                    }
+                } else {
+                    requestedPath = queryItem("socketPath") ?? queryItem("path")
+                }
+            }
+
+            if isUnbind {
+                NomadUnixSocketBridge.shared.unbind { _ in
+                    let currentPath = NomadUnixSocketBridge.defaultSocketPath
+                    let exists = FileManager.default.fileExists(atPath: currentPath)
+                    self.sendJSON(connection: connection, object: [
+                        "success": true,
+                        "active": false,
+                        "unbound": true,
+                        "socketPath": currentPath,
+                        "path": currentPath,
+                        "exists": exists,
+                        "error": NSNull()
+                    ], origin: origin)
+                }
+                return
+            }
+
+            NomadUnixSocketBridge.shared.rebind(newPath: requestedPath) { active, error in
+                let currentPath = NomadUnixSocketBridge.defaultSocketPath
+                let exists = FileManager.default.fileExists(atPath: currentPath)
+                self.sendJSON(connection: connection, object: [
+                    "success": active,
+                    "active": active,
+                    "socketPath": currentPath,
+                    "path": currentPath,
+                    "exists": exists,
+                    "error": (error as Any?) ?? NSNull()
+                ], origin: origin)
+            }
+            return
+        }
+
         // Health check probes ("GET /" or "GET /status") can respond immediately even before BrowserStore finishes attaching
         if method == "GET" && (cleanPath == "/" || cleanPath == "/status") {
+            let socketPath = NomadUnixSocketBridge.defaultSocketPath
+            let socketExists = FileManager.default.fileExists(atPath: socketPath)
+            let unixSocketInfo: [String: Any] = [
+                "path": socketPath,
+                "active": NomadUnixSocketBridge.shared.isListening,
+                "exists": socketExists,
+                "error": (NomadUnixSocketBridge.shared.lastError as Any?) ?? NSNull()
+            ]
             let capabilities: [String: Any] = [
                 "transports": ["http", "unix_socket", "sse_events"],
-                "socketPath": NomadUnixSocketBridge.defaultSocketPath,
+                "socketPath": socketPath,
+                "unixSocket": unixSocketInfo,
                 "waitModes": ["stability", "selector", "timeout", "networkidle", "navigation", "url"],
                 "actions": ["click", "hover", "type", "clear", "press", "selectOption", "scroll", "drag", "highlight", "upload", "native_click", "native_type", "native_press", "native_drag", "native_hover"],
                 "upload": ["files", "paths"],
@@ -376,15 +498,19 @@ final class NomadAgentServer: ObservableObject {
                 "network": ["fetch", "xhr", "status", "timing"],
                 "networkInterception": ["mock", "block"],
                 "tabVirtualization": ["hot", "warm", "cold"],
-                "agenticRuntime": ["route_cache", "trajectory_trace", "headless_daemon"],
+                "agenticRuntime": ["route_cache", "trajectory_trace", "headless_daemon", "socket_rebind"],
+                "updater": ["status", "check", "version", "build"],
                 "dialogPolicies": ["accept", "dismiss", "wait"]
             ]
             let liveTitle = (self.store?.activeTab?.webView.title?.isEmpty == false ? self.store?.activeTab?.webView.title : self.store?.activeTab?.title) ?? ""
             let liveURL = (self.store?.activeTab?.webView.url?.absoluteString ?? self.store?.activeTab?.url?.absoluteString) ?? ""
             let statusObj: [String: Any] = [
                 "nomad": "active",
-                "version": "1.0",
+                "status": "healthy",
+                "version": Updater.currentVersion,
+                "build": Updater.currentBuild,
                 "port": self.port,
+                "unixSocket": unixSocketInfo,
                 "tabsCount": self.store?.tabs.count ?? 0,
                 "tabCount": self.store?.tabs.count ?? 0,
                 "activeTabId": self.store?.activeTabId?.uuidString ?? "",
@@ -399,13 +525,49 @@ final class NomadAgentServer: ObservableObject {
         }
 
         if method == "GET" && (cleanPath == "/daemon" || cleanPath == "/headless") {
+            let socketPath = NomadUnixSocketBridge.defaultSocketPath
+            let socketExists = FileManager.default.fileExists(atPath: socketPath)
             sendJSON(connection: connection, object: [
                 "success": true,
                 "mode": NomadHeadlessManager.isHeadless ? "headless_daemon" : "gui",
                 "isHeadless": NomadHeadlessManager.isHeadless,
                 "viewport": ["width": 1280, "height": 800],
                 "cliFlags": ["--headless", "NOMAD_HEADLESS=1"],
-                "socketPath": NomadUnixSocketBridge.defaultSocketPath
+                "socketPath": socketPath,
+                "unixSocket": [
+                    "path": socketPath,
+                    "active": NomadUnixSocketBridge.shared.isListening,
+                    "exists": socketExists,
+                    "error": (NomadUnixSocketBridge.shared.lastError as Any?) ?? NSNull()
+                ]
+            ], origin: origin)
+            return
+        }
+
+        if method == "GET" && cleanPath == "/updater" {
+            let u = Updater.shared
+            let lastCheckVal: Any = u.lastChecked != nil ? (u.lastChecked!.timeIntervalSince1970 * 1000.0) : NSNull()
+            sendJSON(connection: connection, object: [
+                "success": true,
+                "version": Updater.currentVersion,
+                "build": Updater.currentBuild,
+                "statusMessage": u.statusMessage,
+                "checking": u.checking,
+                "lastChecked": lastCheckVal,
+                "feedURL": Updater.feedURL.absoluteString,
+                "autoInstall": u.autoInstall,
+                "isDevelopmentBuild": Updater.isDevelopmentBuild
+            ], origin: origin)
+            return
+        }
+
+        if method == "POST" && (cleanPath == "/updater/check" || cleanPath == "/updater") {
+            Updater.shared.checkByHand(showAlerts: false)
+            sendJSON(connection: connection, object: [
+                "success": true,
+                "checking": true,
+                "version": Updater.currentVersion,
+                "build": Updater.currentBuild
             ], origin: origin)
             return
         }

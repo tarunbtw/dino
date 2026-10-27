@@ -125,24 +125,84 @@ final class Updater: ObservableObject {
         check { _ in }
     }
 
+    static var isDevelopmentBuild: Bool {
+        #if DEBUG
+        return true
+        #else
+        let path = Bundle.main.bundleURL.path
+        return path.contains("/DerivedData/") || path.contains("/Build/Products/") || path.contains("/target/")
+        #endif
+    }
+
     /// Manual user action (menu bar or settings).
-    func checkByHand() {
-        switch stage {
-        case .ready(let next):
+    func checkByHand(showAlerts: Bool = true) {
+        if case .ready(let next) = stage {
             statusMessage = "Nomad \(next.version) is ready — relaunch to use it"
+            if showAlerts {
+                let alert = NSAlert()
+                alert.messageText = "Nomad \(next.version) is Ready"
+                alert.informativeText = "The update has been downloaded and verified. Relaunch Nomad now to start using the new version."
+                alert.alertStyle = .informational
+                alert.addButton(withTitle: "Relaunch Now")
+                alert.addButton(withTitle: "Later")
+                if alert.runModal() == .alertFirstButtonReturn {
+                    relaunch()
+                }
+            }
             return
-        case .fetching(let next, _):
-            statusMessage = "Downloading Nomad \(next.version)..."
-            return
-        default:
-            break
         }
+
+        if case .fetching(let next, let progress) = stage {
+            statusMessage = "Downloading Nomad \(next.version) (\(Int(progress * 100))%)..."
+            if showAlerts {
+                let alert = NSAlert()
+                alert.messageText = "Downloading Nomad \(next.version)"
+                alert.informativeText = "An update is currently being downloaded in the background (\(Int(progress * 100))%)."
+                alert.alertStyle = .informational
+                alert.addButton(withTitle: "OK")
+                alert.runModal()
+            }
+            return
+        }
+
         guard !checking else { return }
         statusMessage = "Checking for updates..."
         check { [weak self] found in
             guard let self = self else { return }
-            if found == nil {
+            if let release = found {
+                self.statusMessage = "Nomad \(release.version) is available"
+                if showAlerts {
+                    let alert = NSAlert()
+                    alert.messageText = "Nomad \(release.version) is Available!"
+                    var msg = "A new version of Nomad is available (Version \(release.version), Build \(release.build)).\n"
+                    if let notes = release.notes, !notes.isEmpty {
+                        msg += "\nRelease Notes:\n\(notes)"
+                    }
+                    if Self.isDevelopmentBuild {
+                        msg += "\n\nNote: Running a development/debug build. In-place auto-update applies to releases installed in /Applications."
+                    }
+                    alert.informativeText = msg
+                    alert.alertStyle = .informational
+                    alert.addButton(withTitle: "Download & Install")
+                    alert.addButton(withTitle: "Later")
+                    if alert.runModal() == .alertFirstButtonReturn {
+                        self.take(release)
+                    }
+                }
+            } else {
                 self.statusMessage = "Nomad is up to date (\(Self.currentVersion))"
+                if showAlerts {
+                    let alert = NSAlert()
+                    alert.messageText = "You're Up to Date!"
+                    var msg = "Nomad \(Self.currentVersion) (Build \(Self.currentBuild)) is currently the newest version available."
+                    if Self.isDevelopmentBuild {
+                        msg += "\n\n(Running a Development/Debug build — in-place updates apply to releases in /Applications.)"
+                    }
+                    alert.informativeText = msg
+                    alert.alertStyle = .informational
+                    alert.addButton(withTitle: "OK")
+                    alert.runModal()
+                }
             }
         }
     }
@@ -355,6 +415,13 @@ private enum Swap {
 
         // Verify incoming bundle
         try verify(fresh)
+
+        // Strip quarantine attributes so the fresh bundle runs immediately without gatekeeper friction
+        let xattr = Process()
+        xattr.executableURL = URL(fileURLWithPath: "/usr/bin/xattr")
+        xattr.arguments = ["-r", "-d", "com.apple.quarantine", fresh.path]
+        try? xattr.run()
+        xattr.waitUntilExit()
 
         // Perform the atomic rename swap
         try swap(fresh)

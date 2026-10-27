@@ -218,14 +218,17 @@ For environments driving Nomad directly without MCP (e.g. `curl`, Python, Node.j
 | `GET` / `POST` / `DELETE` | `/cache/routes` | Learned route cache: inspect and store reliable selector mappings for recurring flows |
 | `GET` / `POST` / `DELETE` | `/trace` \| `/trajectory` | Export (`GET`), record custom step (`POST`), or clear (`DELETE`) chronological trajectory journal with action logs, console outputs, and network entries |
 | `POST` | `/tabs/tier` | Set tab lifecycle virtualization tier (`id: string, tier: "hot"|"warm"|"cold"`) for memory governance |
-| `GET` | `/daemon` \| `/headless` | Inspect headless background daemon status, viewport dimensions (1280x800), and socket path |
+| `GET` | `/status` \| `/health` \| `/version` | System health check, release version/build, active tab, capabilities, and Unix socket status |
+| `GET` / `POST` / `DELETE` | `/socket` \| `/daemon` \| `/headless` | Inspect socket/daemon (`GET`), dynamically rebind/activate Unix socket path at runtime (`POST { "socketPath": "./nomad.sock" }`), or unbind/clear socket (`DELETE /socket` or `POST /socket {}`) |
+| `GET` / `POST` | `/updater` | Inspect auto-update state, version, and build (`GET`), or trigger background update check (`POST`) |
 
 > [!TIP]
 > **Sub-Millisecond IPC & Zero-Friction Socket Auth:**
 > For local agents running in the shell or CI, Nomad exposes a POSIX Unix Domain Socket at `~/.nomad/nomad.sock` (mode `0600`).
+> For sandboxed agents confined to a working directory (`pwd`), send `POST /socket` with `{ "socketPath": "./nomad.sock" }` to instantly bind the socket right inside your `pwd` at runtime without restarting. To clean up or unbind, send `DELETE /socket` or `POST /socket {}`.
 > Connections over this socket are inherently authenticated by Darwin filesystem permissions and automatically inject bearer tokens, eliminating the need to pass `-H "Authorization: Bearer ..."` on every request:
 > ```bash
-> curl --unix-socket ~/.nomad/nomad.sock http://localhost/status
+> curl --unix-socket ~/.nomad/nomad.sock http://localhost/health
 > ```
 
 > [!CAUTION]

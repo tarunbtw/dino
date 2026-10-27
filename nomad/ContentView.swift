@@ -44,9 +44,6 @@ private struct BrowserMainView: View {
         .onAppear {
             NomadAgentServer.shared.start(store: store)
         }
-        .onDisappear {
-            NomadAgentServer.shared.stop()
-        }
     }
 }
 
