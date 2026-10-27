@@ -99,13 +99,16 @@ final class NomadAgentServer: ObservableObject {
         return token
     }
 
+    private var isStarting: Bool = false
+
     /// Starts the local agent server (default: NOMAD_AGENT_PORT or 9222).
     @MainActor
     func start(port: UInt16? = nil, store: BrowserStore? = nil) {
         if let store = store {
             self.store = store
         }
-        guard !isRunning else { return }
+        guard !isRunning, !isStarting, listener == nil else { return }
+        isStarting = true
         self.port = port ?? Self.defaultPort
 
         do {
@@ -117,6 +120,7 @@ final class NomadAgentServer: ObservableObject {
 
             guard let endpointPort = NWEndpoint.Port(rawValue: self.port) else {
                 print("⚠️ [NomadAgentServer] Invalid port: \(self.port)")
+                isStarting = false
                 return
             }
 
@@ -127,13 +131,16 @@ final class NomadAgentServer: ObservableObject {
                 Task { @MainActor in
                     switch state {
                     case .ready:
+                        self.isStarting = false
                         self.isRunning = true
                         NomadUnixSocketBridge.shared.start(port: self.port, token: self.token)
                         print("🟢 [NomadAgentServer] Listening on http://127.0.0.1:\(self.port) (Bearer auth enabled)")
                     case .failed(let error):
                         print("🔴 [NomadAgentServer] Failed with error: \(error)")
+                        self.isStarting = false
                         self.stop()
                     case .cancelled:
+                        self.isStarting = false
                         self.isRunning = false
                         print("⚪️ [NomadAgentServer] Stopped.")
                     default:
@@ -149,20 +156,21 @@ final class NomadAgentServer: ObservableObject {
 
             self.listener = newListener
             newListener.start(queue: serverQueue)
-            NomadUnixSocketBridge.shared.start(port: self.port, token: self.token)
         } catch {
+            isStarting = false
             print("⚠️ [NomadAgentServer] Could not initialize NWListener: \(error)")
         }
     }
 
     /// Stops the server and cleanly releases all sockets and connections.
     func stop() {
+        isStarting = false
+        isRunning = false
         NomadUnixSocketBridge.shared.stop()
         eventBroadcaster.closeAll()
 
         listener?.cancel()
         listener = nil
-        isRunning = false
     }
 
     // MARK: - HTTP Request Handling (Runs on serverQueue)

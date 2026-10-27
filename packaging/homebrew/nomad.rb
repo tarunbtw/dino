@@ -1,6 +1,6 @@
 cask "nomad" do
   version "0.1"
-  sha256 :no_check # Replace with sha256 checksum after creating the zip archive
+  sha256 "dd292aaae26f5e25a73f73a27a2912d1d52c5118bb044b2289b250d02c22ff89"
 
   url "https://github.com/tarunbtw/nomad/releases/download/v#{version}/Nomad-#{version}.zip"
   name "Nomad"
@@ -12,6 +12,14 @@ cask "nomad" do
   app "Nomad.app"
   binary "#{appdir}/Nomad.app/Contents/MacOS/nomad", target: "nomad"
   binary "#{appdir}/Nomad.app/Contents/MacOS/nomad", target: "nomadd"
+
+  postflight do
+    system_command "/usr/bin/xattr",
+                   args: ["-dr", "com.apple.quarantine", "#{appdir}/Nomad.app"],
+                   sudo: false
+  rescue StandardError
+    # Ignore if quarantine attribute is absent
+  end
 
   zap trash: [
     "~/.nomad",

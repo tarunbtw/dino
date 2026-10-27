@@ -8,8 +8,9 @@ scratch/
 .AppleDouble
 .LSOverride
 
-# Xcode
+# Xcode & Distribution
 build/
+dist/
 DerivedData/
 *.xcuserstate
 project.xcworkspace/xcuserdata/

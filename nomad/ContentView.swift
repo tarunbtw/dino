@@ -22,10 +22,6 @@ private struct BrowserMainView: View {
     @StateObject private var store = BrowserStore()
     @StateObject private var settings = SettingsStore.shared
 
-    init() {
-        NomadAgentServer.shared.start()
-    }
-
     var body: some View {
         ZStack {
             BrowserView(store: store)
