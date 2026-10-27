@@ -76,7 +76,7 @@ nonisolated enum ScriptLoader {
             }
         }
 
-        print("⚠️ [ScriptLoader] Could not find '\(name).js' in bundled resources. Using safe empty fallback.")
+        print("[nomad] ScriptLoader: '\(name).js' not found in bundle, using empty fallback")
         return ""
     }
 }

@@ -12,10 +12,45 @@ struct nomadApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     init() {
-        if CommandLine.arguments.contains("--mcp") || CommandLine.arguments.contains("mcp") {
+        let args = CommandLine.arguments.dropFirst().map { $0.lowercased() }
+
+        // nomad version, nomad --version, nomad -v
+        if args.contains("version") || args.contains("--version") || args.contains("-v") {
+            let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1"
+            let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+            print("nomad version \(version) (build \(build))")
+            exit(0)
+        }
+
+        // nomad help, nomad --help, nomad -h
+        if args.contains("help") || args.contains("--help") || args.contains("-h") {
+            let help = """
+            Nomad - Native macOS browser engine and agent runtime
+
+            Usage:
+              nomad [command] [options]
+
+            Commands:
+              version       Print version information
+              help          Show available commands and options
+              headless      Run as an off-screen background browser daemon
+              mcp           Run stdio Model Context Protocol (MCP) server
+
+            Options:
+              --port <port>       Set agent HTTP server port (default: 9222)
+              --socket <path>     Set agent IPC Unix domain socket path
+              --version, -v       Alias for 'version'
+              --help, -h          Alias for 'help'
+            """
+            print(help)
+            exit(0)
+        }
+
+        if args.contains("mcp") || args.contains("--mcp") {
             NomadMCPServer.run()
             exit(0)
         }
+
         if NomadHeadlessManager.isHeadless {
             NSApplication.shared.setActivationPolicy(.accessory)
         }

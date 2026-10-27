@@ -87,7 +87,7 @@ final class NomadHeadlessManager: ObservableObject {
 
         // Start agent server bound to headless store
         NomadAgentServer.shared.start(store: browserStore)
-        print("🟢 [NomadHeadlessManager] Headless daemon initialized. Off-screen window: 1280x800.")
+        print("[nomad] Headless runtime initialized (1280x800)")
     }
 
     /// Attaches the webView to the offscreen window so layout and screenshots work identically to GUI mode.

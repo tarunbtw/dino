@@ -124,7 +124,7 @@ final class NomadUnixSocketBridge: @unchecked Sendable {
         guard fd >= 0 else {
             let err = errno
             let errStr = String(cString: strerror(err))
-            print("⚠️ [NomadUnixSocketBridge] Failed to create AF_UNIX socket: \(err) (\(errStr))")
+            print("[nomad] Failed to create UNIX socket: \(err) (\(errStr))")
             stateLock.lock()
             lastError = "socket failed: \(err) (\(errStr))"
             stateLock.unlock()
@@ -166,7 +166,7 @@ final class NomadUnixSocketBridge: @unchecked Sendable {
         guard bindRes == 0 else {
             let err = errno
             let errStr = String(cString: strerror(err))
-            print("⚠️ [NomadUnixSocketBridge] Failed to bind to \(socketPath): \(err) (\(errStr))")
+            print("[nomad] Failed to bind socket to \(socketPath): \(err) (\(errStr))")
             stateLock.lock()
             lastError = "bind failed: \(err) (\(errStr))"
             stateLock.unlock()
@@ -180,7 +180,7 @@ final class NomadUnixSocketBridge: @unchecked Sendable {
         guard Darwin.listen(fd, 64) == 0 else {
             let err = errno
             let errStr = String(cString: strerror(err))
-            print("⚠️ [NomadUnixSocketBridge] Failed to listen on socket: \(err) (\(errStr))")
+            print("[nomad] Failed to listen on socket: \(err) (\(errStr))")
             stateLock.lock()
             lastError = "listen failed: \(err) (\(errStr))"
             stateLock.unlock()
@@ -206,7 +206,7 @@ final class NomadUnixSocketBridge: @unchecked Sendable {
         self.source = readSource
         readSource.resume()
 
-        print("🟢 [NomadUnixSocketBridge] IPC Socket ready at: \(socketPath) (Permissions: 0600)")
+        print("[nomad] IPC socket ready at: \(socketPath)")
     }
 
     private func stopSync() {
@@ -222,7 +222,7 @@ final class NomadUnixSocketBridge: @unchecked Sendable {
         source?.cancel()
         source = nil
         unlink(Self.defaultSocketPath)
-        print("⚪️ [NomadUnixSocketBridge] IPC Socket closed.")
+        print("[nomad] IPC socket closed")
     }
 
     private func acceptIncomingConnections() {

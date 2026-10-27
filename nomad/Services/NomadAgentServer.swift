@@ -119,7 +119,7 @@ final class NomadAgentServer: ObservableObject {
             params.requiredInterfaceType = .loopback
 
             guard let endpointPort = NWEndpoint.Port(rawValue: self.port) else {
-                print("⚠️ [NomadAgentServer] Invalid port: \(self.port)")
+                print("[nomad] Invalid agent port: \(self.port)")
                 isStarting = false
                 return
             }
@@ -134,15 +134,15 @@ final class NomadAgentServer: ObservableObject {
                         self.isStarting = false
                         self.isRunning = true
                         NomadUnixSocketBridge.shared.start(port: self.port, token: self.token)
-                        print("🟢 [NomadAgentServer] Listening on http://127.0.0.1:\(self.port) (Bearer auth enabled)")
+                        print("[nomad] Agent server listening on http://127.0.0.1:\(self.port)")
                     case .failed(let error):
-                        print("🔴 [NomadAgentServer] Failed with error: \(error)")
+                        print("[nomad] Agent server error: \(error)")
                         self.isStarting = false
                         self.stop()
                     case .cancelled:
                         self.isStarting = false
                         self.isRunning = false
-                        print("⚪️ [NomadAgentServer] Stopped.")
+                        print("[nomad] Agent server stopped")
                     default:
                         break
                     }
@@ -158,7 +158,7 @@ final class NomadAgentServer: ObservableObject {
             newListener.start(queue: serverQueue)
         } catch {
             isStarting = false
-            print("⚠️ [NomadAgentServer] Could not initialize NWListener: \(error)")
+            print("[nomad] Listener error: \(error)")
         }
     }
 
