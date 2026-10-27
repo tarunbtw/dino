@@ -71,6 +71,7 @@ xcodebuild -project nomad.xcodeproj \
   -configuration Release \
   -derivedDataPath "$BUILD_DIR" \
   MARKETING_VERSION="${NEW_VERSION}" \
+  -quiet \
   build
 
 BUILT_APP="$BUILD_DIR/Build/Products/Release/nomad.app"
@@ -92,7 +93,7 @@ cp -R "$BUILT_APP" "$STAGING_DIR/Nomad.app"
 xattr -cr "$STAGING_DIR/Nomad.app" 2>/dev/null || true
 
 # Codesign bundle with entitlements
-codesign --force --deep --sign - --entitlements nomad/nomad.entitlements "$STAGING_DIR/Nomad.app"
+codesign --force --deep --sign - --entitlements nomad/nomad.entitlements "$STAGING_DIR/Nomad.app" >/dev/null 2>&1
 
 # 6. Archive Creation with ditto (immune to AppleDouble resource forks)
 echo "==> Packaging archive with ditto..."
@@ -168,6 +169,6 @@ echo "=========================================================="
 echo "  Archive:   ${ZIP_PATH}"
 echo "  SHA-256:   ${SHA256}"
 echo "  Release:   https://github.com/tarunbtw/nomad/releases/tag/v${NEW_VERSION}"
-echo "  Homebrew:  Pushed to tarunbtw/homebrew-tap (brew upgrade nomad)"
+echo "  Homebrew:  Pushed to tarunbtw/homebrew-tap (brew update && brew upgrade nomad)"
 echo "=========================================================="
 echo ""
