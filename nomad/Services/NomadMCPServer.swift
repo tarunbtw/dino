@@ -518,8 +518,8 @@ final class NomadMCPServer {
                     "target": ["type": "string", "description": "CSS selector or element ID (e.g. '#modal', 'e5') to scope snapshot perception to that subtree"],
                     "depth": ["type": "number", "description": "Maximum tree depth relative to target/root (e.g. 1 for direct children, 2 for grandchildren)"],
                     "track": ["type": "boolean", "description": "Track element mutations across snapshots. Tags new elements with [NEW] and returns mutation counts"],
-                    "mode": ["type": "string", "enum": ["text", "json"], "description": "Perception output format. 'text' returns compact markdown summary; 'json' returns raw element array (default: 'text')"] as [String: Any],
-                    "unrestricted": ["type": "boolean", "description": "When true, bypasses the 250 element limit in JSON mode (warning: token-heavy)"],
+                    "mode": ["type": "string", "enum": ["text", "json"], "description": "Perception output format. 'text' returns compact markdown summary (~20 tokens/el, ~700 tokens full page, recommended); 'json' returns raw AST array (~110 tokens/el, clamped to 250 unless unrestricted: true) (default: 'text')"] as [String: Any],
+                    "unrestricted": ["type": "boolean", "description": "When true, bypasses the 250 element limit in JSON mode (caution: dense pages can consume 100k+ tokens; prefer mode: 'text')"],
                     "tabId": ["type": "string", "description": "Optional tab UUID to inspect instead of the active tab"]
                 ] as [String: Any],
                 "additionalProperties": false
@@ -527,17 +527,19 @@ final class NomadMCPServer {
         ],
         [
             "name": "nomad_action",
-            "description": "Execute an atomic interaction in the active tab (click, hover, type, clear, press key chord, selectOption, scroll, drag, highlight, upload). Best used with elementId from nomad_snapshot (e.g. 'e1') or CSS selector fallback. Fully compatible with React controlled components.",
+            "description": "Execute an atomic interaction in the active tab (click, right_click, context_menu, hover, type, clear, press key chord, selectOption, scroll, drag, highlight, upload). Best used with elementId from nomad_snapshot (e.g. 'e1') or CSS selector fallback. Supports element-to-element drag via toElementId. Fully compatible with React controlled components.",
             "inputSchema": [
                 "type": "object",
                 "properties": [
                     "type": [
                         "type": "string",
-                        "enum": ["click", "hover", "type", "clear", "press", "selectOption", "scroll", "drag", "highlight", "upload", "native_click", "native_hover", "native_type", "native_press", "native_drag"],
+                        "enum": ["click", "right_click", "context_menu", "hover", "type", "clear", "press", "selectOption", "scroll", "drag", "highlight", "upload", "native_click", "native_right_click", "native_context_menu", "native_hover", "native_type", "native_press", "native_drag"],
                         "description": "Type of action to execute"
                     ] as [String: Any],
                     "elementId": ["type": "string", "description": "Target element ID from nomad_snapshot (e.g. 'e1', 'e2', or subframe 'f1:e1')"],
                     "selector": ["type": "string", "description": "CSS selector fallback if elementId is not used (e.g. '.todo-list li .toggle')"],
+                    "toElementId": ["type": "string", "description": "Destination element ID from nomad_snapshot (e.g. 'e8') for element-to-element drag without manual coordinates"],
+                    "toTarget": ["type": "string", "description": "Destination element ID or CSS selector for drag action"],
                     "text": ["type": "string", "description": "Text to enter (for 'type' action) or key name / chord (for 'press' action, e.g. 'Enter', 'Meta+A')"],
                     "native": [
                         "type": "boolean",
@@ -552,8 +554,8 @@ final class NomadMCPServer {
                     "optionText": ["type": "string", "description": "Option visible text to choose for 'selectOption'"],
                     "x": ["type": "number", "description": "Viewport X coordinate fallback"],
                     "y": ["type": "number", "description": "Viewport Y coordinate fallback"],
-                    "toX": ["type": "number", "description": "Destination X coordinate for drag action"],
-                    "toY": ["type": "number", "description": "Destination Y coordinate for drag action"],
+                    "toX": ["type": "number", "description": "Destination X coordinate for drag action (if toElementId is not used)"],
+                    "toY": ["type": "number", "description": "Destination Y coordinate for drag action (if toElementId is not used)"],
                     "scrollDeltaY": ["type": "number", "description": "Pixels to scroll down (positive) or up (negative) for 'scroll'"],
                     "scrollDeltaX": ["type": "number", "description": "Pixels to scroll right (positive) or left (negative) for 'scroll'"],
                     "direction": ["type": "string", "enum": ["up", "down", "left", "right"], "description": "Scroll direction fallback"] as [String: Any],
@@ -594,16 +596,16 @@ final class NomadMCPServer {
         ],
         [
             "name": "nomad_wait",
-            "description": "Wait for DOM mutation stability, a specific CSS selector, URL pattern, network requests to become idle, navigation to complete, or a timeout before continuing execution.",
+            "description": "Wait for page settlement, DOM mutation stability, a specific CSS selector, URL pattern, network requests to become idle, navigation to complete, or a timeout before continuing execution.",
             "inputSchema": [
                 "type": "object",
                 "properties": [
                     "mode": [
                         "type": "string",
-                        "enum": ["stability", "selector", "timeout", "networkidle", "navigation", "url"],
-                        "description": "Wait mode. Default: stability."
+                        "enum": ["auto", "stability", "selector", "timeout", "networkidle", "navigation", "url"],
+                        "description": "Wait mode. Default: 'auto' (automatically checks navigation, inflight network requests, selector readiness, and DOM mutation stability)."
                     ] as [String: Any],
-                    "selector": ["type": "string", "description": "CSS selector to wait for (if provided, mode defaults to 'selector')"],
+                    "selector": ["type": "string", "description": "CSS selector to wait for (if provided, auto-wait also verifies element readiness)"],
                     "urlPattern": ["type": "string", "description": "Substring or regex pattern to wait for in active URL (for 'navigation' or 'url' mode)"],
                     "quietMs": ["type": "number", "description": "Milliseconds of DOM mutation silence required for 'stability' (default: 250)"],
                     "timeoutMs": ["type": "number", "description": "Maximum milliseconds to wait before timing out (default: 5000)"],

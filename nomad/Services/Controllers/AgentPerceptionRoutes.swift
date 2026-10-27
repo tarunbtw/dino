@@ -54,10 +54,14 @@ extension NomadAgentServer {
             }
 
             var snapshotWarning: String? = nil
+            var isClamped = false
+            var notice: String? = nil
             if (mode == "json" || mode == "full") && !isUnrestricted && limit > 250 {
                 let originalLimit = limit
                 limit = 250
+                isClamped = true
                 snapshotWarning = "JSON mode limit was clamped from \(originalLimit) to 250 elements to prevent excessive token consumption (~110 tokens/element). Pass 'unrestricted=true' to bypass, or use default mode='text' (~20 tokens/element) for ~100x lower cost."
+                notice = "Output clamped to 250 elements to prevent context blowup (~110 tokens/element). Pass 'unrestricted=true' to fetch all, use limit/offset pagination, or switch to default mode: 'text' (~20 tokens/element) to ingest the full page in ~1,200 tokens."
             }
 
             do {
@@ -74,6 +78,11 @@ extension NomadAgentServer {
                 )
                 if mode == "json" || mode == "full" {
                     var fullSnapshot = snapshot
+                    fullSnapshot.isClamped = isClamped
+                    fullSnapshot.unclampedTotal = snapshot.filteredTotal ?? snapshot.totalElements ?? snapshot.elements.count
+                    if isClamped {
+                        fullSnapshot.notice = notice
+                    }
                     // Compute accurate full token estimate including the elements array
                     let rawData = try JSONEncoder().encode(snapshot)
                     let fullTokens = max(1, Int(ceil(Double(rawData.count) / 4.0)))

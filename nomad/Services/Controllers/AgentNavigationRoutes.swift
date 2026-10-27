@@ -126,7 +126,7 @@ extension NomadAgentServer {
             return true
 
         case ("POST", "/wait"):
-            var mode = "stability"
+            var mode = "auto"
             var quietMs = 250
             var timeoutMs = 5000
             var durationMs = 1000
@@ -138,7 +138,7 @@ extension NomadAgentServer {
             if let bodyData = bodyData,
                let json = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any] {
                 tid = json["tabId"] as? String
-                if let m = json["mode"] as? String { mode = m.lowercased() }
+                if let m = json["mode"] as? String { mode = m.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
                 if let q = json["quietMs"] as? Int { quietMs = q }
                 if let t = json["timeoutMs"] as? Int { timeoutMs = t }
                 if let d = json["durationMs"] as? Int { durationMs = d }
@@ -147,15 +147,101 @@ extension NomadAgentServer {
                 if let u = json["url"] as? String, urlPattern.isEmpty { urlPattern = u }
                 if let i = json["idleMs"] as? Int { idleMs = i }
             }
+            if mode.isEmpty { mode = "auto" }
 
             guard let activeTab = requireTab(id: tid, connection: connection, origin: origin) else { return true }
 
-            // Auto-infer selector mode if selector string is present
-            if !selector.isEmpty && (mode == "stability" || mode.isEmpty) {
-                mode = "selector"
-            }
-
             switch mode {
+            case "auto", "default":
+                let startTime = Date()
+                let maxTimeoutSec = Double(timeoutMs) / 1000.0
+
+                // 1. Navigation check: if active page is navigating, wait for it to settle
+                if activeTab.isLoading {
+                    await activeTab.waitForNavigationSettled(timeout: max(0.5, maxTimeoutSec - Date().timeIntervalSince(startTime)))
+                }
+
+                // Ensure document readyState is not 'loading'
+                let readyDeadline = Date().addingTimeInterval(min(2.0, max(0.2, maxTimeoutSec - Date().timeIntervalSince(startTime))))
+                while Date() < readyDeadline {
+                    let readyState = (try? await activeTab.webView.evaluateJavaScript("document.readyState")) as? String
+                    if readyState != "loading" { break }
+                    try? await Task.sleep(nanoseconds: 40_000_000)
+                }
+
+                // 2. Target readiness check (if selector or elementId is passed)
+                var targetAppeared = false
+                if !selector.isEmpty {
+                    let escapedSelector: String
+                    if let data = try? JSONEncoder().encode(selector), let str = String(data: data, encoding: .utf8) {
+                        escapedSelector = str
+                    } else {
+                        escapedSelector = "\"\(selector)\""
+                    }
+                    let checkScript = """
+                    (() => {
+                        var sel = \(escapedSelector);
+                        if (window.__nomad && window.__nomad.findInTree) {
+                            try { if (window.__nomad.findInTree(document, sel)) return true; } catch(e) {}
+                        }
+                        try { if (document.querySelector(sel) || document.querySelector('[data-nomad-id="' + sel + '"]')) return true; } catch(e) {}
+                        return false;
+                    })()
+                    """
+                    let selectorDeadline = Date().addingTimeInterval(max(0.1, maxTimeoutSec - Date().timeIntervalSince(startTime)))
+                    while Date() < selectorDeadline {
+                        let found = (try? await activeTab.webView.evaluateJavaScript(checkScript)) as? Bool ?? false
+                        if found {
+                            targetAppeared = true
+                            break
+                        }
+                        try? await Task.sleep(nanoseconds: 50_000_000)
+                    }
+                }
+
+                // 3. Network inflight check: wait for inflight network requests to settle (200ms quiet window, capped at 2.5s)
+                let netCap = min(2.5, max(0.2, maxTimeoutSec - Date().timeIntervalSince(startTime)))
+                let netDeadline = Date().addingTimeInterval(netCap)
+                var netQuietStart = Date()
+                while Date() < netDeadline {
+                    let inflightCount = (try? await activeTab.webView.evaluateJavaScript("window.__nomad_inflight_count || 0")) as? Int ?? 0
+                    if inflightCount > 0 {
+                        netQuietStart = Date()
+                        try? await Task.sleep(nanoseconds: 60_000_000)
+                    } else {
+                        if Date().timeIntervalSince(netQuietStart) >= 0.2 {
+                            break
+                        }
+                        try? await Task.sleep(nanoseconds: 40_000_000)
+                    }
+                }
+
+                // 4. DOM stability check: await DOM mutation quiet period
+                let remainingSec = max(0.1, maxTimeoutSec - Date().timeIntervalSince(startTime))
+                let remainingMs = Int(remainingSec * 1000.0)
+                do {
+                    let stabilityResult = try await activeTab.waitForStability(quietMs: min(quietMs, 200), timeoutMs: remainingMs)
+                    var response: [String: Any] = [
+                        "success": true,
+                        "mode": "auto",
+                        "message": "Page settled (navigation, network, and DOM stable)"
+                    ]
+                    if !selector.isEmpty {
+                        response["selector"] = selector
+                        response["targetAppeared"] = targetAppeared
+                    }
+                    if let mut = stabilityResult["mutations"] as? Int {
+                        response["mutations"] = mut
+                    }
+                    sendJSON(connection: connection, object: response, origin: origin)
+                } catch {
+                    sendJSON(connection: connection, object: [
+                        "success": true,
+                        "mode": "auto",
+                        "message": "Auto-wait completed with fallback stability: \(error.localizedDescription)"
+                    ], origin: origin)
+                }
+
             case "stability", "stable", "domstable", "idle", "quiescence":
                 do {
                     let result = try await activeTab.waitForStability(quietMs: quietMs, timeoutMs: timeoutMs)

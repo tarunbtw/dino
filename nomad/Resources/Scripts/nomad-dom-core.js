@@ -155,8 +155,27 @@
             return false;
         }
 
+        // Context menu / right-click trigger detection
+        function hasContextMenuSupport(el) {
+            if (!el) return false;
+            try {
+                if (el.hasAttribute && (
+                    el.hasAttribute('oncontextmenu') ||
+                    el.getAttribute('aria-haspopup') === 'menu' ||
+                    el.getAttribute('aria-haspopup') === 'true' ||
+                    el.hasAttribute('data-contextmenu') ||
+                    el.hasAttribute('data-context-menu') ||
+                    el.hasAttribute('contextmenu')
+                )) return true;
+                if (el.oncontextmenu !== null && el.oncontextmenu !== undefined) return true;
+                var cls = (el.className && typeof el.className === 'string') ? el.className.toLowerCase() : '';
+                if (cls.indexOf('context-menu') !== -1 || cls.indexOf('contextmenu') !== -1 || cls.indexOf('right-click') !== -1) return true;
+            } catch(e) {}
+            return false;
+        }
+
         // Dispatches full HTML5 Drag and Drop event sequence with DataTransfer
-        function dispatchHtml5Drag(targetId, fromX, fromY, toX, toY, optEl) {
+        function dispatchHtml5Drag(targetId, fromX, fromY, toX, toY, optEl, optDest) {
             var nomad = (typeof window !== 'undefined' && window.__nomad) ? window.__nomad : (this || {});
             var el = optEl || null;
             if (!el && targetId) {
@@ -167,8 +186,30 @@
             }
             if (!el) return { success: false, code: 'MISSING_TARGET', message: 'No source element for drag action', elementId: targetId };
 
-            if (toX === undefined || toX === null || toY === undefined || toY === null) {
-                return { success: false, code: 'MISSING_DESTINATION', message: 'Missing destination coordinates (toX, toY) for drag action', elementId: targetId };
+            var destEl = null;
+            if (optDest && typeof optDest === 'object' && optDest.dispatchEvent) {
+                destEl = optDest;
+            } else if (typeof optDest === 'string' && optDest) {
+                destEl = (nomad.elements && nomad.elements[optDest] && nomad.isNodeConnected && nomad.isNodeConnected(nomad.elements[optDest]) ? nomad.elements[optDest] : null) || (nomad.findInTree ? nomad.findInTree(document, optDest) : null) || document.querySelector('[data-nomad-id="' + optDest + '"]') || document.querySelector(optDest);
+            }
+
+            var destX = (toX !== undefined && toX !== null) ? Number(toX) : null;
+            var destY = (toY !== undefined && toY !== null) ? Number(toY) : null;
+
+            if ((destX === null || destY === null) && destEl) {
+                var dRect = destEl.getBoundingClientRect ? destEl.getBoundingClientRect() : { left: 0, top: 0, width: 0, height: 0 };
+                destX = Math.round(dRect.left + dRect.width / 2);
+                destY = Math.round(dRect.top + dRect.height / 2);
+            } else if ((destX === null || destY === null) && typeof optDest === 'string' && optDest) {
+                var vRect = nomad.getElementViewportRect ? nomad.getElementViewportRect(optDest) : null;
+                if (vRect && (vRect.width > 0 || vRect.height > 0)) {
+                    destX = Math.round(vRect.left + vRect.width / 2);
+                    destY = Math.round(vRect.top + vRect.height / 2);
+                }
+            }
+
+            if (destX === null || destY === null) {
+                return { success: false, code: 'MISSING_DESTINATION', message: 'Missing destination coordinates (toX, toY) or destination element (toElementId/toTarget) for drag action', elementId: targetId };
             }
 
             if (el.scrollIntoView) {
@@ -178,8 +219,6 @@
             var srcRect = el.getBoundingClientRect ? el.getBoundingClientRect() : { left: 0, top: 0, width: 0, height: 0 };
             var startX = (fromX !== undefined && fromX !== null) ? Number(fromX) : Math.round(srcRect.left + srcRect.width / 2);
             var startY = (fromY !== undefined && fromY !== null) ? Number(fromY) : Math.round(srcRect.top + srcRect.height / 2);
-            var destX = Number(toX);
-            var destY = Number(toY);
 
             var dt = new DataTransfer();
             try { dt.effectAllowed = 'all'; } catch(e) {}
@@ -193,16 +232,18 @@
             });
             el.dispatchEvent(dragStartEvt);
 
-            var destEl = document.elementFromPoint(destX, destY) || el;
-            if (destEl && destEl.tagName === 'IFRAME') {
-                try {
-                    var fDoc = destEl.contentDocument || (destEl.contentWindow ? destEl.contentWindow.document : null);
-                    if (fDoc) {
-                        var ifrRect = destEl.getBoundingClientRect();
-                        var subEl = fDoc.elementFromPoint(destX - ifrRect.left, destY - ifrRect.top);
-                        if (subEl) destEl = subEl;
-                    }
-                } catch(e) {}
+            if (!destEl) {
+                destEl = document.elementFromPoint(destX, destY) || el;
+                if (destEl && destEl.tagName === 'IFRAME') {
+                    try {
+                        var fDoc = destEl.contentDocument || (destEl.contentWindow ? destEl.contentWindow.document : null);
+                        if (fDoc) {
+                            var ifrRect = destEl.getBoundingClientRect();
+                            var subEl = fDoc.elementFromPoint(destX - ifrRect.left, destY - ifrRect.top);
+                            if (subEl) destEl = subEl;
+                        }
+                    } catch(e) {}
+                }
             }
 
             var dragEnterEvt = new DragEvent('dragenter', {
@@ -241,7 +282,8 @@
             });
             el.dispatchEvent(dragEndEvt);
 
-            return { success: true, code: 'SUCCESS', message: 'Dragged ' + (targetId || 'element') + ' to (' + destX + ', ' + destY + ')', elementId: targetId };
+            var destLabel = (typeof optDest === 'string' && optDest) ? ("'" + optDest + "' (" + destX + ", " + destY + ")") : ('(' + destX + ', ' + destY + ')');
+            return { success: true, code: 'SUCCESS', message: 'Dragged ' + (targetId || 'element') + ' to ' + destLabel, elementId: targetId };
         }
 
         if (!window.__nomad_frames) window.__nomad_frames = {};
@@ -693,7 +735,7 @@
                 // Recursive collector penetrating open Shadow DOM roots and same-origin / srcdoc iframes
                 function collectNodes(root, list) {
                     if (!root) return;
-                    var selector = 'a, button, input, textarea, select, details, summary, h1, h2, h3, h4, h5, h6, img, li, p, td, th, pre, code, blockquote, canvas, [draggable], [ondragstart], [ondrop], [id*="hit"], [id*="drag"], [id*="drop"], [class*="drag"], [class*="drop"], [class*="dropzone"], [role="button"], [role="link"], [role="checkbox"], [role="radio"], [role="combobox"], [role="menuitem"], [role="tab"], [role="switch"], [role="option"], [role="heading"], [role="listitem"], [role="status"], [role="alert"], [role="cell"], [tabindex]:not([tabindex="-1"]), [contenteditable="true"], iframe';
+                    var selector = 'a, button, input, textarea, select, details, summary, h1, h2, h3, h4, h5, h6, img, li, p, td, th, pre, code, blockquote, canvas, [draggable], [ondragstart], [ondrop], [id*="hit"], [id*="drag"], [id*="drop"], [class*="drag"], [class*="drop"], [class*="dropzone"], [role="button"], [role="link"], [role="checkbox"], [role="radio"], [role="combobox"], [role="menuitem"], [role="tab"], [role="switch"], [role="option"], [role="heading"], [role="listitem"], [role="status"], [role="alert"], [role="cell"], [tabindex]:not([tabindex="-1"]), [contenteditable="true"], [oncontextmenu], [data-contextmenu], [data-context-menu], [contextmenu], [aria-haspopup="menu"], iframe';
                     try {
                         var found = root.querySelectorAll(selector);
                         for (var i = 0; i < found.length; i++) {
@@ -1038,6 +1080,7 @@
                         rank: itemRank,
                         isObscured: isObscured,
                         inViewport: inViewport,
+                        hasContextMenu: hasContextMenuSupport(el),
                         disabled: disabled,
                         checked: checked,
                         selected: selected,
@@ -1097,6 +1140,7 @@
                                 rank: null,
                                 isObscured: false,
                                 inViewport: inVp,
+                                hasContextMenu: Boolean(fel.hasContextMenu),
                                 disabled: Boolean(fel.disabled),
                                 checked: Boolean(fel.checked),
                                 selected: Boolean(fel.selected),
@@ -1269,6 +1313,7 @@
                     if (item.isInShadowRoot) desc += ' shadow';
                     if (!item.inViewport) desc += ' (offscreen)';
                     desc += '>';
+                    if (item.hasContextMenu) desc += ' (context-menu)';
                     if (item.isObscured) desc += ' (obscured)';
                     summaryLines.push(desc);
                 }
@@ -1704,6 +1749,72 @@
                         }
                         return { success: false, code: 'MISSING_TARGET', message: 'No target element or coordinates specified for click action' };
 
+                    case 'right_click':
+                    case 'rightclick':
+                    case 'context_menu':
+                    case 'contextmenu':
+                        if (el) {
+                            if (el.ownerDocument && el.ownerDocument !== document && el.ownerDocument.defaultView && el.ownerDocument.defaultView.frameElement) {
+                                try { el.ownerDocument.defaultView.frameElement.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch(e) {}
+                            }
+                            if (el.scrollIntoView) {
+                                try { el.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch(e) {}
+                            }
+                            try { el.focus(); } catch(e) {}
+
+                            var elDocR = el.ownerDocument || document;
+                            var elWinR = elDocR.defaultView || window;
+                            var rectR = el.getBoundingClientRect ? el.getBoundingClientRect() : { left: 0, top: 0, width: 0, height: 0 };
+                            var cxR = Math.round(rectR.left + (rectR.width ? rectR.width / 2 : 0));
+                            var cyR = Math.round(rectR.top + (rectR.height ? rectR.height / 2 : 0));
+
+                            var targetToRClick = el;
+                            if (!actionObj.force) {
+                                try {
+                                    var topR = elDocR.elementFromPoint(cxR, cyR);
+                                    if (topR && topR !== el && !el.contains(topR) && !topR.contains(el)) {
+                                        targetToRClick = topR;
+                                    }
+                                } catch(e) {}
+                            }
+
+                            var rPointerInit = {
+                                bubbles: true,
+                                cancelable: true,
+                                view: elWinR,
+                                clientX: cxR,
+                                clientY: cyR,
+                                screenX: cxR,
+                                screenY: cyR,
+                                button: 2,
+                                buttons: 2,
+                                pointerId: 1,
+                                pointerType: 'mouse',
+                                isPrimary: true
+                            };
+                            targetToRClick.dispatchEvent(new elWinR.PointerEvent('pointerdown', rPointerInit));
+                            targetToRClick.dispatchEvent(new elWinR.MouseEvent('mousedown', {
+                                bubbles: true, cancelable: true, view: elWinR, clientX: cxR, clientY: cyR, screenX: cxR, screenY: cyR, button: 2, buttons: 2
+                            }));
+                            targetToRClick.dispatchEvent(new elWinR.PointerEvent('pointerup', Object.assign({}, rPointerInit, { buttons: 0 })));
+                            targetToRClick.dispatchEvent(new elWinR.MouseEvent('mouseup', {
+                                bubbles: true, cancelable: true, view: elWinR, clientX: cxR, clientY: cyR, screenX: cxR, screenY: cyR, button: 2, buttons: 0
+                            }));
+                            var ctxEvt = new elWinR.MouseEvent('contextmenu', {
+                                bubbles: true, cancelable: true, view: elWinR, clientX: cxR, clientY: cyR, screenX: cxR, screenY: cyR, button: 2, buttons: 0
+                            });
+                            targetToRClick.dispatchEvent(ctxEvt);
+                            return { success: true, message: 'Context menu (right-click) dispatched on ' + (targetId || 'element'), elementId: targetId };
+                        } else if (actionObj.x !== undefined && actionObj.y !== undefined) {
+                            var hitR = document.elementFromPoint(actionObj.x, actionObj.y);
+                            if (hitR) {
+                                hitR.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: actionObj.x, clientY: actionObj.y, button: 2 }));
+                                return { success: true, message: 'Context menu dispatched at (' + actionObj.x + ', ' + actionObj.y + ')' };
+                            }
+                            return { success: false, code: 'ELEMENT_NOT_FOUND', message: 'No element at coordinates (' + actionObj.x + ', ' + actionObj.y + ')' };
+                        }
+                        return { success: false, code: 'MISSING_TARGET', message: 'No target element or coordinates specified for right-click action' };
+
                     case 'hover':
                         if (!el) return { success: false, code: 'MISSING_TARGET', message: 'No target element for hover action' };
                         if (el.ownerDocument && el.ownerDocument !== document && el.ownerDocument.defaultView && el.ownerDocument.defaultView.frameElement) {
@@ -1824,10 +1935,28 @@
 
                     case 'drag':
                         if (!el) return { success: false, code: 'MISSING_TARGET', message: 'No target element for drag action', elementId: targetId };
-                        if (actionObj.toX === undefined || actionObj.toX === null || actionObj.toY === undefined || actionObj.toY === null) {
-                            return { success: false, code: 'MISSING_DESTINATION', message: 'Missing destination coordinates (toX, toY) for drag action', elementId: targetId };
+                        var toTargetId = actionObj.toTarget || actionObj.toElementId || actionObj.toSelector || null;
+                        var destEl = null;
+                        var destX = (actionObj.toX !== undefined && actionObj.toX !== null) ? Number(actionObj.toX) : null;
+                        var destY = (actionObj.toY !== undefined && actionObj.toY !== null) ? Number(actionObj.toY) : null;
+                        if (toTargetId) {
+                            destEl = (nomad.elements && nomad.elements[toTargetId] && nomad.isNodeConnected && nomad.isNodeConnected(nomad.elements[toTargetId]) ? nomad.elements[toTargetId] : null) || (nomad.findInTree ? nomad.findInTree(document, toTargetId) : null) || document.querySelector('[data-nomad-id="' + toTargetId + '"]') || document.querySelector(toTargetId);
+                            if (destEl) {
+                                var dRect = destEl.getBoundingClientRect ? destEl.getBoundingClientRect() : { left: 0, top: 0, width: 0, height: 0 };
+                                if (destX === null) destX = Math.round(dRect.left + dRect.width / 2);
+                                if (destY === null) destY = Math.round(dRect.top + dRect.height / 2);
+                            } else {
+                                var vRect = nomad.getElementViewportRect ? nomad.getElementViewportRect(toTargetId) : null;
+                                if (vRect && (vRect.width > 0 || vRect.height > 0)) {
+                                    if (destX === null) destX = Math.round(vRect.left + vRect.width / 2);
+                                    if (destY === null) destY = Math.round(vRect.top + vRect.height / 2);
+                                }
+                            }
                         }
-                        return dispatchHtml5Drag(targetId, actionObj.x, actionObj.y, actionObj.toX, actionObj.toY, el);
+                        if (destX === null || destY === null) {
+                            return { success: false, code: 'MISSING_DESTINATION', message: 'Missing destination coordinates (toX, toY) or destination element (toElementId/toTarget) for drag action', elementId: targetId };
+                        }
+                        return dispatchHtml5Drag(targetId, actionObj.x, actionObj.y, destX, destY, el, destEl || toTargetId);
 
                     case 'press':
                         var rawKey = actionObj.key || actionObj.text || 'Enter';

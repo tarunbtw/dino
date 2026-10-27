@@ -114,6 +114,8 @@ enum WebKitPool {
         (function() {
             if (window.__nomad_network_hooked) return;
             window.__nomad_network_hooked = true;
+            window.__nomad_inflight_count = 0;
+            window.__nomad_last_network_activity = performance.now();
 
             function maskNative(fn, name) {
                 try {
@@ -138,6 +140,8 @@ enum WebKitPool {
             if (origFetch) {
                 window.fetch = async function(...args) {
                     const startTime = performance.now();
+                    window.__nomad_inflight_count = (window.__nomad_inflight_count || 0) + 1;
+                    window.__nomad_last_network_activity = performance.now();
                     let method = 'GET';
                     let url = '';
                     try {
@@ -213,6 +217,9 @@ enum WebKitPool {
                             error: err ? err.message : 'Network error'
                         });
                         throw err;
+                    } finally {
+                        window.__nomad_inflight_count = Math.max(0, (window.__nomad_inflight_count || 1) - 1);
+                        window.__nomad_last_network_activity = performance.now();
                     }
                 };
                 maskNative(window.fetch, 'fetch');
@@ -228,6 +235,8 @@ enum WebKitPool {
             };
             XMLHttpRequest.prototype.send = function(...args) {
                 const startTime = performance.now();
+                window.__nomad_inflight_count = (window.__nomad_inflight_count || 0) + 1;
+                window.__nomad_last_network_activity = performance.now();
                 const xhr = this;
 
                 if (window.__nomad_mock_routes && window.__nomad_mock_routes.length) {
@@ -254,6 +263,8 @@ enum WebKitPool {
                             Object.defineProperty(xhr, 'status', { value: 0, configurable: true });
                             Object.defineProperty(xhr, 'statusText', { value: 'Blocked', configurable: true });
                             setTimeout(() => {
+                                window.__nomad_inflight_count = Math.max(0, (window.__nomad_inflight_count || 1) - 1);
+                                window.__nomad_last_network_activity = performance.now();
                                 xhr.dispatchEvent(new Event('readystatechange'));
                                 xhr.dispatchEvent(new ProgressEvent('error'));
                                 xhr.dispatchEvent(new ProgressEvent('loadend'));
@@ -276,6 +287,8 @@ enum WebKitPool {
                         Object.defineProperty(xhr, 'responseText', { value: mockBody, configurable: true });
                         Object.defineProperty(xhr, 'response', { value: mockBody, configurable: true });
                         setTimeout(() => {
+                            window.__nomad_inflight_count = Math.max(0, (window.__nomad_inflight_count || 1) - 1);
+                            window.__nomad_last_network_activity = performance.now();
                             xhr.dispatchEvent(new Event('readystatechange'));
                             xhr.dispatchEvent(new Event('load'));
                             xhr.dispatchEvent(new Event('loadend'));
@@ -285,6 +298,8 @@ enum WebKitPool {
                 }
 
                 this.addEventListener('loadend', function() {
+                    window.__nomad_inflight_count = Math.max(0, (window.__nomad_inflight_count || 1) - 1);
+                    window.__nomad_last_network_activity = performance.now();
                     const duration = Math.round(performance.now() - startTime);
                     sendNet({
                         method: xhr.__nomad_method || 'GET',

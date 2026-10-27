@@ -24,10 +24,10 @@ Nomad is an ultra-lightweight, native macOS WebKit browser engine featuring an e
 | `nomad_switch_tab` | Switch focused active tab by `id` | ~30 tokens |
 | `nomad_close_tab` | Close tab by `id` | ~30 tokens |
 | `nomad_navigate` | Navigate active tab to URL, or go back, forward, reload (`action: 'back'|'forward'|'reload'|'url'`, optional `allowLocalFiles: true` for `file://` URLs) | ~50 tokens |
-| `nomad_wait` | Wait for DOM stability (`mode: 'stability'`), CSS selector, URL (`mode: 'url'`), network idle (`mode: 'networkidle'`), navigation, or timeout | ~40 tokens |
+| `nomad_wait` | Wait for page settlement (`mode: 'auto'` default: automatically checks navigation, inflight requests, selector, and DOM stability), or specific mode (`stability`, `selector`, `networkidle`, `url`, `timeout`) | ~40 tokens |
 | `nomad_cookies` | Inspect, inject, or clear session cookies for authentication and state (`action: 'get'|'set'|'clear'`, optional `allDomains: true`). Acts on active tab's store (profile vs ephemeral incognito). | ~80 tokens |
 | `nomad_snapshot` | **Primary perception:** Dense semantic markdown of interactive & text elements (`li`, `p`, `td`, `th`), deterministic IDs, cross-origin iframe piercing (`f1:e1`), redaction, pagination, and JSON mode | ~400–2,000 tokens |
-| `nomad_action` | Atomic interactions (`click`, `hover`, `type`, `clear`, `press`, `selectOption`, `scroll`, `drag`, `highlight`, `upload`, `native_click`, `native_type`) with optional `native: true` (`isTrusted: true`) | ~40 tokens |
+| `nomad_action` | Atomic interactions (`click`, `right_click`, `context_menu`, `hover`, `type`, `clear`, `press`, `selectOption`, `scroll`, `drag` with `toElementId`, `highlight`, `upload`) with optional `native: true` (`isTrusted: true`) | ~40 tokens |
 | `nomad_upload` | Programmatic file upload to `<input type="file">`, label, or dropzone without modal system dialogs (`paths: string[]`) | ~40 tokens |
 | `nomad_downloads` | List recent file downloads, showing destination paths in `~/Downloads`, file sizes, and states | ~80 tokens |
 | `nomad_wait_for_download` | Await active or impending file download to complete; returns local disk path, size, and SHA-256 hash | ~60 tokens |
@@ -80,7 +80,7 @@ nomad_snapshot({ "mode": "json" })
 
 > [!WARNING]
 > **JSON Mode Token Cost Guard:**
-> Full JSON AST mode serializes coordinates, tags, roles, attributes, and bounds for every element (~110 tokens/element vs ~20 in text mode). On a 1,000-element page, JSON mode consumes ~100k+ tokens. To prevent runaway context exhaustion, `mode: "json"` defaults to a 250-element limit and includes a `warning` field. To intentionally bypass this clamp, pass `"unrestricted": true` (or `"force": true`). For normal agent loops, always use the default `mode: "text"`.
+> Full JSON AST mode serializes coordinates, tags, roles, attributes, and bounds for every element (~110 tokens/element vs ~20 in text mode). On a 1,000-element page, JSON mode consumes ~100k+ tokens. To prevent runaway context exhaustion, `mode: "json"` defaults to a 250-element limit and includes self-documenting metadata (`isClamped: true`, `unclampedTotal: <count>`, and an actionable `notice`). To intentionally bypass this clamp, pass `"unrestricted": true` (or `"force": true`). For normal agent loops, always use the default `mode: "text"`.
 
 > [!NOTE]
 > **URL Display & Filter Totals in Header:** Snapshot headers echo the current page URL for context grounding. `totalElements` (and `filteredTotal`) reflects the count of elements matching any active filters (`role`, `text`, `viewportOnly`), while `unfilteredTotal` returns the raw element count on the page.
@@ -104,16 +104,17 @@ nomad_action({
 
 Supported action types:
 - `click`: Triggers synthetic PointerDown, PointerUp, and Click events at the element's center. Occlusion-aware: if an overlay or modal backdrop covers the element, the click hits the topmost covering element unless `force: true` is passed.
+- `right_click` / `context_menu`: Dispatches native/synthetic right-click mouse events and `contextmenu` event to reveal custom and native context menus. Nodes supporting right-click menus are flagged with `(context-menu)` in `nomad_snapshot`.
 - `hover`: Dispatches pointerover/pointerenter/mousemove sequence to open dropdown menus or tooltips.
 - `type`: Focuses element and sets value via prototype setter (React 16+ and contentEditable compatible). Dispatches `input` events per keystroke. If text is empty/omitted and `submit: true` is passed, existing field content is preserved. To commit changes, pass `submit: true` (presses Enter), `blur: true`, or `change: true`.
 - `clear`: Wipes input/textarea/contentEditable value and triggers change events.
 - `press`: Simulates key press or modifier chord (e.g. `key: "Enter"`, `key: "Meta+A"`, `key: "Escape"`). Validates key names against standard named keys (`Enter`, `Tab`, `Escape`, `Backspace`, `Delete`, `ArrowUp/Down/Left/Right`, `Space`, function keys `F1`–`F12`, and modifier chords); rejects unknown key names.
 - `selectOption`: Chooses native HTML `<select>` dropdown option by `optionValue` or `optionText`. For custom ARIA/div dropdowns (e.g. Radix, HeadlessUI, React-Select), click the dropdown trigger element, wait/snapshot, and click the option element.
 - `scroll`: Scrolls the viewport by `scrollDeltaY` pixels (e.g. `300` to scroll down, `-300` to scroll up) or `scrollDeltaX`.
-- `drag`: Dispatches standard HTML5 drag-and-drop sequence (`dragstart`, `dragover`, `drop`, `dragend`) to destination (`toX`, `toY`).
+- `drag`: Dispatches standard HTML5 drag-and-drop sequence (`dragstart`, `dragenter`, `dragover`, `drop`, `dragend`). Supports element-to-element drag directly via `toElementId` (e.g. `{ "type": "drag", "elementId": "e3", "toElementId": "e8" }` or `toTarget`), or explicit destination pixel coordinates (`toX`, `toY`).
 - `highlight`: Briefly flashes a high-contrast visual outline over the element for visual confirmation.
 - `upload`: Programmatically injects local files into `<input type="file">`, associated `<label>`, or dropzone containers without triggering blocking macOS `NSOpenPanel` sheets (`paths: string[]`). Automatically validates file existence on disk before dispatch.
-- **Native Hardware Input (`native: true` | `isTrusted: true`)**: Pass `"native": true` (or use `native_click`, `native_type`, `native_press`, `native_drag`) on any action to bypass synthetic JS dispatch and route through macOS AppKit and CoreGraphics HID queues directly into WebKit's window event pipeline. Produces DOM events with `event.isTrusted === true`, which is required for Canvas-based web apps (Figma, Google Docs), WebGL 3D scenes, Monaco/VSCode web editors, and anti-bot verification sliders.
+- **Native Hardware Input (`native: true` | `isTrusted: true`)**: Pass `"native": true` (or use `native_click`, `native_right_click`, `native_type`, `native_press`, `native_drag`) on any action to bypass synthetic JS dispatch and route through macOS AppKit and CoreGraphics HID queues directly into WebKit's window event pipeline. Produces DOM events with `event.isTrusted === true`, which is required for Canvas-based web apps (Figma, Google Docs), WebGL 3D scenes, Monaco/VSCode web editors, and anti-bot verification sliders.
 
 > [!TIP]
 > **Cross-Origin Sub-Frame Piercing (Stripe, OAuth, reCAPTCHA):**
@@ -152,9 +153,10 @@ This renders numbered visual badges matching the snapshot references (`[1]`, `[2
 > Modern landing pages (such as Framer or WebGL showcases) frequently utilize initial entrance fade-in animations (`opacity: 0 -> 1` over 500–1000ms). When observing such pages, call `nomad_wait({ mode: "timeout", durationMs: 1200 })` or wait for stability before capturing the reference screenshot, and visually inspect the frame before proceeding.
 >
 > **Choosing the Right Wait Mode:**
+> - `mode: "auto"` (Default): The smart auto-wait pipeline. Automatically performs: (1) Navigation check (waits if page is actively loading), (2) Target readiness check (if selector is provided, awaits node mounting), (3) Inflight network check (awaits active fetch/XHR requests settling with a 200ms quiet window, capped at 2.5s to avoid polling deadlocks), and (4) DOM mutation stability check.
 > - `mode: "stability"`: Waits for ongoing DOM mutation bursts to quiet down (great after clicks, modal opens, or accordion transitions). It settles once active churn stops; it does not wait for delayed future timers.
 > - `mode: "selector"`: Best for async UI renders or API fetches — returns immediately once the target node mounts in the DOM. Automatically pierces open Shadow DOM roots and nested same-origin frames.
-> - `mode: "networkidle"`: Best for data-heavy SPAs that perform background fetch/XHR queries before rendering content. Waits until in-flight requests settle for 500ms (for pages with recurring polling intervals like `setInterval(fetch, 200ms)`, use `stability` or `selector` instead).
+> - `mode: "networkidle"`: Best for data-heavy SPAs that perform background fetch/XHR queries before rendering content. Waits until in-flight requests settle for 500ms (for pages with recurring polling intervals like `setInterval(fetch, 200ms)`, use `auto` or `selector` instead).
 > - `mode: "navigation"` or `mode: "url"`: Best when awaiting full-page redirects or SPA history transitions. Matches against both raw and percent-decoded URLs (e.g. `Special:Search` matches `Special%3ASearch`). When called without a URL pattern, waits for active navigation loading to complete or URL to change, preventing premature returns.
 
 ---

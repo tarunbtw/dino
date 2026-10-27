@@ -26,6 +26,9 @@ struct NomadSnapshot: Codable {
     let summary: String
     var tokenEstimate: Int?
     var warning: String?
+    var isClamped: Bool?
+    var unclampedTotal: Int?
+    var notice: String?
 }
 
 /// A single interactive element discovered on the page.
@@ -42,6 +45,7 @@ struct NomadElement: Codable {
     var rank: String?
     var isObscured: Bool?
     var inViewport: Bool?
+    var hasContextMenu: Bool?
     var disabled: Bool?
     var checked: Bool?
     var selected: Bool?
@@ -66,10 +70,13 @@ struct NomadBounds: Codable {
 
 /// Action request issued by an AI agent or DevX tool.
 struct NomadAction: Codable {
-    var action: String = "click" // "click", "hover", "type", "clear", "press", "selectOption", "scroll", "drag", "highlight", "upload", "native_click", "native_type", ...
+    var action: String = "click" // "click", "hover", "type", "clear", "press", "selectOption", "scroll", "drag", "highlight", "upload", "right_click", "context_menu", "native_click", ...
     var target: String? // e.g. "e1", "e2", or CSS selector fallback
     var selector: String?
     var elementId: String?
+    var toTarget: String? // e.g. "e8" or CSS selector destination for drag
+    var toElementId: String?
+    var toSelector: String?
     var text: String?
     var key: String? // "Enter", "Escape", "Tab", or chords "Meta+A", "Control+Enter"
     var direction: String? // "up", "down", "left", "right"
@@ -96,11 +103,14 @@ struct NomadAction: Codable {
         paths ?? []
     }
 
-    init(action: String = "click", target: String? = nil, selector: String? = nil, elementId: String? = nil, text: String? = nil, key: String? = nil, direction: String? = nil, amount: CGFloat? = nil, submit: Bool? = nil, blur: Bool? = nil, change: Bool? = nil, force: Bool? = nil, native: Bool? = nil, x: CGFloat? = nil, y: CGFloat? = nil, toX: CGFloat? = nil, toY: CGFloat? = nil, scrollDeltaY: CGFloat? = nil, scrollDeltaX: CGFloat? = nil, optionValue: String? = nil, optionText: String? = nil, modifiers: [String]? = nil, paths: [String]? = nil, dialogPolicy: String? = nil, dialogResponse: String? = nil) {
+    init(action: String = "click", target: String? = nil, selector: String? = nil, elementId: String? = nil, toTarget: String? = nil, toElementId: String? = nil, toSelector: String? = nil, text: String? = nil, key: String? = nil, direction: String? = nil, amount: CGFloat? = nil, submit: Bool? = nil, blur: Bool? = nil, change: Bool? = nil, force: Bool? = nil, native: Bool? = nil, x: CGFloat? = nil, y: CGFloat? = nil, toX: CGFloat? = nil, toY: CGFloat? = nil, scrollDeltaY: CGFloat? = nil, scrollDeltaX: CGFloat? = nil, optionValue: String? = nil, optionText: String? = nil, modifiers: [String]? = nil, paths: [String]? = nil, dialogPolicy: String? = nil, dialogResponse: String? = nil) {
         self.action = action
         self.target = target ?? elementId ?? selector
         self.selector = selector
         self.elementId = elementId
+        self.toTarget = toTarget ?? toElementId ?? toSelector
+        self.toElementId = toElementId
+        self.toSelector = toSelector
         self.text = text
         self.key = key
         self.direction = direction
@@ -125,7 +135,7 @@ struct NomadAction: Codable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case action, type, target, elementId, selector, text, key, direction, amount
+        case action, type, target, elementId, selector, toTarget, toElementId, toSelector, text, key, direction, amount
         case submit, blur, change, force, native, isNative, hardware, x, y, toX, toY
         case scrollDeltaY, deltaY, scrollDeltaX, deltaX, optionValue, optionText, modifiers
         case paths, path, files, file
@@ -138,8 +148,9 @@ struct NomadAction: Codable {
             throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Missing required 'type' or 'action' field in action object"))
         }
         let validActions: Set<String> = [
-            "click", "hover", "type", "clear", "press", "selectoption", "scroll", "drag", "highlight", "upload",
-            "native_click", "native_hover", "native_type", "native_press", "native_drag"
+            "click", "right_click", "rightclick", "context_menu", "contextmenu",
+            "hover", "type", "clear", "press", "selectoption", "scroll", "drag", "highlight", "upload",
+            "native_click", "native_right_click", "native_context_menu", "native_hover", "native_type", "native_press", "native_drag"
         ]
         guard validActions.contains(rawAction.lowercased()) else {
             throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Unknown action type '\(rawAction)'"))
@@ -148,6 +159,9 @@ struct NomadAction: Codable {
         self.selector = try c.decodeIfPresent(String.self, forKey: .selector)
         self.elementId = try c.decodeIfPresent(String.self, forKey: .elementId)
         self.target = try c.decodeIfPresent(String.self, forKey: .target) ?? self.elementId ?? self.selector
+        self.toSelector = try c.decodeIfPresent(String.self, forKey: .toSelector)
+        self.toElementId = try c.decodeIfPresent(String.self, forKey: .toElementId)
+        self.toTarget = try c.decodeIfPresent(String.self, forKey: .toTarget) ?? self.toElementId ?? self.toSelector
         self.text = try c.decodeIfPresent(String.self, forKey: .text)
         self.key = try c.decodeIfPresent(String.self, forKey: .key)
         self.submit = try c.decodeIfPresent(Bool.self, forKey: .submit)
@@ -200,6 +214,9 @@ struct NomadAction: Codable {
         try c.encodeIfPresent(target, forKey: .target)
         try c.encodeIfPresent(selector, forKey: .selector)
         try c.encodeIfPresent(elementId, forKey: .elementId)
+        try c.encodeIfPresent(toTarget, forKey: .toTarget)
+        try c.encodeIfPresent(toElementId, forKey: .toElementId)
+        try c.encodeIfPresent(toSelector, forKey: .toSelector)
         try c.encodeIfPresent(text, forKey: .text)
         try c.encodeIfPresent(key, forKey: .key)
         try c.encodeIfPresent(direction, forKey: .direction)
@@ -724,6 +741,61 @@ extension Tab {
                 hasPendingDialog: self.pendingDialog != nil
             )
 
+        case "right_click", "rightclick", "context_menu", "contextmenu":
+            guard let pt = targetPoint else {
+                return NomadActionResult(success: false, message: "Missing target element or (x, y) coordinates for native right click", elementId: action.target, code: "MISSING_TARGET")
+            }
+            let winPoint = webView.convert(pt, to: nil)
+            let screenPoint = webView.window?.convertPoint(toScreen: winPoint) ?? winPoint
+            let primaryScreenH = NSScreen.screens.first?.frame.height ?? 1080
+            let cgPos = CGPoint(x: screenPoint.x, y: primaryScreenH - screenPoint.y)
+
+            let downEvent = NSEvent.mouseEvent(
+                with: .rightMouseDown,
+                location: winPoint,
+                modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: windowNumber,
+                context: nil,
+                eventNumber: 0,
+                clickCount: 1,
+                pressure: 1.0
+            )
+            let upEvent = NSEvent.mouseEvent(
+                with: .rightMouseUp,
+                location: winPoint,
+                modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime + 0.03,
+                windowNumber: windowNumber,
+                context: nil,
+                eventNumber: 0,
+                clickCount: 1,
+                pressure: 0.0
+            )
+
+            if let cgDown = CGEvent(mouseEventSource: nil, mouseType: .rightMouseDown, mouseCursorPosition: cgPos, mouseButton: .right) {
+                cgDown.postToPid(ProcessInfo.processInfo.processIdentifier)
+            }
+            if let down = downEvent { webView.rightMouseDown(with: down) }
+            try? await Task.sleep(nanoseconds: 35_000_000)
+
+            if let cgUp = CGEvent(mouseEventSource: nil, mouseType: .rightMouseUp, mouseCursorPosition: cgPos, mouseButton: .right) {
+                cgUp.postToPid(ProcessInfo.processInfo.processIdentifier)
+            }
+            if let up = upEvent { webView.rightMouseUp(with: up) }
+            try? await Task.sleep(nanoseconds: 30_000_000)
+
+            return NomadActionResult(
+                success: true,
+                message: "Native context menu (right click) dispatched at (\(Int(pt.x)), \(Int(pt.y))) with isTrusted: true",
+                elementId: action.target,
+                code: "SUCCESS",
+                native: true,
+                isTrusted: true,
+                lastDialog: self.lastDialog,
+                hasPendingDialog: self.pendingDialog != nil
+            )
+
         case "hover":
             guard let pt = targetPoint else {
                 return NomadActionResult(success: false, message: "Missing target element or (x, y) coordinates for hover", elementId: action.target, code: "MISSING_TARGET", lastDialog: self.lastDialog, hasPendingDialog: self.pendingDialog != nil)
@@ -810,10 +882,28 @@ extension Tab {
             guard let fromPt = targetPoint else {
                 return NomadActionResult(success: false, message: "No target element or coordinates specified for drag action", elementId: action.target, code: "MISSING_TARGET")
             }
-            guard let toX = action.toX, let toY = action.toY else {
-                return NomadActionResult(success: false, message: "Missing destination coordinates (toX, toY) for native drag", elementId: action.target, code: "MISSING_DESTINATION")
+            var destPoint: CGPoint? = nil
+            if let tx = action.toX, let ty = action.toY {
+                destPoint = CGPoint(x: tx, y: ty)
+            } else if let toTarget = (action.toTarget ?? action.toElementId ?? action.toSelector)?.trimmingCharacters(in: .whitespacesAndNewlines), !toTarget.isEmpty {
+                let escaped = toTarget.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+                let script = "JSON.stringify(window.__nomad.getElementViewportRect(\"\(escaped)\"))"
+                if let rectStr = try? await webView.evaluateJavaScript(script) as? String,
+                   let rectData = rectStr.data(using: .utf8),
+                   let rect = try? JSONSerialization.jsonObject(with: rectData) as? [String: Any],
+                   let x = (rect["left"] as? NSNumber)?.doubleValue,
+                   let y = (rect["top"] as? NSNumber)?.doubleValue,
+                   let w = (rect["width"] as? NSNumber)?.doubleValue,
+                   let h = (rect["height"] as? NSNumber)?.doubleValue,
+                   (w > 0 || h > 0) {
+                    destPoint = CGPoint(x: x + w / 2.0, y: y + h / 2.0)
+                } else {
+                    return NomadActionResult(success: false, message: "Cannot execute native drag: destination element '\(toTarget)' not found or has zero geometry in viewport.", elementId: toTarget, code: "DESTINATION_NOT_FOUND")
+                }
             }
-            let toPt = CGPoint(x: toX, y: toY)
+            guard let toPt = destPoint else {
+                return NomadActionResult(success: false, message: "Missing destination coordinates (toX, toY) or destination element (toElementId/toTarget) for native drag", elementId: action.target, code: "MISSING_DESTINATION")
+            }
             let fromWin = webView.convert(fromPt, to: nil)
             let toWin = webView.convert(toPt, to: nil)
             let screenFromPoint = webView.window?.convertPoint(toScreen: fromWin) ?? fromWin
@@ -848,7 +938,8 @@ extension Tab {
 
             // 2. Dispatch HTML5 Drag & Drop pipeline (dragstart -> dragenter -> dragover -> drop -> dragend)
             let escapedTarget = (action.target ?? "").replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
-            let dragScript = "JSON.stringify(window.__nomad.dispatchHtml5Drag(\"\(escapedTarget)\", \(fromPt.x), \(fromPt.y), \(toPt.x), \(toPt.y)))"
+            let escapedToTarget = (action.toTarget ?? action.toElementId ?? "").replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+            let dragScript = "JSON.stringify(window.__nomad.dispatchHtml5Drag(\"\(escapedTarget)\", \(fromPt.x), \(fromPt.y), \(toPt.x), \(toPt.y), null, \"\(escapedToTarget)\"))"
             _ = try? await webView.evaluateJavaScript(dragScript)
 
             // 3. Native mouse up (CoreGraphics & AppKit)
@@ -858,7 +949,8 @@ extension Tab {
             if let up = NSEvent.mouseEvent(with: .leftMouseUp, location: toWin, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 0.0) {
                 webView.mouseUp(with: up)
             }
-            return NomadActionResult(success: true, message: "Native drag executed from (\(Int(fromPt.x)), \(Int(fromPt.y))) to (\(Int(toX)), \(Int(toY))) with isTrusted: true", elementId: action.target, code: "SUCCESS", native: true, isTrusted: true)
+            let destDesc = (action.toTarget ?? action.toElementId) != nil ? "'\(action.toTarget ?? action.toElementId!)' (\(Int(toPt.x)), \(Int(toPt.y)))" : "(\(Int(toPt.x)), \(Int(toPt.y)))"
+            return NomadActionResult(success: true, message: "Native drag executed from '\(action.target ?? "element")' (\(Int(fromPt.x)), \(Int(fromPt.y))) to \(destDesc) with isTrusted: true", elementId: action.target, code: "SUCCESS", native: true, isTrusted: true)
 
         case "type":
             guard let text = action.text else {
