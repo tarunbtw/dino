@@ -311,23 +311,22 @@ extension NomadAgentServer {
             }
             let serialized = String(data: bodyData, encoding: .utf8) ?? "{}"
             let js = "window.__nomad_mock_routes = (window.__nomad_mock_routes || []).concat([\(serialized)]);"
-            activeTab.webView.evaluateJavaScript(js) { _, _ in }
+            _ = try? await activeTab.webView.evaluateJavaScript(js)
             sendJSON(connection: connection, object: ["success": true, "mockedUrl": mockUrl], origin: origin)
             return true
 
         case ("GET", "/network/mock"):
             guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin) else { return true }
-            activeTab.webView.evaluateJavaScript("JSON.stringify(window.__nomad_mock_routes || [])") { res, _ in
-                let jsonStr = (res as? String) ?? "[]"
-                let data = Data(jsonStr.utf8)
-                let array = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] ?? []
-                self.sendJSON(connection: connection, object: ["success": true, "mocks": array], origin: origin)
-            }
+            let res = try? await activeTab.webView.evaluateJavaScript("JSON.stringify(window.__nomad_mock_routes || [])")
+            let jsonStr = (res as? String) ?? "[]"
+            let data = Data(jsonStr.utf8)
+            let array = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] ?? []
+            sendJSON(connection: connection, object: ["success": true, "mocks": array], origin: origin)
             return true
 
         case ("DELETE", "/network/mock"):
             guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin) else { return true }
-            activeTab.webView.evaluateJavaScript("window.__nomad_mock_routes = [];") { _, _ in }
+            _ = try? await activeTab.webView.evaluateJavaScript("window.__nomad_mock_routes = [];")
             sendJSON(connection: connection, object: ["success": true, "cleared": true], origin: origin)
             return true
 
@@ -354,23 +353,22 @@ extension NomadAgentServer {
             }
             let rulesJson = (try? JSONSerialization.data(withJSONObject: rules)).flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
             let js = "window.__nomad_mock_routes = (window.__nomad_mock_routes || []).concat(\(rulesJson));"
-            activeTab.webView.evaluateJavaScript(js) { _, _ in }
+            _ = try? await activeTab.webView.evaluateJavaScript(js)
             sendJSON(connection: connection, object: ["success": true, "blocked": true, "count": rules.count, "url": blockUrl], origin: origin)
             return true
 
         case ("GET", "/network/block"):
             guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin) else { return true }
-            activeTab.webView.evaluateJavaScript("JSON.stringify((window.__nomad_mock_routes || []).filter(m => m && m.block))") { res, _ in
-                let jsonStr = (res as? String) ?? "[]"
-                let data = Data(jsonStr.utf8)
-                let array = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] ?? []
-                self.sendJSON(connection: connection, object: ["success": true, "blockedRules": array, "count": array.count], origin: origin)
-            }
+            let res = try? await activeTab.webView.evaluateJavaScript("JSON.stringify((window.__nomad_mock_routes || []).filter(m => m && m.block))")
+            let jsonStr = (res as? String) ?? "[]"
+            let data = Data(jsonStr.utf8)
+            let array = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] ?? []
+            sendJSON(connection: connection, object: ["success": true, "blockedRules": array, "count": array.count], origin: origin)
             return true
 
         case ("DELETE", "/network/block"):
             guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin) else { return true }
-            activeTab.webView.evaluateJavaScript("window.__nomad_mock_routes = (window.__nomad_mock_routes || []).filter(m => !m || !m.block);") { _, _ in }
+            _ = try? await activeTab.webView.evaluateJavaScript("window.__nomad_mock_routes = (window.__nomad_mock_routes || []).filter(m => !m || !m.block);")
             sendJSON(connection: connection, object: ["success": true, "cleared": true], origin: origin)
             return true
 

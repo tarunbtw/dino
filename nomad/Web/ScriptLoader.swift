@@ -8,13 +8,13 @@
 import Foundation
 
 /// Fast, cached loader for external JavaScript resources bundled with Nomad.
-enum ScriptLoader {
+nonisolated enum ScriptLoader {
     private static var cache: [String: String] = [:]
     private static let lock = NSLock()
 
     /// Loads the specified JavaScript file by name (without .js extension).
     /// Searches Bundle.main resources, bundle subdirectories, and development fallbacks.
-    static func load(named name: String) -> String {
+    nonisolated static func load(named name: String) -> String {
         lock.lock()
         defer { lock.unlock() }
 

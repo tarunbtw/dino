@@ -681,7 +681,7 @@ final class NomadAgentServer: ObservableObject {
 }
 
 /// Thread-safe registry and broadcaster for connected Server-Sent Events (SSE) clients.
-final class EventStreamBroadcaster: @unchecked Sendable {
+nonisolated final class EventStreamBroadcaster: @unchecked Sendable {
     private var eventConnections = [ObjectIdentifier: NWConnection]()
     private let eventLock = NSLock()
 

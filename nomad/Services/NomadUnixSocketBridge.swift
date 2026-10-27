@@ -139,7 +139,7 @@ final class NomadUnixSocketBridge: @unchecked Sendable {
         addr.sun_family = sa_family_t(AF_UNIX)
         let maxPathLen = MemoryLayout.size(ofValue: addr.sun_path) - 1
         socketPath.withCString { cstr in
-            _ = withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
+            withUnsafeMutablePointer(to: &addr.sun_path) { ptr in
                 let raw = UnsafeMutableRawPointer(ptr).assumingMemoryBound(to: CChar.self)
                 memset(raw, 0, maxPathLen + 1)
                 strncpy(raw, cstr, maxPathLen)

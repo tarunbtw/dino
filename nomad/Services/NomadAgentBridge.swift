@@ -1032,7 +1032,7 @@ extension Tab {
         }
 
         let parts = chord.split(separator: "+").map { String($0).trimmingCharacters(in: .whitespaces) }
-        var mainKey = parts.last ?? chord
+        let mainKey = parts.last ?? chord
         if parts.count > 1 {
             for modPart in parts.dropLast() {
                 let m = modPart.lowercased()
