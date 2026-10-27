@@ -13,12 +13,10 @@ cask "nomad" do
   binary "#{appdir}/Nomad.app/Contents/MacOS/nomad", target: "nomad"
   binary "#{appdir}/Nomad.app/Contents/MacOS/nomad", target: "nomadd"
 
-  postflight do
-    system_command "/usr/bin/xattr",
-                   args: ["-dr", "com.apple.quarantine", "#{appdir}/Nomad.app"],
-                   sudo: false
-  rescue StandardError
-    # Ignore if quarantine attribute is absent
+  postflight_steps do
+    on_macos do
+      run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{appdir}}/Nomad.app"]
+    end
   end
 
   zap trash: [
