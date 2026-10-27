@@ -1,0 +1,93 @@
+//
+//  Tab+Telemetry.swift
+//  nomad
+//
+//  Created by tarun on 10/10/26.
+//
+
+import WebKit
+
+// MARK: - Script Message Handler & Bridge
+final class WeakScriptMessageHandler: NSObject, WKScriptMessageHandler {
+    private weak var delegate: WKScriptMessageHandler?
+
+    init(delegate: WKScriptMessageHandler) {
+        self.delegate = delegate
+        super.init()
+    }
+
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        delegate?.userContentController(userContentController, didReceive: message)
+    }
+}
+
+extension Tab: WKScriptMessageHandler {
+    nonisolated func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        Task { @MainActor [weak self] in
+            self?.handleScriptMessage(name: message.name, body: message.body)
+        }
+    }
+
+    func handleScriptMessage(name: String, body: Any) {
+        if name == "nomadConsole", let dict = body as? [String: Any] {
+            let lvlStr = dict["level"] as? String ?? "log"
+            let msg = dict["message"] as? String ?? ""
+            let level: ConsoleEntry.Level
+            switch lvlStr {
+            case "error": level = .error
+            case "warn": level = .warn
+            case "info": level = .info
+            default: level = .log
+            }
+            appendConsoleEntry(level: level, message: msg)
+        } else if name == "nomadInspect", let dict = body as? [String: Any] {
+            if dict["cancel"] as? Bool == true {
+                self.isInspectorActive = false
+                return
+            }
+            let selector = dict["selector"] as? String ?? ""
+            let tag = dict["tag"] as? String ?? ""
+            let idAttr = dict["idAttr"] as? String ?? ""
+            let classes = dict["classes"] as? String ?? ""
+            let text = dict["text"] as? String ?? ""
+            let width = dict["width"] as? Int ?? 0
+            let height = dict["height"] as? Int ?? 0
+            let agentId = dict["agentId"] as? String
+            self.inspectedElementInfo = InspectedElementInfo(
+                selector: selector,
+                tag: tag,
+                idAttr: idAttr,
+                classes: classes,
+                text: text,
+                width: width,
+                height: height,
+                agentId: agentId
+            )
+            self.isInspectorActive = false
+        } else if name == "nomadNetwork", let dict = body as? [String: Any] {
+            let method = dict["method"] as? String ?? "GET"
+            let url = dict["url"] as? String ?? ""
+            let status = dict["status"] as? Int ?? 200
+            let duration = dict["duration"] as? Int ?? 0
+            let type = dict["type"] as? String ?? "fetch"
+            let error = dict["error"] as? String
+            let entry = NetworkEntry(method: method, url: url, status: status, durationMs: duration, type: type, error: error)
+            if self.networkEntries.count > 400 {
+                self.networkEntries.removeFirst(50)
+            }
+            self.networkEntries.append(entry)
+        } else if name == "nomadZapper", let dict = body as? [String: Any] {
+            if dict["cancel"] as? Bool == true {
+                self.isZapperActive = false
+                return
+            }
+            guard let currentHost = self.url?.host?.lowercased(), !currentHost.isEmpty else { return }
+            if let sel = dict["selector"] as? String {
+                ZapperStore.shared.addSelector(sel, for: currentHost)
+            }
+        } else if name == "nomadFrameBridge" {
+            // Frame registration and lifecycle message from sub-frame execution context
+        }
+    }
+
+}
