@@ -43,6 +43,10 @@ if [ ! -d "$BUILT_APP" ]; then
   exit 1
 fi
 
+echo "==> Bundling JavaScript runtime scripts..."
+mkdir -p "$BUILT_APP/Contents/Resources/Scripts"
+cp -R nomad/Resources/Scripts/* "$BUILT_APP/Contents/Resources/Scripts/"
+
 echo "==> Signing application bundle with entitlements..."
 codesign --force --deep --sign - --entitlements nomad/nomad.entitlements "$BUILT_APP"
 

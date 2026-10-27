@@ -1,25 +1,17 @@
 cask "nomad" do
-  version "1.0.0"
-  sha256 :no_check
+  version "0.1"
+  sha256 :no_check # Replace with sha256 checksum after creating the zip archive
 
-  url "https://github.com/tarunbtw/nomad/releases/download/v#{version}/Nomad.zip"
+  url "https://github.com/tarunbtw/nomad/releases/download/v#{version}/Nomad-#{version}.zip"
   name "Nomad"
   desc "Ultra-lightweight native macOS WebKit browser engine and agent runtime"
   homepage "https://github.com/tarunbtw/nomad"
 
-  depends_on macos: ">= :ventura"
+  depends_on macos: :ventura
 
-  app "nomad.app", target: "Nomad.app"
+  app "Nomad.app"
   binary "#{appdir}/Nomad.app/Contents/MacOS/nomad", target: "nomad"
   binary "#{appdir}/Nomad.app/Contents/MacOS/nomad", target: "nomadd"
-
-  postflight do
-    system_command "/usr/bin/xattr",
-                   args: ["-r", "-d", "com.apple.quarantine", "#{appdir}/Nomad.app"],
-                   sudo: false
-  rescue StandardError
-    # Ignore if quarantine attribute is absent
-  end
 
   zap trash: [
     "~/.nomad",

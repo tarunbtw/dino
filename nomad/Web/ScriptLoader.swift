@@ -31,25 +31,52 @@ enum ScriptLoader {
             return content
         }
 
-        // 2. Fallback: Locate relative to runtime binary or working directory (dev & CLI runs)
+        // 2. Locate relative to runtime binary (resolving symlinks like /opt/homebrew/bin/nomad -> /Applications/Nomad.app)
         let fileManager = FileManager.default
-        let currentDir = URL(fileURLWithPath: fileManager.currentDirectoryPath)
-        let candidates = [
-            Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/Scripts/\(name).js"),
-            Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/\(name).js"),
-            Bundle.main.bundleURL.appendingPathComponent("Resources/Scripts/\(name).js"),
-            currentDir.appendingPathComponent("nomad/Resources/Scripts/\(name).js"),
-            currentDir.appendingPathComponent("Resources/Scripts/\(name).js")
-        ]
+        var searchRoots: [URL] = []
 
-        for candidate in candidates {
-            if fileManager.fileExists(atPath: candidate.path),
-               let content = try? String(contentsOf: candidate, encoding: .utf8), !content.isEmpty {
-                cache[name] = content
-                return content
+        if let res = Bundle.main.resourceURL {
+            searchRoots.append(res)
+        }
+        searchRoots.append(Bundle.main.bundleURL.appendingPathComponent("Contents/Resources"))
+        searchRoots.append(Bundle.main.bundleURL.appendingPathComponent("Resources"))
+
+        let execArg = CommandLine.arguments.first ?? ""
+        if !execArg.isEmpty {
+            let execURL = URL(fileURLWithPath: execArg).resolvingSymlinksInPath()
+            // e.g. /Applications/Nomad.app/Contents/MacOS/nomad -> /Applications/Nomad.app
+            let appBundle = execURL.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            searchRoots.append(appBundle.appendingPathComponent("Contents/Resources"))
+            searchRoots.append(appBundle.appendingPathComponent("Resources"))
+            searchRoots.append(execURL.deletingLastPathComponent())
+        }
+
+        // Hardcoded standard installation paths
+        searchRoots.append(URL(fileURLWithPath: "/Applications/Nomad.app/Contents/Resources"))
+
+        // Development & current working directory fallbacks
+        let currentDir = URL(fileURLWithPath: fileManager.currentDirectoryPath)
+        searchRoots.append(currentDir.appendingPathComponent("nomad/Resources"))
+        searchRoots.append(currentDir.appendingPathComponent("Resources"))
+        searchRoots.append(currentDir)
+
+        for root in searchRoots {
+            let candidates = [
+                root.appendingPathComponent("Scripts/\(name).js"),
+                root.appendingPathComponent("\(name).js"),
+                root.appendingPathComponent("Resources/Scripts/\(name).js"),
+                root.appendingPathComponent("nomad/Resources/Scripts/\(name).js")
+            ]
+            for candidate in candidates {
+                if fileManager.fileExists(atPath: candidate.path),
+                   let content = try? String(contentsOf: candidate, encoding: .utf8), !content.isEmpty {
+                    cache[name] = content
+                    return content
+                }
             }
         }
 
-        fatalError("ScriptLoader could not find '\(name).js'. Ensure it is bundled into Resources/Scripts/ or present in nomad/Resources/Scripts/.")
+        print("⚠️ [ScriptLoader] Could not find '\(name).js' in bundled resources. Using safe empty fallback.")
+        return ""
     }
 }

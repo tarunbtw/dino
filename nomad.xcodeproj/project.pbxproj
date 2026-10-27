@@ -53,6 +53,7 @@
 				8DA21326307A734C0088406C /* Sources */,
 				8DA21327307A734C0088406C /* Frameworks */,
 				8DA21328307A734C0088406C /* Resources */,
+				8DA21399307A734C0088406C /* Copy Web Resources */,
 			);
 			buildRules = (
 			);
@@ -113,6 +114,27 @@
 			);
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		8DA21399307A734C0088406C /* Copy Web Resources */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Copy Web Resources";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "mkdir -p \"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/Scripts\"\ncp -R \"${SRCROOT}/nomad/Resources/Scripts/\"* \"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/Scripts/\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
 		8DA21335307A734C0088406C /* Debug configuration for PBXProject "nomad" */ = {
