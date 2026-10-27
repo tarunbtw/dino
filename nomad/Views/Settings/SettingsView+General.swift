@@ -108,26 +108,6 @@ extension SettingsView {
                 }
             }
 
-            // Welcome Experience
-            card(title: "Welcome Experience") {
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Replay Welcome Screen")
-                            .font(.system(size: 13, weight: .medium))
-                        Text("View the first-run introduction screen and core principles.")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Button("Replay") {
-                        withAnimation(.easeInOut(duration: 0.25)) {
-                            settings.hasCompletedOnboarding = false
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                }
-            }
 
             // Software Updates
             card(title: "Software Updates") {

@@ -67,7 +67,7 @@ struct OnboardingView: View {
                             .foregroundStyle(.primary)
                             .tracking(0.3)
 
-                        Text("A fast, lightweight and agentic browser for macOS")
+                        Text("A native macOS browser built for humans and agents")
                             .font(.system(size: 13, weight: .regular))
                             .foregroundStyle(.secondary)
                     }
@@ -75,12 +75,12 @@ struct OnboardingView: View {
                     .offset(y: appearStage >= 2 ? 0 : 10)
 
                     // Stage 3: Ethos & Core Principles
-                    VStack(spacing: 6) {
-                        Text("Built with Swift and WebKit.")
-                        Text("Bare,fast and zero telemetry.")
+                    VStack(spacing: 4) {
+                        Text("Engineered with Swift and WebKit.")
+                        Text("Lightweight, private, and zero telemetry.")
                     }
                     .font(.system(size: 13, weight: .regular))
-                    .foregroundStyle(.secondary.opacity(0.9))
+                    .foregroundStyle(.secondary.opacity(0.85))
                     .multilineTextAlignment(.center)
                     .lineSpacing(4)
                     .padding(.horizontal, 32)

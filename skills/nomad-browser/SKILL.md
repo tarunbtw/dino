@@ -179,7 +179,7 @@ Nomad's embedded local server (`127.0.0.1:9222`) is protected by bearer token au
   TOKEN=$(cat ~/.nomad/agent-token)
   curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:9222/snapshot
   ```
-- **Health & Liveness Probes:** `GET /status` returns `{ "nomad": "active", "version": "1.0", "port": 9222, "authRequired": true }` unauthenticated. When authenticated with your Bearer token, it returns full engine status: `tabsCount`, `tabCount`, `activeTabId`, `activeURL`, `activeUrl`, `activeTitle`, `capabilities`, and `lastDialog`.
+- **Health & Liveness Probes:** `GET /status` returns `{ "nomad": "active", "version": "0.1", "port": 9222, "authRequired": true }` unauthenticated. When authenticated with your Bearer token, it returns full engine status: `tabsCount`, `tabCount`, `activeTabId`, `activeURL`, `activeUrl`, `activeTitle`, `capabilities`, and `lastDialog`.
 
 ---
 

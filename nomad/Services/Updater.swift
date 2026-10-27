@@ -63,7 +63,7 @@ final class Updater: ObservableObject {
     @Published private(set) var statusMessage: String = ""
 
     static var currentVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1"
     }
 
     static var currentBuild: Int {
