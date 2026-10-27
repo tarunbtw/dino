@@ -98,10 +98,13 @@ extension NomadAgentServer {
                     }
                 }
                 if superseded {
+                    NomadRouteCache.shared.record(eventType: "navigationCancelled", message: "Navigation superseded for \(url.absoluteString)", tabId: activeTab.id.uuidString)
                     sendJSON(connection: connection, object: ["success": false, "cancelled": true, "code": "NAVIGATION_SUPERSEDED", "reason": "superseded", "navigatedTo": url.absoluteString], origin: origin)
                 } else if let navError = navError {
+                    NomadRouteCache.shared.record(eventType: "navigationError", message: "Navigation failed for \(url.absoluteString): \(navError)", tabId: activeTab.id.uuidString)
                     sendJSON(connection: connection, object: ["success": false, "error": navError, "code": "NAVIGATION_FAILED", "navigatedTo": url.absoluteString], origin: origin)
                 } else {
+                    NomadRouteCache.shared.record(eventType: "navigation", message: "Navigated to \(url.absoluteString)", tabId: activeTab.id.uuidString)
                     sendJSON(connection: connection, object: ["success": true, "navigatedTo": url.absoluteString], origin: origin)
                 }
             }

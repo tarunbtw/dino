@@ -69,6 +69,13 @@ struct NetworkEntry: Identifiable, Sendable {
     }
 }
 
+/// Lifecycle execution tier for tabs under the memory governor.
+enum TabTier: String, Codable, Sendable {
+    case hot   // Active or recently focused tab: full GPU compositing, unrestricted timers
+    case warm  // Inactive background tab: retained in memory, background timers active
+    case cold  // Virtualized/suspended tab: webView unloaded, state preserved on disk/memory
+}
+
 /// Represents an individual browser tab.
 /// Owns its WKWebView instance so switching tabs is instant and preserves scroll state.
 @MainActor
@@ -84,6 +91,9 @@ final class Tab: NSObject, Identifiable, ObservableObject {
     @Published var isBlank: Bool = true
     @Published var favicon: NSImage? = nil
     @Published var isIncognito: Bool = false
+    @Published var tier: TabTier = .hot
+    var lastActiveTime: Date = Date()
+    var preservedScrollOffset: CGPoint = .zero
 
     // MARK: - Developer Drawer & Live Inspection State
     @Published var isDevDrawerVisible: Bool = false
@@ -271,6 +281,26 @@ final class Tab: NSObject, Identifiable, ObservableObject {
         guard !hasLoaded, let url = self.url, !isBlank, !isInternalPage else { return }
         hasLoaded = true
         load(url: url)
+    }
+
+    // MARK: - Tab Tier Virtualization (Hot / Warm / Cold)
+
+    /// Suspends an idle background tab, releasing its GPU pipeline and WebContent memory.
+    func dehydrateToCold() {
+        guard tier != .cold, !isLoading, let _ = self.url, !isBlank, !isInternalPage else { return }
+        tier = .cold
+        _ = webView.load(URLRequest(url: URL(string: "about:blank")!))
+    }
+
+    /// Rehydrates a cold tab back into full GPU execution.
+    func hydrateToHot() {
+        lastActiveTime = Date()
+        guard tier == .cold, let u = self.url, !isBlank, !isInternalPage else {
+            tier = .hot
+            return
+        }
+        tier = .hot
+        load(url: u)
     }
 
     // MARK: - Swipe Gesture Coordinator

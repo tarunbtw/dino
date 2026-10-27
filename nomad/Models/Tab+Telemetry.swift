@@ -40,6 +40,11 @@ extension Tab: WKScriptMessageHandler {
             default: level = .log
             }
             appendConsoleEntry(level: level, message: msg)
+            NomadAgentServer.shared.broadcastEvent(name: "console", payload: [
+                "tabId": self.id.uuidString,
+                "level": level.rawValue,
+                "message": msg
+            ])
         } else if name == "nomadInspect", let dict = body as? [String: Any] {
             if dict["cancel"] as? Bool == true {
                 self.isInspectorActive = false
@@ -76,6 +81,16 @@ extension Tab: WKScriptMessageHandler {
                 self.networkEntries.removeFirst(50)
             }
             self.networkEntries.append(entry)
+            var netPayload: [String: Any] = [
+                "tabId": self.id.uuidString,
+                "method": method,
+                "url": url,
+                "status": status,
+                "durationMs": duration,
+                "type": type
+            ]
+            if let err = error { netPayload["error"] = err }
+            NomadAgentServer.shared.broadcastEvent(name: "network", payload: netPayload)
         } else if name == "nomadZapper", let dict = body as? [String: Any] {
             if dict["cancel"] as? Bool == true {
                 self.isZapperActive = false

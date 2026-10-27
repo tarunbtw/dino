@@ -117,6 +117,12 @@ extension Tab: WKNavigationDelegate {
         self.allowNextFileNavigation = false
         self.isLoading = false
         self.lastNavigationFinishTime = Date()
+        NomadAgentServer.shared.broadcastEvent(name: "navigation", payload: [
+            "tabId": self.id.uuidString,
+            "url": webView.url?.absoluteString ?? self.url?.absoluteString ?? "",
+            "title": webView.title ?? self.title,
+            "isLoading": false
+        ])
         if webView.magnification != 1.0 {
             webView.setMagnification(1.0, centeredAt: .zero)
         }
@@ -172,6 +178,10 @@ extension Tab: WKNavigationDelegate {
         self.currentNavigation = navigation
         self.networkEntries.removeAll()
         self.lastNavigationStartTime = Date()
+        NomadAgentServer.shared.broadcastEvent(name: "navigationStart", payload: [
+            "tabId": self.id.uuidString,
+            "url": webView.url?.absoluteString ?? self.url?.absoluteString ?? ""
+        ])
     }
 
     private func isSupersededOrCancelled(_ error: Error, navigation: WKNavigation!) -> Bool {
@@ -195,6 +205,10 @@ extension Tab: WKNavigationDelegate {
         self.isLoading = false
         self.lastNavigationFinishTime = Date()
         self.lastNavigationError = error.localizedDescription
+        NomadAgentServer.shared.broadcastEvent(name: "navigationError", payload: [
+            "tabId": self.id.uuidString,
+            "error": error.localizedDescription
+        ])
         print("Tab Navigation failed: \(error.localizedDescription)")
     }
 
@@ -217,6 +231,10 @@ extension Tab: WKNavigationDelegate {
         self.isLoading = false
         self.lastNavigationFinishTime = Date()
         self.lastNavigationError = error.localizedDescription
+        NomadAgentServer.shared.broadcastEvent(name: "navigationError", payload: [
+            "tabId": self.id.uuidString,
+            "error": error.localizedDescription
+        ])
         print("Tab Provisional navigation failed: \(error.localizedDescription)")
     }
 

@@ -16,6 +16,9 @@ struct nomadApp: App {
             NomadMCPServer.run()
             exit(0)
         }
+        if NomadHeadlessManager.isHeadless {
+            NSApplication.shared.setActivationPolicy(.accessory)
+        }
     }
 
     var body: some Scene {
@@ -45,6 +48,16 @@ struct nomadApp: App {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if NomadHeadlessManager.isHeadless {
+            NomadHeadlessManager.shared.start()
+            // Close or hide any GUI windows spawned by SwiftUI
+            for window in NSApplication.shared.windows where window != NomadHeadlessManager.shared.offscreenWindow {
+                window.orderOut(nil)
+                window.close()
+            }
+            return
+        }
+
         NomadAgentServer.shared.start()
         Updater.shared.checkIfDue()
     }

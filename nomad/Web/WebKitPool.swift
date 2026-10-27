@@ -153,6 +153,45 @@ enum WebKitPool {
                     } catch(e) {}
 
                     try {
+                        if (window.__nomad_mock_routes && window.__nomad_mock_routes.length) {
+                            const matched = window.__nomad_mock_routes.find(m => {
+                                if (!m || !m.url) return false;
+                                if (m.method && m.method.toUpperCase() !== method) return false;
+                                return m.exact ? (url === m.url) : url.includes(m.url);
+                            });
+                            if (matched) {
+                                if (matched.block) {
+                                    const duration = Math.round(performance.now() - startTime);
+                                    sendNet({
+                                        method: method,
+                                        url: url,
+                                        status: 0,
+                                        duration: duration,
+                                        type: 'fetch (blocked)',
+                                        isError: true,
+                                        error: 'Blocked by client'
+                                    });
+                                    throw new TypeError('Failed to fetch (blocked by client)');
+                                }
+                                const mockStatus = matched.status || 200;
+                                const mockBody = matched.body !== undefined ? String(matched.body) : '';
+                                const mockHeaders = new Headers(matched.headers || { 'content-type': matched.contentType || 'application/json' });
+                                const duration = Math.round(performance.now() - startTime);
+                                sendNet({
+                                    method: method,
+                                    url: url,
+                                    status: mockStatus,
+                                    duration: duration,
+                                    type: 'fetch (mocked)'
+                                });
+                                return new Response(mockBody, {
+                                    status: mockStatus,
+                                    statusText: (mockStatus >= 200 && mockStatus < 300) ? 'OK' : 'Mock Response',
+                                    headers: mockHeaders
+                                });
+                            }
+                        }
+
                         const res = await origFetch.apply(this, args);
                         const duration = Math.round(performance.now() - startTime);
                         sendNet({
@@ -190,6 +229,61 @@ enum WebKitPool {
             XMLHttpRequest.prototype.send = function(...args) {
                 const startTime = performance.now();
                 const xhr = this;
+
+                if (window.__nomad_mock_routes && window.__nomad_mock_routes.length) {
+                    const reqUrl = this.__nomad_url || '';
+                    const reqMethod = this.__nomad_method || 'GET';
+                    const matched = window.__nomad_mock_routes.find(m => {
+                        if (!m || !m.url) return false;
+                        if (m.method && m.method.toUpperCase() !== reqMethod) return false;
+                        return m.exact ? (reqUrl === m.url) : reqUrl.includes(m.url);
+                    });
+                    if (matched) {
+                        if (matched.block) {
+                            const duration = Math.round(performance.now() - startTime);
+                            sendNet({
+                                method: reqMethod,
+                                url: reqUrl,
+                                status: 0,
+                                duration: duration,
+                                type: 'xhr (blocked)',
+                                isError: true,
+                                error: 'Blocked by client'
+                            });
+                            Object.defineProperty(xhr, 'readyState', { value: 4, configurable: true });
+                            Object.defineProperty(xhr, 'status', { value: 0, configurable: true });
+                            Object.defineProperty(xhr, 'statusText', { value: 'Blocked', configurable: true });
+                            setTimeout(() => {
+                                xhr.dispatchEvent(new Event('readystatechange'));
+                                xhr.dispatchEvent(new ProgressEvent('error'));
+                                xhr.dispatchEvent(new ProgressEvent('loadend'));
+                            }, 1);
+                            return;
+                        }
+                        const mockStatus = matched.status || 200;
+                        const mockBody = matched.body !== undefined ? String(matched.body) : '';
+                        const duration = Math.round(performance.now() - startTime);
+                        sendNet({
+                            method: reqMethod,
+                            url: reqUrl,
+                            status: mockStatus,
+                            duration: duration,
+                            type: 'xhr (mocked)'
+                        });
+                        Object.defineProperty(xhr, 'readyState', { value: 4, configurable: true });
+                        Object.defineProperty(xhr, 'status', { value: mockStatus, configurable: true });
+                        Object.defineProperty(xhr, 'statusText', { value: 'OK', configurable: true });
+                        Object.defineProperty(xhr, 'responseText', { value: mockBody, configurable: true });
+                        Object.defineProperty(xhr, 'response', { value: mockBody, configurable: true });
+                        setTimeout(() => {
+                            xhr.dispatchEvent(new Event('readystatechange'));
+                            xhr.dispatchEvent(new Event('load'));
+                            xhr.dispatchEvent(new Event('loadend'));
+                        }, 1);
+                        return;
+                    }
+                }
+
                 this.addEventListener('loadend', function() {
                     const duration = Math.round(performance.now() - startTime);
                     sendNet({

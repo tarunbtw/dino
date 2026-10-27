@@ -9,6 +9,16 @@ import SwiftUI
 import AppKit
 
 struct ContentView: View {
+    var body: some View {
+        if NomadHeadlessManager.isHeadless {
+            Color.clear.frame(width: 0, height: 0)
+        } else {
+            BrowserMainView()
+        }
+    }
+}
+
+private struct BrowserMainView: View {
     @StateObject private var store = BrowserStore()
     @StateObject private var settings = SettingsStore.shared
 

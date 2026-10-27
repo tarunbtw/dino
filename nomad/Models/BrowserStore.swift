@@ -90,9 +90,25 @@ final class BrowserStore: ObservableObject {
         if select {
             ExtensionManager.shared.didActivateTab(tab)
         }
+        enforceMemoryGovernor()
         persistSession()
         
         return tab
+    }
+
+    // MARK: - Memory Governor (Tiered Tab Virtualization)
+    static let maxActiveWarmTabs = 8
+
+    /// Enforces the concurrency memory governor: preserves active and recent tabs in Hot/Warm tiers
+    /// while virtualizing oldest idle background tabs to Cold tier to cap RAM usage.
+    func enforceMemoryGovernor() {
+        guard tabs.count > Self.maxActiveWarmTabs else { return }
+        let inactiveTabs = tabs.filter { $0.id != activeTabId && !$0.isBlank && !$0.isInternalPage }
+            .sorted(by: { $0.lastActiveTime > $1.lastActiveTime })
+        let demoteCandidates = inactiveTabs.dropFirst(Self.maxActiveWarmTabs - 1)
+        for tab in demoteCandidates {
+            tab.dehydrateToCold()
+        }
     }
 
     /// Creates and opens a new private / incognito tab with isolated ephemeral storage.
@@ -134,8 +150,10 @@ final class BrowserStore: ObservableObject {
             }
             if let tab = tabs.first(where: { $0.id == id }) {
                 tab.ensureLoaded()
+                tab.hydrateToHot()
                 ExtensionManager.shared.didActivateTab(tab)
             }
+            enforceMemoryGovernor()
             persistSession()
         }
     }

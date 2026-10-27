@@ -27,6 +27,12 @@ extension Tab: WKUIDelegate {
     // MARK: - Non-blocking JavaScript Alert / Confirm / Prompt handling
     func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
         appendConsoleEntry(level: .info, message: "[Dialog Alert] \(message)")
+        NomadAgentServer.shared.broadcastEvent(name: "dialog", payload: [
+            "tabId": self.id.uuidString,
+            "type": "alert",
+            "message": message,
+            "policy": dialogPolicy
+        ])
         if dialogPolicy.lowercased() == "wait" {
             self.lastDialog = "[Alert: \(message)] -> waiting"
             let pending = PendingDialog(type: .alert, message: message, defaultText: nil, timestamp: Date(), resolve: { [weak self] _ in
@@ -44,6 +50,12 @@ extension Tab: WKUIDelegate {
 
     func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
         appendConsoleEntry(level: .info, message: "[Dialog Confirm] \(message)")
+        NomadAgentServer.shared.broadcastEvent(name: "dialog", payload: [
+            "tabId": self.id.uuidString,
+            "type": "confirm",
+            "message": message,
+            "policy": dialogPolicy
+        ])
         if dialogPolicy.lowercased() == "wait" {
             self.lastDialog = "[Confirm: \(message)] -> waiting"
             let pending = PendingDialog(type: .confirm, message: message, defaultText: nil, timestamp: Date(), resolve: { [weak self] result in
@@ -65,6 +77,13 @@ extension Tab: WKUIDelegate {
 
     func webView(_ webView: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String, defaultText: String?, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (String?) -> Void) {
         appendConsoleEntry(level: .info, message: "[Dialog Prompt] \(prompt)")
+        NomadAgentServer.shared.broadcastEvent(name: "dialog", payload: [
+            "tabId": self.id.uuidString,
+            "type": "prompt",
+            "message": prompt,
+            "defaultText": defaultText as Any,
+            "policy": dialogPolicy
+        ])
         if dialogPolicy.lowercased() == "wait" {
             self.lastDialog = "[Prompt: \(prompt)] -> waiting"
             let pending = PendingDialog(type: .prompt, message: prompt, defaultText: defaultText, timestamp: Date(), resolve: { [weak self] result in

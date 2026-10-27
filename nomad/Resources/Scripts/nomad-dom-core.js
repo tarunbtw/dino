@@ -1598,12 +1598,13 @@
                             var wasObscured = false;
                             var interceptorTag = null;
 
+                            var rectC = el.getBoundingClientRect ? el.getBoundingClientRect() : { left: 0, top: 0, width: 0, height: 0 };
+                            var cxC = Math.round(rectC.left + (rectC.width ? rectC.width / 2 : 0));
+                            var cyC = Math.round(rectC.top + (rectC.height ? rectC.height / 2 : 0));
+
                             // Occlusion hit-testing: unless force: true, clicks hit what is physically on top
                             if (!actionObj.force) {
                                 try {
-                                    var rectC = el.getBoundingClientRect();
-                                    var cxC = Math.round(rectC.left + rectC.width / 2);
-                                    var cyC = Math.round(rectC.top + rectC.height / 2);
                                     var topEl = elDoc.elementFromPoint(cxC, cyC);
                                     if (topEl && topEl !== el && !el.contains(topEl) && !topEl.contains(el)) {
                                         var rootNode = el.getRootNode ? el.getRootNode() : null;
@@ -1617,11 +1618,48 @@
                                 } catch(e) {}
                             }
 
-                            // Pointer and mouse event simulation sequence
-                            var pdown = new elWin.PointerEvent('pointerdown', { bubbles: true, cancelable: true, view: elWin });
-                            var mdown = new elWin.MouseEvent('mousedown', { bubbles: true, cancelable: true, view: elWin });
-                            var pup = new elWin.PointerEvent('pointerup', { bubbles: true, cancelable: true, view: elWin });
-                            var mup = new elWin.MouseEvent('mouseup', { bubbles: true, cancelable: true, view: elWin });
+                            // Full pointer and mouse event simulation sequence with realistic coordinates
+                            var pointerInit = {
+                                bubbles: true,
+                                cancelable: true,
+                                view: elWin,
+                                clientX: cxC,
+                                clientY: cyC,
+                                screenX: cxC,
+                                screenY: cyC,
+                                button: 0,
+                                buttons: 1,
+                                pointerId: 1,
+                                pointerType: 'mouse',
+                                isPrimary: true,
+                                width: 1,
+                                height: 1
+                            };
+                            var pdown = new elWin.PointerEvent('pointerdown', pointerInit);
+                            var mdown = new elWin.MouseEvent('mousedown', {
+                                bubbles: true,
+                                cancelable: true,
+                                view: elWin,
+                                clientX: cxC,
+                                clientY: cyC,
+                                screenX: cxC,
+                                screenY: cyC,
+                                button: 0,
+                                buttons: 1
+                            });
+                            var pointerUpInit = Object.assign({}, pointerInit, { buttons: 0 });
+                            var pup = new elWin.PointerEvent('pointerup', pointerUpInit);
+                            var mup = new elWin.MouseEvent('mouseup', {
+                                bubbles: true,
+                                cancelable: true,
+                                view: elWin,
+                                clientX: cxC,
+                                clientY: cyC,
+                                screenX: cxC,
+                                screenY: cyC,
+                                button: 0,
+                                buttons: 0
+                            });
 
                             targetToClick.dispatchEvent(pdown);
                             targetToClick.dispatchEvent(mdown);
@@ -1632,7 +1670,17 @@
                             try {
                                 targetToClick.click();
                             } catch(e) {
-                                targetToClick.dispatchEvent(new elWin.MouseEvent('click', { bubbles: true, cancelable: true, view: elWin }));
+                                targetToClick.dispatchEvent(new elWin.MouseEvent('click', {
+                                    bubbles: true,
+                                    cancelable: true,
+                                    view: elWin,
+                                    clientX: cxC,
+                                    clientY: cyC,
+                                    screenX: cxC,
+                                    screenY: cyC,
+                                    button: 0,
+                                    buttons: 0
+                                }));
                             }
 
                             if (wasObscured) {
@@ -2256,6 +2304,44 @@
                         }
                     }, 25);
                 });
+            },
+
+            // 6. Playwright-Grade Auto-Waiting & Action Settlement
+            performActionAsync: async function(actionObj) {
+                var self = this;
+                var action = (actionObj.action || actionObj.type || '').trim().toLowerCase();
+                var targetId = actionObj.target || actionObj.elementId || actionObj.selector;
+                var timeout = actionObj.timeout || actionObj.timeoutMs || 800;
+
+                // Pre-action readiness auto-wait: wait for element to exist, attach to DOM, and become enabled
+                if (targetId && action !== 'scroll' && action !== 'press') {
+                    var start = performance.now();
+                    while (performance.now() - start < timeout) {
+                        var el = null;
+                        if (self.elements && self.elements[targetId] && self.isNodeConnected(self.elements[targetId])) {
+                            el = self.elements[targetId];
+                        } else {
+                            el = self.findInTree(document, targetId);
+                        }
+                        if (el) {
+                            var isInteractive = !el.disabled;
+                            if (isInteractive) break;
+                        }
+                        await new Promise(function(r) { setTimeout(r, 25); });
+                    }
+                }
+
+                // Dispatch action via full synthetic pipeline
+                var res = self.performAction(actionObj);
+
+                // Post-action settlement: observe DOM mutation quiescence (50ms quiet window, max 250ms)
+                if (res && res.success && actionObj.settle !== false) {
+                    try {
+                        await self.waitForStability(50, 250);
+                    } catch(e) {}
+                }
+
+                return res;
             }
         };
     })();

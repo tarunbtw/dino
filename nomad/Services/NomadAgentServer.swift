@@ -34,7 +34,7 @@ final class NomadAgentServer: ObservableObject {
     }
 
     /// Validates request Origin header to prevent DNS rebinding and cross-site exfiltration attacks.
-    nonisolated private static func isAllowedOrigin(_ origin: String?) -> Bool {
+    nonisolated static func isAllowedOrigin(_ origin: String?) -> Bool {
         guard let origin = origin, !origin.isEmpty else {
             // Local CLI, curl, Node.js, Python, or MCP servers emit no Origin header
             return true
@@ -60,6 +60,7 @@ final class NomadAgentServer: ObservableObject {
 
     private var listener: NWListener?
     nonisolated private let serverQueue = DispatchQueue(label: "nomad.agent.server", qos: .userInitiated)
+    nonisolated private let eventBroadcaster = EventStreamBroadcaster()
 
     /// Process activity assertion to ensure macOS App Nap and timer coalescing are disabled during agent server operations
     private var activityToken: NSObjectProtocol? = {
@@ -127,6 +128,7 @@ final class NomadAgentServer: ObservableObject {
                     switch state {
                     case .ready:
                         self.isRunning = true
+                        NomadUnixSocketBridge.shared.start(port: self.port, token: self.token)
                         print("🟢 [NomadAgentServer] Listening on http://127.0.0.1:\(self.port) (Bearer auth enabled)")
                     case .failed(let error):
                         print("🔴 [NomadAgentServer] Failed with error: \(error)")
@@ -147,6 +149,7 @@ final class NomadAgentServer: ObservableObject {
 
             self.listener = newListener
             newListener.start(queue: serverQueue)
+            NomadUnixSocketBridge.shared.start(port: self.port, token: self.token)
         } catch {
             print("⚠️ [NomadAgentServer] Could not initialize NWListener: \(error)")
         }
@@ -154,6 +157,9 @@ final class NomadAgentServer: ObservableObject {
 
     /// Stops the server and cleanly releases all sockets and connections.
     func stop() {
+        NomadUnixSocketBridge.shared.stop()
+        eventBroadcaster.closeAll()
+
         listener?.cancel()
         listener = nil
         isRunning = false
@@ -182,7 +188,7 @@ final class NomadAgentServer: ObservableObject {
                 connection.cancel()
                 return
             }
-            if let error = error {
+            if error != nil {
                 connection.cancel()
                 return
             }
@@ -332,14 +338,16 @@ final class NomadAgentServer: ObservableObject {
         }
 
         // Unauthenticated access is strictly limited to minimal health check probe without sensitive page data
-        let isPublicHealthCheck = (method == "GET" && (path == "/" || path == "/status" || cleanPath == "/" || cleanPath == "/status"))
+        let isPublicHealthCheck = (method == "GET" && (path == "/" || path == "/status" || cleanPath == "/" || cleanPath == "/status" || cleanPath == "/daemon" || cleanPath == "/headless"))
         if !isAuthenticated {
             if isPublicHealthCheck {
                 let publicStatusObj: [String: Any] = [
                     "nomad": "active",
                     "version": "1.0",
                     "port": self.port,
-                    "authRequired": true
+                    "authRequired": true,
+                    "isHeadless": NomadHeadlessManager.isHeadless,
+                    "mode": NomadHeadlessManager.isHeadless ? "headless_daemon" : "gui"
                 ]
                 sendJSON(connection: connection, object: publicStatusObj, origin: origin)
                 return
@@ -352,6 +360,8 @@ final class NomadAgentServer: ObservableObject {
         // Health check probes ("GET /" or "GET /status") can respond immediately even before BrowserStore finishes attaching
         if method == "GET" && (cleanPath == "/" || cleanPath == "/status") {
             let capabilities: [String: Any] = [
+                "transports": ["http", "unix_socket", "sse_events"],
+                "socketPath": NomadUnixSocketBridge.defaultSocketPath,
                 "waitModes": ["stability", "selector", "timeout", "networkidle", "navigation", "url"],
                 "actions": ["click", "hover", "type", "clear", "press", "selectOption", "scroll", "drag", "highlight", "upload", "native_click", "native_type", "native_press", "native_drag", "native_hover"],
                 "upload": ["files", "paths"],
@@ -364,6 +374,9 @@ final class NomadAgentServer: ObservableObject {
                 "cookies": ["get", "set", "clear"],
                 "console": ["log", "warn", "error"],
                 "network": ["fetch", "xhr", "status", "timing"],
+                "networkInterception": ["mock", "block"],
+                "tabVirtualization": ["hot", "warm", "cold"],
+                "agenticRuntime": ["route_cache", "trajectory_trace", "headless_daemon"],
                 "dialogPolicies": ["accept", "dismiss", "wait"]
             ]
             let liveTitle = (self.store?.activeTab?.webView.title?.isEmpty == false ? self.store?.activeTab?.webView.title : self.store?.activeTab?.title) ?? ""
@@ -385,7 +398,19 @@ final class NomadAgentServer: ObservableObject {
             return
         }
 
-        guard let store = self.store else {
+        if method == "GET" && (cleanPath == "/daemon" || cleanPath == "/headless") {
+            sendJSON(connection: connection, object: [
+                "success": true,
+                "mode": NomadHeadlessManager.isHeadless ? "headless_daemon" : "gui",
+                "isHeadless": NomadHeadlessManager.isHeadless,
+                "viewport": ["width": 1280, "height": 800],
+                "cliFlags": ["--headless", "NOMAD_HEADLESS=1"],
+                "socketPath": NomadUnixSocketBridge.defaultSocketPath
+            ], origin: origin)
+            return
+        }
+
+        guard self.store != nil else {
             sendResponse(connection: connection, status: "503 Service Unavailable", body: "{\"error\":\"BrowserStore not connected\",\"code\":\"SERVICE_UNAVAILABLE\",\"success\":false}", origin: origin)
             return
         }
@@ -410,11 +435,17 @@ final class NomadAgentServer: ObservableObject {
     }
 
     func resolveTab(id: String?) -> Tab? {
+        let tab: Tab?
         if let id = id, !id.isEmpty {
             guard let uuid = UUID(uuidString: id) else { return nil }
-            return store?.tabs.first(where: { $0.id == uuid })
+            tab = store?.tabs.first(where: { $0.id == uuid })
+        } else {
+            tab = store?.activeTab
         }
-        return store?.activeTab
+        if let t = tab, t.tier == .cold {
+            t.hydrateToHot()
+        }
+        return tab
     }
 
     func requireTab(id: String? = nil, connection: NWConnection, origin: String?, errorMessage: String? = nil) -> Tab? {
@@ -474,5 +505,102 @@ final class NomadAgentServer: ObservableObject {
         connection.send(content: responseData, completion: .contentProcessed { _ in
             connection.cancel()
         })
+    }
+
+    // MARK: - Server-Sent Events (SSE) Real-Time Telemetry & Event Streaming
+
+    nonisolated func registerEventStream(connection: NWConnection, origin: String?) {
+        eventBroadcaster.register(connection: connection, origin: origin)
+    }
+
+    nonisolated func broadcastEvent(name: String, payload: [String: Any]) {
+        eventBroadcaster.broadcast(name: name, payload: payload)
+    }
+}
+
+/// Thread-safe registry and broadcaster for connected Server-Sent Events (SSE) clients.
+final class EventStreamBroadcaster: @unchecked Sendable {
+    private var eventConnections = [ObjectIdentifier: NWConnection]()
+    private let eventLock = NSLock()
+
+    func register(connection: NWConnection, origin: String?) {
+        var corsHeaders = ""
+        if let origin = origin, !origin.isEmpty, NomadAgentServer.isAllowedOrigin(origin) {
+            corsHeaders = """
+            Access-Control-Allow-Origin: \(origin)\r
+            Access-Control-Allow-Methods: GET, OPTIONS\r
+            Access-Control-Allow-Headers: Authorization, Content-Type, X-Nomad-Token\r\n
+            """
+        }
+        let headers = """
+        HTTP/1.1 200 OK\r
+        Content-Type: text/event-stream; charset=utf-8\r
+        Cache-Control: no-cache, no-transform\r
+        Connection: keep-alive\r
+        \(corsHeaders)\r
+        : nomad event stream connected\r\n\r\n
+        """
+        let headerData = Data(headers.utf8)
+        connection.send(content: headerData, completion: .contentProcessed { [weak self] error in
+            guard let self = self, error == nil else {
+                connection.cancel()
+                return
+            }
+            self.add(connection)
+        })
+    }
+
+    private func add(_ connection: NWConnection) {
+        eventLock.lock()
+        let id = ObjectIdentifier(connection)
+        eventConnections[id] = connection
+        eventLock.unlock()
+
+        connection.stateUpdateHandler = { [weak self] state in
+            guard let self = self else { return }
+            switch state {
+            case .cancelled, .failed:
+                self.eventLock.lock()
+                self.eventConnections.removeValue(forKey: id)
+                self.eventLock.unlock()
+            default:
+                break
+            }
+        }
+    }
+
+    func broadcast(name: String, payload: [String: Any]) {
+        var eventObj = payload
+        if eventObj["timestamp"] == nil {
+            eventObj["timestamp"] = Date().timeIntervalSince1970 * 1000.0
+        }
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: eventObj),
+              let jsonString = String(data: jsonData, encoding: .utf8) else { return }
+        let sseMessage = "event: \(name)\ndata: \(jsonString)\n\n"
+        let sseData = Data(sseMessage.utf8)
+
+        eventLock.lock()
+        let connections = Array(eventConnections.values)
+        eventLock.unlock()
+
+        for conn in connections {
+            conn.send(content: sseData, completion: .contentProcessed { [weak self] error in
+                if error != nil {
+                    self?.eventLock.lock()
+                    self?.eventConnections.removeValue(forKey: ObjectIdentifier(conn))
+                    self?.eventLock.unlock()
+                    conn.cancel()
+                }
+            })
+        }
+    }
+
+    func closeAll() {
+        eventLock.lock()
+        for conn in eventConnections.values {
+            conn.cancel()
+        }
+        eventConnections.removeAll()
+        eventLock.unlock()
     }
 }

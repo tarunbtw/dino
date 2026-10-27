@@ -503,6 +503,14 @@ extension Tab {
                             self.clearStagedUpload()
                         }
                     }
+                    if res.success {
+                        NomadRouteCache.shared.record(eventType: "action", message: "Action '\(action.action)' succeeded on \(action.target ?? "element")", tabId: self.id.uuidString)
+                        if let domain = self.url?.host, let target = action.target, !target.isEmpty {
+                            NomadRouteCache.shared.recordSuccess(domain: domain, intent: action.action, selector: target, action: action.action)
+                        }
+                    } else {
+                        NomadRouteCache.shared.record(eventType: "actionError", message: "Action '\(action.action)' failed on \(action.target ?? "element"): \(res.message)", tabId: self.id.uuidString)
+                    }
                     res.lastDialog = self.lastDialog
                     if self.pendingDialog != nil {
                         res.hasPendingDialog = true

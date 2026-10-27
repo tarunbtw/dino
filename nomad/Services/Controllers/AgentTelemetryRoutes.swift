@@ -222,6 +222,10 @@ extension NomadAgentServer {
             sendJSON(connection: connection, object: ["success": deleted, "filename": targetFile], origin: origin)
             return true
 
+        case ("GET", "/events"):
+            registerEventStream(connection: connection, origin: origin)
+            return true
+
         case ("GET", "/console"):
             guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin, errorMessage: "Tab not found") else { return true }
             let clear = queryBool("clear")
@@ -294,6 +298,168 @@ extension NomadAgentServer {
         case ("POST", "/network/clear"), ("DELETE", "/network"):
             guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin) else { return true }
             activeTab.networkEntries.removeAll()
+            sendJSON(connection: connection, object: ["success": true, "cleared": true], origin: origin)
+            return true
+
+        case ("POST", "/network/mock"):
+            guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin) else { return true }
+            guard let bodyData = bodyData,
+                  let mockObj = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any],
+                  let mockUrl = mockObj["url"] as? String, !mockUrl.isEmpty else {
+                sendResponse(connection: connection, status: "400 Bad Request", body: "{\"error\":\"Missing required 'url' in /network/mock\",\"code\":\"MISSING_URL\",\"success\":false}", origin: origin)
+                return true
+            }
+            let serialized = String(data: bodyData, encoding: .utf8) ?? "{}"
+            let js = "window.__nomad_mock_routes = (window.__nomad_mock_routes || []).concat([\(serialized)]);"
+            activeTab.webView.evaluateJavaScript(js) { _, _ in }
+            sendJSON(connection: connection, object: ["success": true, "mockedUrl": mockUrl], origin: origin)
+            return true
+
+        case ("GET", "/network/mock"):
+            guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin) else { return true }
+            activeTab.webView.evaluateJavaScript("JSON.stringify(window.__nomad_mock_routes || [])") { res, _ in
+                let jsonStr = (res as? String) ?? "[]"
+                let data = Data(jsonStr.utf8)
+                let array = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] ?? []
+                self.sendJSON(connection: connection, object: ["success": true, "mocks": array], origin: origin)
+            }
+            return true
+
+        case ("DELETE", "/network/mock"):
+            guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin) else { return true }
+            activeTab.webView.evaluateJavaScript("window.__nomad_mock_routes = [];") { _, _ in }
+            sendJSON(connection: connection, object: ["success": true, "cleared": true], origin: origin)
+            return true
+
+        case ("POST", "/network/block"):
+            guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin) else { return true }
+            guard let bodyData = bodyData,
+                  let blockObj = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any] else {
+                sendResponse(connection: connection, status: "400 Bad Request", body: "{\"error\":\"Missing or invalid JSON body in /network/block\",\"code\":\"INVALID_PAYLOAD\",\"success\":false}", origin: origin)
+                return true
+            }
+            let blockUrl = (blockObj["url"] as? String) ?? (blockObj["pattern"] as? String) ?? ""
+            if blockUrl.isEmpty && blockObj["urls"] == nil {
+                sendResponse(connection: connection, status: "400 Bad Request", body: "{\"error\":\"Missing 'url' or 'pattern' in /network/block\",\"code\":\"MISSING_URL\",\"success\":false}", origin: origin)
+                return true
+            }
+            var rules: [[String: Any]] = []
+            if !blockUrl.isEmpty {
+                rules.append(["url": blockUrl, "block": true])
+            }
+            if let urls = blockObj["urls"] as? [String] {
+                for u in urls where !u.isEmpty {
+                    rules.append(["url": u, "block": true])
+                }
+            }
+            let rulesJson = (try? JSONSerialization.data(withJSONObject: rules)).flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+            let js = "window.__nomad_mock_routes = (window.__nomad_mock_routes || []).concat(\(rulesJson));"
+            activeTab.webView.evaluateJavaScript(js) { _, _ in }
+            sendJSON(connection: connection, object: ["success": true, "blocked": true, "count": rules.count, "url": blockUrl], origin: origin)
+            return true
+
+        case ("GET", "/network/block"):
+            guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin) else { return true }
+            activeTab.webView.evaluateJavaScript("JSON.stringify((window.__nomad_mock_routes || []).filter(m => m && m.block))") { res, _ in
+                let jsonStr = (res as? String) ?? "[]"
+                let data = Data(jsonStr.utf8)
+                let array = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] ?? []
+                self.sendJSON(connection: connection, object: ["success": true, "blockedRules": array, "count": array.count], origin: origin)
+            }
+            return true
+
+        case ("DELETE", "/network/block"):
+            guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin) else { return true }
+            activeTab.webView.evaluateJavaScript("window.__nomad_mock_routes = (window.__nomad_mock_routes || []).filter(m => !m || !m.block);") { _, _ in }
+            sendJSON(connection: connection, object: ["success": true, "cleared": true], origin: origin)
+            return true
+
+        case ("GET", "/cache/routes"):
+            let domain = queryItem("domain")
+            let intent = queryItem("intent")
+            let routes: [CachedRoute]
+            if let d = domain, !d.isEmpty {
+                routes = NomadRouteCache.shared.lookup(domain: d, intent: intent)
+            } else {
+                routes = NomadRouteCache.shared.allRoutes()
+            }
+            let routeList: [[String: Any]] = routes.map { r in
+                [
+                    "id": r.id.uuidString,
+                    "domain": r.domain,
+                    "intent": r.intent,
+                    "selector": r.selector,
+                    "action": r.action,
+                    "successCount": r.successCount,
+                    "lastUsed": r.lastUsed.timeIntervalSince1970 * 1000.0
+                ]
+            }
+            sendJSON(connection: connection, object: ["success": true, "routes": routeList, "count": routeList.count], origin: origin)
+            return true
+
+        case ("POST", "/cache/routes"):
+            guard let bodyData = bodyData,
+                  let json = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any],
+                  let domain = json["domain"] as? String, !domain.isEmpty,
+                  let intent = json["intent"] as? String, !intent.isEmpty,
+                  let selector = json["selector"] as? String, !selector.isEmpty else {
+                sendResponse(connection: connection, status: "400 Bad Request", body: "{\"error\":\"Missing domain, intent, or selector in /cache/routes\",\"code\":\"INVALID_PAYLOAD\",\"success\":false}", origin: origin)
+                return true
+            }
+            let action = json["action"] as? String ?? "click"
+            NomadRouteCache.shared.recordSuccess(domain: domain, intent: intent, selector: selector, action: action)
+            sendJSON(connection: connection, object: ["success": true, "cached": true, "domain": domain, "intent": intent], origin: origin)
+            return true
+
+        case ("DELETE", "/cache/routes"):
+            NomadRouteCache.shared.clearRoutes()
+            sendJSON(connection: connection, object: ["success": true, "cleared": true], origin: origin)
+            return true
+
+        case ("POST", "/trace"), ("POST", "/trajectory"):
+            var eventType = "agent"
+            var message = ""
+            var tabId = queryItem("tabId")
+            var metadata: [String: String] = [:]
+
+            if let bodyData = bodyData,
+               let json = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any] {
+                if let t = (json["type"] as? String) ?? (json["eventType"] as? String) {
+                    eventType = t
+                }
+                if let m = (json["message"] as? String) ?? (json["text"] as? String) ?? (json["action"] as? String) {
+                    message = m
+                }
+                if let tid = json["tabId"] as? String {
+                    tabId = tid
+                }
+                if let meta = json["metadata"] as? [String: Any] {
+                    for (k, v) in meta {
+                        metadata[k] = "\(v)"
+                    }
+                }
+            } else if let msgParam = queryItem("message") {
+                message = msgParam
+                if let tParam = queryItem("type") { eventType = tParam }
+            }
+
+            NomadRouteCache.shared.record(eventType: eventType, message: message, tabId: tabId, metadata: metadata)
+            sendJSON(connection: connection, object: ["success": true, "recorded": true, "type": eventType, "message": message], origin: origin)
+            return true
+
+        case ("GET", "/trace"), ("GET", "/trajectory"):
+            let tabId = queryItem("tabId")
+            let entries = NomadRouteCache.shared.exportTrajectory(tabId: tabId)
+            sendJSON(connection: connection, object: [
+                "success": true,
+                "tabId": (tabId as Any?) ?? NSNull(),
+                "entriesCount": entries.count,
+                "trajectory": entries
+            ], origin: origin)
+            return true
+
+        case ("DELETE", "/trace"), ("DELETE", "/trajectory"):
+            NomadRouteCache.shared.clearTrajectory()
             sendJSON(connection: connection, object: ["success": true, "cleared": true], origin: origin)
             return true
 

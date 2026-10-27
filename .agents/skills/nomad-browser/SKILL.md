@@ -212,6 +212,21 @@ For environments driving Nomad directly without MCP (e.g. `curl`, Python, Node.j
 | `GET` / `POST` | `/dialog` | Body / Query: `{ "policy"?: "accept"|"dismiss"|"wait", "action"?: "accept"|"dismiss", "response"?: string }` (default safe policy is `"dismiss"`; `"wait"` returns `hasPendingDialog: true` immediately so clients can synchronously inspect and respond without hanging) |
 | `GET` | `/console` | Query: `level=all|log|warn|error`, `clear=true`, `tabId` |
 | `GET` | `/network` | Query: `statusFilter=all|errors|success`, `clear=true`, `tabId` |
+| `GET` | `/events` | Real-time Server-Sent Events (SSE) telemetry stream pushing navigation, console, network, and dialog events without polling |
+| `POST` / `GET` / `DELETE` | `/network/mock` | In-flight request mocking: intercept fetch / XHR requests with custom mock status, headers, and responses |
+| `POST` / `GET` / `DELETE` | `/network/block` | In-flight request blocking: block specific URLs or patterns (`urls: [...]`, `url: "..."`); blocked requests reject with network error |
+| `GET` / `POST` / `DELETE` | `/cache/routes` | Learned route cache: inspect and store reliable selector mappings for recurring flows |
+| `GET` / `POST` / `DELETE` | `/trace` \| `/trajectory` | Export (`GET`), record custom step (`POST`), or clear (`DELETE`) chronological trajectory journal with action logs, console outputs, and network entries |
+| `POST` | `/tabs/tier` | Set tab lifecycle virtualization tier (`id: string, tier: "hot"|"warm"|"cold"`) for memory governance |
+| `GET` | `/daemon` \| `/headless` | Inspect headless background daemon status, viewport dimensions (1280x800), and socket path |
+
+> [!TIP]
+> **Sub-Millisecond IPC & Zero-Friction Socket Auth:**
+> For local agents running in the shell or CI, Nomad exposes a POSIX Unix Domain Socket at `~/.nomad/nomad.sock` (mode `0600`).
+> Connections over this socket are inherently authenticated by Darwin filesystem permissions and automatically inject bearer tokens, eliminating the need to pass `-H "Authorization: Bearer ..."` on every request:
+> ```bash
+> curl --unix-socket ~/.nomad/nomad.sock http://localhost/status
+> ```
 
 > [!CAUTION]
 > **Profile Cookies & State Isolation:**
