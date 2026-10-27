@@ -64,7 +64,7 @@ final class FloatingVideoManager: ObservableObject {
             if isSuccess {
                 self.present(tab: tab, aspectWidth: aspectW, aspectHeight: aspectH)
             } else {
-                print("⚠️ [FloatingVideoManager] No playing video found on this page.")
+                print("[nomad] Floating video: No playing video found on page")
             }
         }
     }

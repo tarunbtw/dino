@@ -107,6 +107,27 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		8DA21399307A734C0088406C /* Copy Web Resources */ = {
+			isa = PBXShellScriptBuildPhase;
+			inputPaths = (
+				"$(SRCROOT)/nomad/Resources/Scripts/extension-shims.js",
+				"$(SRCROOT)/nomad/Resources/Scripts/nomad-dom-core.js",
+			);
+			name = "Copy Web Resources";
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/Scripts/extension-shims.js",
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/Scripts/nomad-dom-core.js",
+			);
+			shellPath = /bin/sh;
+			shellScript = (
+				"mkdir -p \"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/Scripts\"",
+				"cp -R \"${SRCROOT}/nomad/Resources/Scripts/\"* \"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/Scripts/\"",
+				"",
+			);
+		};
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		8DA21326307A734C0088406C /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -114,31 +135,6 @@
 			);
 		};
 /* End PBXSourcesBuildPhase section */
-
-/* Begin PBXShellScriptBuildPhase section */
-		8DA21399307A734C0088406C /* Copy Web Resources */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-				"$(SRCROOT)/nomad/Resources/Scripts/extension-shims.js",
-				"$(SRCROOT)/nomad/Resources/Scripts/nomad-dom-core.js",
-			);
-			name = "Copy Web Resources";
-			outputFileListPaths = (
-			);
-			outputPaths = (
-				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/Scripts/extension-shims.js",
-				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/Scripts/nomad-dom-core.js",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "mkdir -p \"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/Scripts\"\ncp -R \"${SRCROOT}/nomad/Resources/Scripts/\"* \"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/Scripts/\"\n";
-		};
-/* End PBXShellScriptBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
 		8DA21335307A734C0088406C /* Debug configuration for PBXProject "nomad" */ = {

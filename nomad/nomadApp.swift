@@ -12,42 +12,7 @@ struct nomadApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     init() {
-        let args = CommandLine.arguments.dropFirst().map { $0.lowercased() }
-
-        // nomad version, nomad --version, nomad -v
-        if args.contains("version") || args.contains("--version") || args.contains("-v") {
-            let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1"
-            let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
-            print("nomad version \(version) (build \(build))")
-            exit(0)
-        }
-
-        // nomad help, nomad --help, nomad -h
-        if args.contains("help") || args.contains("--help") || args.contains("-h") {
-            let help = """
-            Nomad - Native macOS browser engine and agent runtime
-
-            Usage:
-              nomad [command] [options]
-
-            Commands:
-              version       Print version information
-              help          Show available commands and options
-              headless      Run as an off-screen background browser daemon
-              mcp           Run stdio Model Context Protocol (MCP) server
-
-            Options:
-              --port <port>       Set agent HTTP server port (default: 9222)
-              --socket <path>     Set agent IPC Unix domain socket path
-              --version, -v       Alias for 'version'
-              --help, -h          Alias for 'help'
-            """
-            print(help)
-            exit(0)
-        }
-
-        if args.contains("mcp") || args.contains("--mcp") {
-            NomadMCPServer.run()
+        if NomadCLIManager.run() {
             exit(0)
         }
 
@@ -83,6 +48,8 @@ struct nomadApp: App {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
+        NomadCLIManager.recordCurrentPID()
+
         if NomadHeadlessManager.isHeadless {
             NomadHeadlessManager.shared.start()
             // Close or hide any GUI windows spawned by SwiftUI
@@ -100,5 +67,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         FloatingVideoManager.shared.land()
         NomadAgentServer.shared.stop()
+        NomadCLIManager.cleanupOnExit()
     }
 }

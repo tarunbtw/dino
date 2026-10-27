@@ -241,14 +241,46 @@ For environments driving Nomad directly without MCP (e.g. `curl`, Python, Node.j
 
 When installed via Homebrew (`brew install --cask tarunbtw/tap/nomad`), `nomad` and `nomadd` are directly accessible on your `PATH`:
 
+```
+Nomad - Native macOS browser engine and agent runtime
+
+Usage:
+  nomad [command] [options]
+```
+
+### Commands
+
 | Command | Description |
 | :--- | :--- |
-| `nomad` | Launch native macOS GUI browser |
-| `nomad version` | Print version and build info (`nomad version 0.1 (build 1)`) |
+| `nomad` | Launch native macOS GUI browser (default with no arguments) |
+| `nomad start` | Run as a detached background daemon in RAM; returns terminal prompt immediately, writes PID to `~/.nomad/nomad.pid`, and redirects logs to `~/.nomad/nomad.log` |
+| `nomad stop` | Gracefully stop the running background daemon (SIGTERM), free RAM, and unlink PID & socket files |
+| `nomad status` | Check running daemon / GUI status, reporting process PID, HTTP endpoint, IPC socket path, and live open tab count |
+| `nomad headless` | Run in foreground with live console logs streaming to terminal; handles `Ctrl+C` (SIGINT) cleanly with graceful socket and PID cleanup |
+| `nomad mcp` | Run stdio Model Context Protocol (MCP) server for Claude Code, Cursor, and Antigravity |
+| `nomad version` | Print version and build information (`nomad version 0.1 (build 1)`) |
 | `nomad help` | Display available commands and options |
-| `nomad headless` | Launch as an off-screen background browser daemon |
-| `nomad mcp` | Run stdio Model Context Protocol (MCP) server for Claude / Cursor |
 | `nomadd` | Direct alias for `nomad headless` |
+
+### Options
+
+| Option | Description |
+| :--- | :--- |
+| `--port <port>` | Set agent HTTP server port (default: `9222`, or via `NOMAD_AGENT_PORT` env) |
+| `--socket <path>` | Set agent IPC Unix domain socket path (default: `~/.nomad/nomad.sock`, or via `NOMAD_SOCKET_PATH` env) |
+| `--version, -v` | Alias for `version` |
+| `--help, -h` | Alias for `help` |
+
+> [!NOTE]
+> **Strict Command Validation:**
+> Nomad strictly validates subcommands and options. Any typos or unrecognized arguments (e.g. `nomad hrlp` or `nomad --unknown`) exit immediately with code `1` and print usage instructions without launching the browser or starting servers.
+
+### Daemon Lifecycle & Process Files
+
+* **`~/.nomad/nomad.pid`**: Stores the active daemon / runner process ID (mode `0600`). Managed automatically by `nomad start`, `nomad headless`, and `nomad stop`. Stale PID files from abruptly terminated processes are automatically detected and cleaned up on subsequent runs.
+* **`~/.nomad/nomad.log`**: Standard output and error stream from background daemons spawned with `nomad start`.
+* **`~/.nomad/nomad.sock`**: POSIX Unix domain socket bridge for sub-millisecond local IPC (mode `0600`).
+* **`~/.nomad/agent-token`**: Cryptographically secure 64-character Bearer token for HTTP API authorization.
 
 ---
 

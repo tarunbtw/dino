@@ -180,7 +180,7 @@ final class NomadAgentServer: ObservableObject {
         if case .hostPort(let host, _) = connection.endpoint {
             let hostStr = "\(host)"
             if hostStr != "127.0.0.1" && hostStr != "::1" && hostStr != "localhost" {
-                print("🛡️ [NomadAgentServer] Rejecting non-loopback connection from: \(hostStr)")
+                print("[nomad] Rejecting non-loopback connection from: \(hostStr)")
                 connection.cancel()
                 return
             }
@@ -299,7 +299,7 @@ final class NomadAgentServer: ObservableObject {
 
         // Validate Origin header against DNS rebinding & cross-site exfiltration attacks
         if !Self.isAllowedOrigin(origin) {
-            print("🛡️ [NomadAgentServer] Blocked cross-origin request from untrusted origin: \(origin ?? "unknown")")
+            print("[nomad] Blocked cross-origin request from untrusted origin: \(origin ?? "unknown")")
             sendResponse(connection: connection, status: "403 Forbidden", body: "{\"error\":\"Forbidden: cross-origin requests from untrusted web origins are blocked by Nomad security policy.\",\"code\":\"FORBIDDEN\",\"success\":false}", origin: nil)
             return
         }
@@ -362,6 +362,8 @@ final class NomadAgentServer: ObservableObject {
                         "authRequired": true,
                         "isHeadless": NomadHeadlessManager.isHeadless,
                         "mode": NomadHeadlessManager.isHeadless ? "headless_daemon" : "gui",
+                        "tabCount": self.store?.tabs.count ?? 0,
+                        "tabsCount": self.store?.tabs.count ?? 0,
                         "unixSocket": [
                             "path": socketPath,
                             "active": NomadUnixSocketBridge.shared.isListening,

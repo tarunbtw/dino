@@ -114,7 +114,7 @@ final class ContentBlockerService: ObservableObject {
 
         store.compileContentRuleList(forIdentifier: ruleListIdentifier, encodedContentRuleList: json) { [weak self] list, error in
             if let error = error {
-                print("⚠️ [ContentBlockerService] Compilation error: \(error.localizedDescription)")
+                print("[nomad] ContentBlocker compilation error: \(error.localizedDescription)")
                 return
             }
             Task { @MainActor [weak self] in

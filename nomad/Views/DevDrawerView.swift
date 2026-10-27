@@ -611,7 +611,7 @@ struct DevDrawerView: View {
                 let img = try await tab.captureScreenshot(labeled: true)
                 self.screenshotPreview = img
             } catch {
-                print("⚠️ Screenshot failed: \(error)")
+                print("[nomad] Screenshot failed: \(error)")
             }
             self.isCapturingAgentData = false
         }
