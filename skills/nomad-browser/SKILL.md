@@ -237,6 +237,21 @@ For environments driving Nomad directly without MCP (e.g. `curl`, Python, Node.j
 
 ---
 
+## CLI Quick Reference
+
+When installed via Homebrew (`brew install --cask tarunbtw/tap/nomad`), `nomad` and `nomadd` are directly accessible on your `PATH`:
+
+| Command | Description |
+| :--- | :--- |
+| `nomad` | Launch native macOS GUI browser |
+| `nomad version` | Print version and build info (`nomad version 0.1 (build 1)`) |
+| `nomad help` | Display available commands and options |
+| `nomad headless` | Launch as an off-screen background browser daemon |
+| `nomad mcp` | Run stdio Model Context Protocol (MCP) server for Claude / Cursor |
+| `nomadd` | Direct alias for `nomad headless` |
+
+---
+
 ## MCP Configuration for Agent Runtimes
 
 Nomad includes a 100% native Swift Model Context Protocol (MCP) server directly inside the app bundle. It communicates over stdio using JSON-RPC 2.0 with zero external dependencies (no Node.js or npm required).
@@ -246,8 +261,8 @@ Nomad includes a 100% native Swift Model Context Protocol (MCP) server directly 
 {
   "mcpServers": {
     "nomad": {
-      "command": "/Applications/Nomad.app/Contents/MacOS/nomad",
-      "args": ["--mcp"]
+      "command": "nomad",
+      "args": ["mcp"]
     }
   }
 }
@@ -258,17 +273,15 @@ Nomad includes a 100% native Swift Model Context Protocol (MCP) server directly 
 {
   "mcpServers": {
     "nomad-browser": {
-      "command": "/Applications/Nomad.app/Contents/MacOS/nomad",
-      "args": ["--mcp"]
+      "command": "nomad",
+      "args": ["mcp"]
     }
   }
 }
 ```
 
 > [!TIP]
-> - **Installed Release Build:** Use `/Applications/Nomad.app/Contents/MacOS/nomad`.
-> - **Xcode Debug Build:** When developing in Xcode, point to your DerivedData build (e.g. `~/Library/Developer/Xcode/DerivedData/nomad-*/Build/Products/Debug/nomad.app/Contents/MacOS/nomad`) or symlink it:
->   ```bash
->   ln -sf ~/Library/Developer/Xcode/DerivedData/nomad-*/Build/Products/Debug/nomad.app/Contents/MacOS/nomad /usr/local/bin/nomad
->   ```
->   and specify `"command": "nomad"`.
+> - **Homebrew Install:** Use `"command": "nomad"`, `"args": ["mcp"]` (linked into `/opt/homebrew/bin/nomad`).
+> - **Direct App Bundle:** Or point directly to `"/Applications/Nomad.app/Contents/MacOS/nomad"`.
+> - **Xcode Debug Build:** When developing in Xcode, point to your DerivedData build:
+>   `"command": "/Users/.../Library/Developer/Xcode/DerivedData/nomad-*/Build/Products/Debug/nomad.app/Contents/MacOS/nomad"`
