@@ -55,9 +55,10 @@ if [ -n "$(cd "$TAP_DIR" && git status --porcelain)" ]; then
   exit 1
 fi
 
-# 3. Version Update in project.pbxproj, local packaging, and tap
+# 3. Version Update in project.pbxproj, NomadVersion.swift, local packaging, and tap
 echo "==> Updating version numbers to ${NEW_VERSION}..."
 sed -i '' -E "s/MARKETING_VERSION = [0-9.]+;/MARKETING_VERSION = ${NEW_VERSION};/g" nomad.xcodeproj/project.pbxproj
+sed -i '' -E "s/static let version = \"[0-9.]+\"/static let version = \"${NEW_VERSION}\"/g" nomad/Services/NomadVersion.swift
 sed -i '' -E "s/version \"[0-9.]+\"/version \"${NEW_VERSION}\"/g" packaging/homebrew/nomad.rb
 sed -i '' -E "s/version \"[0-9.]+\"/version \"${NEW_VERSION}\"/g" "$TAP_DIR/Casks/nomad.rb"
 

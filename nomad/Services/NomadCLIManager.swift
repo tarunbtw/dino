@@ -306,8 +306,8 @@ enum NomadCLIManager {
     // MARK: - Subcommand Implementations
 
     private static func handleVersion() {
-        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1"
-        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+        let version = NomadVersion.currentVersion
+        let build = NomadVersion.currentBuild
         print("nomad version \(version) (build \(build))")
         exit(0)
     }

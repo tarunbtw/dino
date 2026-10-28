@@ -107,7 +107,7 @@ enum WebKitPool {
             maskNative(console.error, 'error');
         })();
         """
-        ucc.addUserScript(WKUserScript(source: consoleInterceptor, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        ucc.addUserScript(WKUserScript(source: consoleInterceptor, injectionTime: .atDocumentStart, forMainFrameOnly: false))
 
         // Capture fetch and XMLHttpRequest network activity for Nomad DevX Network Tab
         let networkInterceptor = """
@@ -315,7 +315,7 @@ enum WebKitPool {
             maskNative(XMLHttpRequest.prototype.send, 'send');
         })();
         """
-        ucc.addUserScript(WKUserScript(source: networkInterceptor, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        ucc.addUserScript(WKUserScript(source: networkInterceptor, injectionTime: .atDocumentStart, forMainFrameOnly: false))
 
         // Nomad Sub-Frame Script: Pierces cross-origin iframes (Stripe, OAuth, reCAPTCHA, embeds)
         // Injected with forMainFrameOnly: false at document start so nested execution contexts are captured immediately.

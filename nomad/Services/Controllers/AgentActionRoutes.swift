@@ -28,7 +28,20 @@ extension NomadAgentServer {
                 let action = try JSONDecoder().decode(NomadAction.self, from: bodyData)
                 let result = try await activeTab.performAction(action)
                 let resData = try JSONEncoder().encode(result)
-                sendRaw(connection: connection, contentType: "application/json; charset=utf-8", data: resData, origin: origin)
+                let status: String
+                if result.success {
+                    status = "200 OK"
+                } else {
+                    switch result.code {
+                    case "STALE_REF", "SELECTOR_NOT_FOUND", "ELEMENT_NOT_FOUND":
+                        status = "404 Not Found"
+                    case "PENDING_DIALOG":
+                        status = "409 Conflict"
+                    default:
+                        status = "400 Bad Request"
+                    }
+                }
+                sendRaw(connection: connection, status: status, contentType: "application/json; charset=utf-8", data: resData, origin: origin)
             } catch let decodingError as DecodingError {
                 let msg: String
                 switch decodingError {
@@ -84,7 +97,8 @@ extension NomadAgentServer {
                 let action = NomadAction(action: "upload", target: targetId, paths: paths)
                 let result = try await activeTab.performAction(action)
                 let resData = try JSONEncoder().encode(result)
-                sendRaw(connection: connection, contentType: "application/json; charset=utf-8", data: resData, origin: origin)
+                let status: String = result.success ? "200 OK" : ((result.code == "STALE_REF" || result.code == "SELECTOR_NOT_FOUND" || result.code == "ELEMENT_NOT_FOUND") ? "404 Not Found" : "400 Bad Request")
+                sendRaw(connection: connection, status: status, contentType: "application/json; charset=utf-8", data: resData, origin: origin)
             } catch {
                 sendResponse(connection: connection, status: "400 Bad Request", body: "{\"error\":\"\(error.localizedDescription)\",\"code\":\"UPLOAD_ERROR\",\"success\":false}", origin: origin)
             }

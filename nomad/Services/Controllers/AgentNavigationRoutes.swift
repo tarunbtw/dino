@@ -82,30 +82,34 @@ extension NomadAgentServer {
                 }
                 let mySeq = activeTab.navigationSeq + 1
                 activeTab.load(url: url)
-                // Poll briefly (up to 350ms) to ensure provisional navigation starts or early DNS/host error is reported
+                // Await navigation resolution (commitment or provisional failure) up to 5.0 seconds
                 var navError: String? = nil
                 var superseded = false
                 let navStart = Date()
-                while Date().timeIntervalSince(navStart) < 0.35 {
+                while Date().timeIntervalSince(navStart) < 5.0 {
                     try? await Task.sleep(nanoseconds: 30_000_000)
                     if activeTab.navigationSeq != mySeq {
                         superseded = true
                         break
                     }
-                    if let err = activeTab.lastNavigationError {
+                    if activeTab.lastFailedNavigationSeq == mySeq, let err = activeTab.lastNavigationError {
                         navError = err
+                        break
+                    }
+                    if activeTab.committedNavigationSeq >= mySeq {
+                        // Navigation successfully committed or finished
                         break
                     }
                 }
                 if superseded {
                     NomadRouteCache.shared.record(eventType: "navigationCancelled", message: "Navigation superseded for \(url.absoluteString)", tabId: activeTab.id.uuidString)
-                    sendJSON(connection: connection, object: ["success": false, "cancelled": true, "code": "NAVIGATION_SUPERSEDED", "reason": "superseded", "navigatedTo": url.absoluteString], origin: origin)
+                    sendJSON(connection: connection, status: "409 Conflict", object: ["success": false, "cancelled": true, "code": "NAVIGATION_SUPERSEDED", "reason": "superseded", "navigatedTo": url.absoluteString], origin: origin)
                 } else if let navError = navError {
                     NomadRouteCache.shared.record(eventType: "navigationError", message: "Navigation failed for \(url.absoluteString): \(navError)", tabId: activeTab.id.uuidString)
-                    sendJSON(connection: connection, object: ["success": false, "error": navError, "code": "NAVIGATION_FAILED", "navigatedTo": url.absoluteString], origin: origin)
+                    sendJSON(connection: connection, status: "502 Bad Gateway", object: ["success": false, "error": navError, "code": "NAVIGATION_FAILED", "navigatedTo": url.absoluteString], origin: origin)
                 } else {
                     NomadRouteCache.shared.record(eventType: "navigation", message: "Navigated to \(url.absoluteString)", tabId: activeTab.id.uuidString)
-                    sendJSON(connection: connection, object: ["success": true, "navigatedTo": url.absoluteString], origin: origin)
+                    sendJSON(connection: connection, status: "200 OK", object: ["success": true, "navigatedTo": url.absoluteString, "title": activeTab.title], origin: origin)
                 }
             }
             return true

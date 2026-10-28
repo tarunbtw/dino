@@ -270,11 +270,11 @@ When driving Nomad from the terminal, shell scripts, or an AI agent without MCP 
 
 | Verbose Shell `curl` (~75 tokens) | Concise Nomad CLI (~4 tokens) | Purpose |
 | :--- | :--- | :--- |
-| `curl -s http://127.0.0.1:9222/snapshot` | **`nomad snap`** | Outputs compact semantic markdown tree to stdout |
+| `curl -s http://127.0.0.1:9222/snapshot` | **`nomad snap`** | Outputs compact semantic markdown tree to stdout (`-v`/`--viewport`, `--role <r>`, `--text <t>`, `--all`) |
 | `curl -s http://127.0.0.1:9222/snapshot?mode=json` | **`nomad snap --json`** | Outputs raw JSON AST |
 | `curl -s -X POST http://.../navigate -d '{"url":"..."}'` | **`nomad open <url>`** | Navigates active tab to URL (`nomad nav`, `nomad navigate`) |
-| `curl -s -X POST http://.../action -d '{"type":"click","elementId":"e5"}'` | **`nomad click <ref>`** | Clicks element by ref (`--native`, `--right` / `-r`) |
-| `curl -s -X POST http://.../action -d '{"type":"type","elementId":"e2","text":"..."}'` | **`nomad type <ref> <text>`** | Types into input field (`--submit`, `--clear`, `--native`) |
+| `curl -s -X POST http://.../action -d '{"type":"click","elementId":"e5"}'` | **`nomad click <ref>`** | Clicks element by ref (`--wait auto`, `--native`, `--right` / `-r`) |
+| `curl -s -X POST http://.../action -d '{"type":"type","elementId":"e2","text":"..."}'` | **`nomad type <ref> <text>`** | Types into input field (`--submit`, `--press Enter`, `--clear`, `--native`) |
 | `curl -s -X POST http://.../action -d '{"type":"press","key":"Enter"}'` | **`nomad press <key>`** | Presses key chord (e.g. `Enter`, `Escape`, `Meta+A`) |
 | `curl -s -X POST http://.../action -d '{"type":"drag","elementId":"e3","toElementId":"e8"}'` | **`nomad drag <from> <to>`** | Drags element to destination element (`--native`) |
 | `curl -s -X POST http://.../action -d '{"type":"hover","elementId":"e5"}'` | **`nomad hover <ref>`** | Hovers over element (`--native`) |

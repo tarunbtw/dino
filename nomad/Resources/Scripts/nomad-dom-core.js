@@ -1116,6 +1116,47 @@
                     } catch(err) {}
 
                     var frameData = window.__nomad_frames && window.__nomad_frames[frameId];
+                    if (!frameData || !frameData.elements || frameData.elements.length === 0) {
+                        try {
+                            if (ifr.contentDocument && ifr.contentWindow) {
+                                var doc = ifr.contentDocument;
+                                var subEls = [];
+                                var subSel = 'a, button, input, textarea, select, details, summary, h1, h2, h3, h4, h5, h6, img, li, p, td, th, [role="button"], [role="link"], [role="checkbox"], [contenteditable="true"]';
+                                var foundSub = doc.querySelectorAll(subSel);
+                                for (var si = 0; si < foundSub.length; si++) {
+                                    var se = foundSub[si];
+                                    var sRect = se.getBoundingClientRect();
+                                    if (sRect.width <= 0 || sRect.height <= 0) continue;
+                                    var sStyle = ifr.contentWindow.getComputedStyle(se);
+                                    if (sStyle.display === 'none' || sStyle.visibility === 'hidden') continue;
+                                    var sid = se.getAttribute('data-nomad-id') || ('e' + (si + 1));
+                                    se.setAttribute('data-nomad-id', sid);
+                                    var sTag = se.tagName.toLowerCase();
+                                    var sText = (se.getAttribute('aria-label') || se.placeholder || se.innerText || se.textContent || '').trim().replace(/\\s+/g, ' ').substring(0, 120);
+                                    subEls.push({
+                                        id: sid,
+                                        tag: sTag,
+                                        role: se.getAttribute('role') || sTag,
+                                        text: sText,
+                                        value: se.value || null,
+                                        type: se.type || null,
+                                        bounds: {
+                                            x: Math.round(sRect.left),
+                                            y: Math.round(sRect.top),
+                                            width: Math.round(sRect.width),
+                                            height: Math.round(sRect.height)
+                                        }
+                                    });
+                                }
+                                if (subEls.length > 0) {
+                                    frameData = {
+                                        frameId: frameId,
+                                        elements: subEls
+                                    };
+                                }
+                            }
+                        } catch(e) {}
+                    }
                     if (frameData && frameData.elements && frameData.elements.length > 0) {
                         for (var fei = 0; fei < frameData.elements.length; fei++) {
                             var fel = frameData.elements[fei];

@@ -170,6 +170,8 @@ final class Tab: NSObject, Identifiable, ObservableObject {
     var dialogTimeoutTask: Task<Void, Never>? = nil
     var onDialogAppeared: ((PendingDialog) -> Void)? = nil
     @Published var navigationSeq: Int = 0
+    @Published var committedNavigationSeq: Int = 0
+    @Published var lastFailedNavigationSeq: Int = 0
     @Published var lastNavigationStartTime: Date? = nil
     @Published var lastNavigationFinishTime: Date? = nil
     @Published var lastActionTime: Date? = nil

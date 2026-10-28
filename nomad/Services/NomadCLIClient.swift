@@ -395,13 +395,48 @@ enum NomadCLIClient {
 
     // MARK: - Subcommand Handlers
 
+    @discardableResult
+    private static func validateActionResponse(_ resp: HTTPResponse, command: String) -> [String: Any] {
+        guard resp.statusCode == 200 else {
+            var msg = resp.bodyString
+            var code = "ERROR"
+            if let json = resp.jsonObject {
+                if let err = json["error"] as? String {
+                    msg = err
+                } else if let m = json["message"] as? String {
+                    msg = m
+                }
+                if let c = json["code"] as? String {
+                    code = c
+                }
+            }
+            emitError("nomad \(command): [\(code)] \(msg)")
+            exit(1)
+        }
+
+        guard let json = resp.jsonObject else {
+            return [:]
+        }
+
+        if let success = json["success"] as? Bool, !success {
+            let msg = (json["message"] as? String) ?? (json["error"] as? String) ?? "Action failed"
+            let code = (json["code"] as? String) ?? "ACTION_FAILED"
+            emitError("nomad \(command): [\(code)] \(msg)")
+            exit(1)
+        }
+
+        return json
+    }
+
     private static func handleSnap(args: ParsedArgs, port: UInt16?, socketPath: String?) {
         var queryItems: [String] = []
 
         let isJson = args.boolFlag(["--json", "-j"])
         queryItems.append("mode=\(isJson ? "json" : "text")")
 
-        if args.boolFlag(["--viewport", "-v", "--viewportOnly"]) {
+        if args.boolFlag(["--all"]) {
+            queryItems.append("viewportOnly=false")
+        } else if args.boolFlag(["--viewport", "-v", "--viewportOnly"]) {
             queryItems.append("viewportOnly=true")
         }
         if let target = args.stringOption(["--target", "-t"]) {
@@ -488,19 +523,28 @@ enum NomadCLIClient {
         let resp = request(method: "POST", path: "/navigate", body: bodyData, timeoutSeconds: 30, socketPath: socketPath, port: port)
         guard resp.statusCode == 200 else {
             let errMsg = (resp.jsonObject?["error"] as? String) ?? resp.bodyString
-            emitError("nomad open: \(errMsg)")
+            let code = (resp.jsonObject?["code"] as? String) ?? "NAVIGATION_FAILED"
+            emitError("nomad open: [\(code)] \(errMsg)")
             exit(1)
         }
 
-        if let json = resp.jsonObject {
-            let finalURL = (json["url"] as? String) ?? url
-            if let title = json["title"] as? String, !title.isEmpty {
-                emitOutput("Loaded: \(finalURL) - \"\(title)\"")
-            } else {
-                emitOutput("Loaded: \(finalURL)")
-            }
-        } else {
+        guard let json = resp.jsonObject else {
             emitOutput("Loaded: \(url)")
+            exit(0)
+        }
+
+        if let success = json["success"] as? Bool, !success {
+            let errMsg = (json["error"] as? String) ?? (json["message"] as? String) ?? "Navigation failed"
+            let code = (json["code"] as? String) ?? "NAVIGATION_FAILED"
+            emitError("nomad open: [\(code)] \(errMsg)")
+            exit(1)
+        }
+
+        let finalURL = (json["navigatedTo"] as? String) ?? (json["url"] as? String) ?? url
+        if let title = json["title"] as? String, !title.isEmpty {
+            emitOutput("Loaded: \(finalURL) - \"\(title)\"")
+        } else {
+            emitOutput("Loaded: \(finalURL)")
         }
         exit(0)
     }
@@ -520,7 +564,15 @@ enum NomadCLIClient {
         let resp = request(method: "POST", path: "/navigate", body: bodyData, timeoutSeconds: 15, socketPath: socketPath, port: port)
         guard resp.statusCode == 200 else {
             let errMsg = (resp.jsonObject?["error"] as? String) ?? resp.bodyString
-            emitError("nomad \(action): \(errMsg)")
+            let code = (resp.jsonObject?["code"] as? String) ?? "ACTION_FAILED"
+            emitError("nomad \(action): [\(code)] \(errMsg)")
+            exit(1)
+        }
+
+        if let json = resp.jsonObject, let success = json["success"] as? Bool, !success {
+            let errMsg = (json["error"] as? String) ?? (json["message"] as? String) ?? "Action failed"
+            let code = (json["code"] as? String) ?? "ACTION_FAILED"
+            emitError("nomad \(action): [\(code)] \(errMsg)")
             exit(1)
         }
 
@@ -548,8 +600,9 @@ enum NomadCLIClient {
             "elementId": ref,
             "native": isNative
         ]
-        if let tabArg = args.stringOption(["--tab"]),
-           let tid = resolveTabId(tabArg, port: port, socketPath: socketPath) {
+        let tabArg = args.stringOption(["--tab"])
+        let resolvedTid = tabArg.flatMap { resolveTabId($0, port: port, socketPath: socketPath) }
+        if let tid = resolvedTid {
             bodyObj["tabId"] = tid
         }
 
@@ -559,10 +612,16 @@ enum NomadCLIClient {
         }
 
         let resp = request(method: "POST", path: "/action", body: bodyData, socketPath: socketPath, port: port)
-        guard resp.statusCode == 200 else {
-            let errMsg = (resp.jsonObject?["error"] as? String) ?? resp.bodyString
-            emitError("nomad click: \(errMsg)")
-            exit(1)
+        _ = validateActionResponse(resp, command: "click")
+
+        // Compound --wait support (e.g. nomad click e5 --wait auto)
+        if let waitArg = args.stringOption(["--wait"]) {
+            var waitBody: [String: Any] = ["mode": waitArg]
+            if let tid = resolvedTid { waitBody["tabId"] = tid }
+            if let wData = try? JSONSerialization.data(withJSONObject: waitBody) {
+                let waitResp = request(method: "POST", path: "/wait", body: wData, timeoutSeconds: 15, socketPath: socketPath, port: port)
+                _ = validateActionResponse(waitResp, command: "wait")
+            }
         }
 
         let desc = isRight ? "Right-clicked" : "Clicked"
@@ -581,17 +640,19 @@ enum NomadCLIClient {
         let isSubmit = args.boolFlag(["--submit"])
         let isClear = args.boolFlag(["--clear"])
         let isNative = args.boolFlag(["--native"])
+        let pressKey = args.stringOption(["--press", "-p"])
 
         var bodyObj: [String: Any] = [
             "type": "type",
             "elementId": ref,
             "text": text,
-            "submit": isSubmit,
+            "submit": isSubmit || (pressKey?.lowercased() == "enter"),
             "clear": isClear,
             "native": isNative
         ]
-        if let tabArg = args.stringOption(["--tab"]),
-           let tid = resolveTabId(tabArg, port: port, socketPath: socketPath) {
+        let tabArg = args.stringOption(["--tab"])
+        let resolvedTid = tabArg.flatMap { resolveTabId($0, port: port, socketPath: socketPath) }
+        if let tid = resolvedTid {
             bodyObj["tabId"] = tid
         }
 
@@ -601,10 +662,16 @@ enum NomadCLIClient {
         }
 
         let resp = request(method: "POST", path: "/action", body: bodyData, socketPath: socketPath, port: port)
-        guard resp.statusCode == 200 else {
-            let errMsg = (resp.jsonObject?["error"] as? String) ?? resp.bodyString
-            emitError("nomad type: \(errMsg)")
-            exit(1)
+        _ = validateActionResponse(resp, command: "type")
+
+        // If extra key chord requested (and not already submitted via Enter)
+        if let key = pressKey, key.lowercased() != "enter" {
+            var pressObj: [String: Any] = ["type": "press", "key": key, "native": isNative]
+            if let tid = resolvedTid { pressObj["tabId"] = tid }
+            if let pData = try? JSONSerialization.data(withJSONObject: pressObj) {
+                let pressResp = request(method: "POST", path: "/action", body: pData, socketPath: socketPath, port: port)
+                _ = validateActionResponse(pressResp, command: "press")
+            }
         }
 
         emitOutput("Typed into \(ref)")
@@ -634,11 +701,7 @@ enum NomadCLIClient {
         }
 
         let resp = request(method: "POST", path: "/action", body: bodyData, socketPath: socketPath, port: port)
-        guard resp.statusCode == 200 else {
-            let errMsg = (resp.jsonObject?["error"] as? String) ?? resp.bodyString
-            emitError("nomad press: \(errMsg)")
-            exit(1)
-        }
+        _ = validateActionResponse(resp, command: "press")
 
         emitOutput("Pressed \(key)")
         exit(0)
@@ -671,11 +734,7 @@ enum NomadCLIClient {
         }
 
         let resp = request(method: "POST", path: "/action", body: bodyData, socketPath: socketPath, port: port)
-        guard resp.statusCode == 200 else {
-            let errMsg = (resp.jsonObject?["error"] as? String) ?? resp.bodyString
-            emitError("nomad drag: \(errMsg)")
-            exit(1)
-        }
+        _ = validateActionResponse(resp, command: "drag")
 
         emitOutput("Dragged \(fromRef) to \(toRef)")
         exit(0)
@@ -704,11 +763,7 @@ enum NomadCLIClient {
         }
 
         let resp = request(method: "POST", path: "/action", body: bodyData, socketPath: socketPath, port: port)
-        guard resp.statusCode == 200 else {
-            let errMsg = (resp.jsonObject?["error"] as? String) ?? resp.bodyString
-            emitError("nomad hover: \(errMsg)")
-            exit(1)
-        }
+        _ = validateActionResponse(resp, command: "hover")
 
         emitOutput("Hovered \(ref)")
         exit(0)
@@ -740,11 +795,7 @@ enum NomadCLIClient {
         }
 
         let resp = request(method: "POST", path: "/action", body: bodyData, socketPath: socketPath, port: port)
-        guard resp.statusCode == 200 else {
-            let errMsg = (resp.jsonObject?["error"] as? String) ?? resp.bodyString
-            emitError("nomad select: \(errMsg)")
-            exit(1)
-        }
+        _ = validateActionResponse(resp, command: "select")
 
         emitOutput("Selected \"\(val)\" in \(ref)")
         exit(0)
@@ -783,11 +834,7 @@ enum NomadCLIClient {
         }
 
         let resp = request(method: "POST", path: "/action", body: bodyData, socketPath: socketPath, port: port)
-        guard resp.statusCode == 200 else {
-            let errMsg = (resp.jsonObject?["error"] as? String) ?? resp.bodyString
-            emitError("nomad scroll: \(errMsg)")
-            exit(1)
-        }
+        _ = validateActionResponse(resp, command: "scroll")
 
         emitOutput("Scrolled \(direction) \(Int(amount))px")
         exit(0)
@@ -821,11 +868,7 @@ enum NomadCLIClient {
 
         let sockTimeout = max(10, Int(Double(timeoutMs) / 1000.0) + 5)
         let resp = request(method: "POST", path: "/wait", body: bodyData, timeoutSeconds: sockTimeout, socketPath: socketPath, port: port)
-        guard resp.statusCode == 200 else {
-            let errMsg = (resp.jsonObject?["error"] as? String) ?? resp.bodyString
-            emitError("nomad wait: \(errMsg)")
-            exit(1)
-        }
+        _ = validateActionResponse(resp, command: "wait")
 
         emitOutput("Wait completed (\(mode))")
         exit(0)
@@ -1096,11 +1139,7 @@ enum NomadCLIClient {
         }
 
         let resp = request(method: "POST", path: "/upload", body: bodyData, socketPath: socketPath, port: port)
-        guard resp.statusCode == 200 else {
-            let errMsg = (resp.jsonObject?["error"] as? String) ?? resp.bodyString
-            emitError("nomad upload: \(errMsg)")
-            exit(1)
-        }
+        _ = validateActionResponse(resp, command: "upload")
 
         emitOutput("Uploaded \(resolvedPaths.count) file(s) to \(ref)")
         exit(0)

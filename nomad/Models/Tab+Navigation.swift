@@ -116,6 +116,8 @@ extension Tab: WKNavigationDelegate {
         }
         self.allowNextFileNavigation = false
         self.isLoading = false
+        self.committedNavigationSeq = self.navigationSeq
+        self.lastNavigationError = nil
         self.lastNavigationFinishTime = Date()
         NomadAgentServer.shared.broadcastEvent(name: "navigation", payload: [
             "tabId": self.id.uuidString,
@@ -174,13 +176,34 @@ extension Tab: WKNavigationDelegate {
         }
     }
 
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        if let curNav = self.currentNavigation, navigation == curNav {
+            self.committedNavigationSeq = self.navigationSeq
+            self.lastNavigationError = nil
+        }
+    }
+
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         self.currentNavigation = navigation
-        self.networkEntries.removeAll()
         self.lastNavigationStartTime = Date()
+        self.lastNavigationError = nil
+
+        let targetUrl = webView.url?.absoluteString ?? self.url?.absoluteString ?? ""
+        let docEntry = NetworkEntry(
+            method: "GET",
+            url: targetUrl,
+            status: 200,
+            durationMs: 0,
+            type: "document"
+        )
+        if self.networkEntries.count > 300 {
+            self.networkEntries.removeFirst(50)
+        }
+        self.networkEntries.append(docEntry)
+
         NomadAgentServer.shared.broadcastEvent(name: "navigationStart", payload: [
             "tabId": self.id.uuidString,
-            "url": webView.url?.absoluteString ?? self.url?.absoluteString ?? ""
+            "url": targetUrl
         ])
     }
 
@@ -205,6 +228,7 @@ extension Tab: WKNavigationDelegate {
         self.isLoading = false
         self.lastNavigationFinishTime = Date()
         self.lastNavigationError = error.localizedDescription
+        self.lastFailedNavigationSeq = self.navigationSeq
         NomadAgentServer.shared.broadcastEvent(name: "navigationError", payload: [
             "tabId": self.id.uuidString,
             "error": error.localizedDescription
@@ -231,6 +255,7 @@ extension Tab: WKNavigationDelegate {
         self.isLoading = false
         self.lastNavigationFinishTime = Date()
         self.lastNavigationError = error.localizedDescription
+        self.lastFailedNavigationSeq = self.navigationSeq
         NomadAgentServer.shared.broadcastEvent(name: "navigationError", payload: [
             "tabId": self.id.uuidString,
             "error": error.localizedDescription

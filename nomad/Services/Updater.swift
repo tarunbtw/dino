@@ -63,11 +63,11 @@ final class Updater: ObservableObject {
     @Published private(set) var statusMessage: String = ""
 
     static var currentVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1"
+        NomadVersion.currentVersion
     }
 
     static var currentBuild: Int {
-        Int(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "") ?? 1
+        NomadVersion.currentBuild
     }
 
     static let autoInstallKey = "nomad.update.autoInstall"
