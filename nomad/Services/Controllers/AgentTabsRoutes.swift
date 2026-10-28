@@ -128,6 +128,47 @@ extension NomadAgentServer {
             sendJSON(connection: connection, object: ["success": true, "tabId": id.uuidString, "tier": newTier.rawValue], origin: origin)
             return true
 
+        case ("GET", "/extensions"):
+            let exts: [[String: Any]] = ExtensionManager.shared.installed.map { ext in
+                var dict: [String: Any] = [
+                    "id": ext.id,
+                    "name": ext.name,
+                    "version": ext.version,
+                    "enabled": ext.enabled,
+                    "fromStore": ext.fromStore,
+                    "pinned": ext.pinned,
+                    "permissions": ext.permissions
+                ]
+                if let p = ext.popupPath { dict["popupPath"] = p }
+                if let o = ext.optionsPath { dict["optionsPath"] = o }
+                return dict
+            }
+            sendJSON(connection: connection, object: ["extensions": exts, "count": exts.count, "success": true], origin: origin)
+            return true
+
+        case ("POST", "/extensions/toggle"):
+            guard let bodyData = bodyData,
+                  let json = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any],
+                  let id = json["id"] as? String, !id.isEmpty else {
+                sendResponse(connection: connection, status: "400 Bad Request", body: "{\"error\":\"Missing extension 'id'\",\"code\":\"MISSING_ID\",\"success\":false}", origin: origin)
+                return true
+            }
+            let mgr = ExtensionManager.shared
+            guard let existing = mgr.installed.first(where: { $0.id == id }) else {
+                sendResponse(connection: connection, status: "404 Not Found", body: "{\"error\":\"Extension not found: \(id)\",\"code\":\"EXTENSION_NOT_FOUND\",\"success\":false}", origin: origin)
+                return true
+            }
+            if let reqEnabled = json["enabled"] as? Bool {
+                if existing.enabled != reqEnabled {
+                    mgr.toggleEnabled(id: id)
+                }
+            } else {
+                mgr.toggleEnabled(id: id)
+            }
+            let updated = mgr.installed.first(where: { $0.id == id })
+            sendJSON(connection: connection, object: ["success": true, "id": id, "enabled": updated?.enabled ?? false], origin: origin)
+            return true
+
         default:
             return false
         }

@@ -116,12 +116,14 @@ extension Tab: WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        let navSeq = sequence(for: navigation) ?? self.navigationSeq
+        guard navSeq >= self.navigationSeq else { return }
         if let curNav = self.currentNavigation, navigation != curNav {
             return
         }
         self.allowNextFileNavigation = false
         self.isLoading = false
-        self.committedNavigationSeq = self.navigationSeq
+        self.committedNavigationSeq = navSeq
         self.lastNavigationError = nil
         self.lastNavigationFinishTime = Date()
         if let start = self.lastNavigationStartTime {
@@ -198,13 +200,15 @@ extension Tab: WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
-        if let curNav = self.currentNavigation, navigation == curNav {
-            self.committedNavigationSeq = self.navigationSeq
-            self.lastNavigationError = nil
-        }
+        let navSeq = sequence(for: navigation) ?? self.navigationSeq
+        guard navSeq >= self.navigationSeq else { return }
+        self.committedNavigationSeq = navSeq
+        self.lastNavigationError = nil
     }
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        let navSeq = sequence(for: navigation) ?? self.navigationSeq
+        guard navSeq >= self.navigationSeq else { return }
         self.currentNavigation = navigation
         self.lastNavigationStartTime = Date()
         self.lastNavigationError = nil
@@ -231,6 +235,9 @@ extension Tab: WKNavigationDelegate {
     private func isSupersededOrCancelled(_ error: Error, navigation: WKNavigation!) -> Bool {
         let nsErr = error as NSError
         if nsErr.domain == NSURLErrorDomain && nsErr.code == NSURLErrorCancelled {
+            return true
+        }
+        if let navSeq = sequence(for: navigation), navSeq < self.navigationSeq {
             return true
         }
         if let curNav = self.currentNavigation, navigation != curNav {

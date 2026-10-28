@@ -119,7 +119,8 @@ enum NomadCLIManager {
             "back", "forward", "reload", "click", "type",
             "press", "drag", "hover", "select", "scroll",
             "wait", "tabs", "tab", "eval", "evaluate",
-            "shot", "screenshot", "upload"
+            "shot", "screenshot", "upload", "find", "dialog",
+            "ext", "extensions"
         ]
 
         var driverCmdIndex: Int? = nil

@@ -177,6 +177,17 @@ final class Tab: NSObject, Identifiable, ObservableObject {
     @Published var lastActionTime: Date? = nil
     var allowNextFileNavigation: Bool = false
     var currentNavigation: WKNavigation? = nil
+    private var navigationSeqMap: [ObjectIdentifier: Int] = [:]
+
+    func recordNavigation(_ navigation: WKNavigation?, for seq: Int) {
+        guard let navigation = navigation else { return }
+        navigationSeqMap[ObjectIdentifier(navigation)] = seq
+    }
+
+    func sequence(for navigation: WKNavigation?) -> Int? {
+        guard let navigation = navigation else { return nil }
+        return navigationSeqMap[ObjectIdentifier(navigation)]
+    }
 
     /// Staged file URLs ready for programmatic consumption by runOpenPanelWith during agent file uploads.
     var stagedUploadURLs: [URL]? = nil
@@ -366,6 +377,7 @@ final class Tab: NSObject, Identifiable, ObservableObject {
     /// Loads a specific URL.
     func load(url: URL) {
         self.navigationSeq += 1
+        let seq = self.navigationSeq
         self.lastNavigationStartTime = Date()
         self.url = url
         self.lastNavigationError = nil
@@ -417,6 +429,7 @@ final class Tab: NSObject, Identifiable, ObservableObject {
             let request = URLRequest(url: url)
             self.currentNavigation = webView.load(request)
         }
+        recordNavigation(self.currentNavigation, for: seq)
         fetchFavicon(for: url)
     }
 

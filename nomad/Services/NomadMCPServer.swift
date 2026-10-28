@@ -200,6 +200,28 @@ final class NomadMCPServer {
                 respondTool(id: id, res: res, error: err)
             }
 
+        case "nomad_find":
+            callNomad(method: "POST", path: "/find", body: args) { res, err in
+                respondTool(id: id, res: res, error: err)
+            }
+
+        case "nomad_extensions":
+            let action = (args["action"] as? String)?.lowercased() ?? "list"
+            if action == "toggle" || action == "enable" || action == "disable" {
+                var body: [String: Any] = [:]
+                if let extId = args["id"] as? String { body["id"] = extId }
+                if action == "enable" { body["enabled"] = true }
+                if action == "disable" { body["enabled"] = false }
+                if let en = args["enabled"] as? Bool { body["enabled"] = en }
+                callNomad(method: "POST", path: "/extensions/toggle", body: body) { res, err in
+                    respondTool(id: id, res: res, error: err)
+                }
+            } else {
+                callNomad(method: "GET", path: "/extensions") { res, err in
+                    respondTool(id: id, res: res, error: err)
+                }
+            }
+
         case "nomad_cookies":
             let action = (args["action"] as? String)?.lowercased() ?? "get"
             var qs: [String] = []
@@ -595,17 +617,54 @@ final class NomadMCPServer {
             ] as [String: Any]
         ],
         [
+            "name": "nomad_find",
+            "description": "Quickly locates a single interactive element ref (e.g. 'e5') matching a role, text, or selector in ~15 tokens, avoiding the token cost of a full page snapshot.",
+            "inputSchema": [
+                "type": "object",
+                "properties": [
+                    "role": ["type": "string", "description": "ARIA role filter (e.g. 'button', 'textbox', 'searchbox', 'link')"],
+                    "text": ["type": "string", "description": "Substring match against element text, value, or placeholder"],
+                    "selector": ["type": "string", "description": "CSS selector to locate element"],
+                    "viewportOnly": ["type": "boolean", "description": "Only consider elements currently inside viewport"],
+                    "tabId": ["type": "string", "description": "Optional target tab UUID"]
+                ] as [String: Any],
+                "additionalProperties": false
+            ] as [String: Any]
+        ],
+        [
+            "name": "nomad_extensions",
+            "description": "List installed WebExtensions in Nomad, inspect their status and declared permissions, or toggle them enabled/disabled.",
+            "inputSchema": [
+                "type": "object",
+                "properties": [
+                    "action": [
+                        "type": "string",
+                        "enum": ["list", "toggle", "enable", "disable"],
+                        "description": "Action to perform. Default: 'list'."
+                    ] as [String: Any],
+                    "id": ["type": "string", "description": "Extension ID to enable, disable, or toggle"]
+                ] as [String: Any],
+                "additionalProperties": false
+            ] as [String: Any]
+        ],
+        [
             "name": "nomad_wait",
-            "description": "Wait for page settlement, DOM mutation stability, a specific CSS selector, URL pattern, network requests to become idle, navigation to complete, or a timeout before continuing execution.",
+            "description": "Wait for page settlement, DOM mutation stability, a specific CSS selector, dynamic text to appear, element state change, URL pattern, network requests to become idle, navigation to complete, or a timeout before continuing execution.",
             "inputSchema": [
                 "type": "object",
                 "properties": [
                     "mode": [
                         "type": "string",
-                        "enum": ["auto", "stability", "selector", "timeout", "networkidle", "navigation", "url"],
+                        "enum": ["auto", "stability", "selector", "text", "state", "timeout", "networkidle", "navigation", "url"],
                         "description": "Wait mode. Default: 'auto' (automatically checks navigation, inflight network requests, selector readiness, and DOM mutation stability)."
                     ] as [String: Any],
                     "selector": ["type": "string", "description": "CSS selector to wait for (if provided, auto-wait also verifies element readiness)"],
+                    "text": ["type": "string", "description": "Text substring to wait for on page or inside selector (used for 'text' mode)"],
+                    "state": [
+                        "type": "string",
+                        "enum": ["visible", "hidden", "enabled", "disabled", "checked", "unchecked", "focused"],
+                        "description": "Element state to wait for on selector (used for 'state' mode)"
+                    ] as [String: Any],
                     "urlPattern": ["type": "string", "description": "Substring or regex pattern to wait for in active URL (for 'navigation' or 'url' mode)"],
                     "quietMs": ["type": "number", "description": "Milliseconds of DOM mutation silence required for 'stability' (default: 250)"],
                     "timeoutMs": ["type": "number", "description": "Maximum milliseconds to wait before timing out (default: 5000)"],

@@ -530,24 +530,27 @@ final class NomadAgentServer: ObservableObject {
             ]
             let liveTitle = (self.store?.activeTab?.webView.title?.isEmpty == false ? self.store?.activeTab?.webView.title : self.store?.activeTab?.title) ?? ""
             let liveURL = (self.store?.activeTab?.webView.url?.absoluteString ?? self.store?.activeTab?.url?.absoluteString) ?? ""
-            let statusObj: [String: Any] = [
+            let isVerbose = (queryItem("verbose") == "true" || queryItem("verbose") == "1")
+            var statusObj: [String: Any] = [
                 "nomad": "active",
                 "status": "healthy",
                 "version": Updater.currentVersion,
-                "build": Updater.currentBuild,
                 "mode": NomadHeadlessManager.isHeadless ? "headless_daemon" : "gui",
-                "isHeadless": NomadHeadlessManager.isHeadless,
                 "port": self.port,
-                "unixSocket": unixSocketInfo,
-                "tabsCount": self.store?.tabs.count ?? 0,
                 "tabCount": self.store?.tabs.count ?? 0,
                 "activeTabId": self.store?.activeTabId?.uuidString ?? "",
                 "activeURL": liveURL,
                 "activeTitle": liveTitle,
-                "lastDialog": (self.store?.activeTab?.lastDialog as Any?) ?? NSNull(),
-                "hasPendingDialog": self.store?.activeTab?.pendingDialog != nil,
-                "capabilities": capabilities
+                "hasPendingDialog": self.store?.activeTab?.pendingDialog != nil
             ]
+            if isVerbose {
+                statusObj["build"] = Updater.currentBuild
+                statusObj["isHeadless"] = NomadHeadlessManager.isHeadless
+                statusObj["unixSocket"] = unixSocketInfo
+                statusObj["tabsCount"] = self.store?.tabs.count ?? 0
+                statusObj["lastDialog"] = (self.store?.activeTab?.lastDialog as Any?) ?? NSNull()
+                statusObj["capabilities"] = capabilities
+            }
             sendJSON(connection: connection, object: statusObj, origin: origin)
             return
         }

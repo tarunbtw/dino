@@ -1100,7 +1100,16 @@
                 }
 
                 // Cross-Origin / Nested Sub-Frame Piercing: aggregate elements from registered iframes
-                var iframes = document.querySelectorAll('iframe');
+                var iframes = [];
+                if (resolvedTargetEl) {
+                    if (resolvedTargetEl.tagName === 'IFRAME') {
+                        iframes = [resolvedTargetEl];
+                    } else if (resolvedTargetEl.querySelectorAll) {
+                        iframes = Array.prototype.slice.call(resolvedTargetEl.querySelectorAll('iframe'));
+                    }
+                } else {
+                    iframes = Array.prototype.slice.call(document.querySelectorAll('iframe'));
+                }
                 for (var fi = 0; fi < iframes.length; fi++) {
                     var ifr = iframes[fi];
                     var ifrRect = ifr.getBoundingClientRect();
@@ -1250,18 +1259,27 @@
                         var r = (item.role || '').toLowerCase();
                         var tg = (item.tag || '').toLowerCase();
                         var tp = (item.type || '').toLowerCase();
-                        if (r === roleFilter || tg === roleFilter || tp === roleFilter) return true;
+                        if (r === roleFilter) return true;
                         // Semantic dual-direction mapping:
-                        if (roleFilter === 'link' && (tg === 'a' || tg === 'area')) return true;
-                        if ((roleFilter === 'a' || roleFilter === 'area') && r === 'link') return true;
-                        if (roleFilter === 'button' && (tg === 'button' || tp === 'submit' || tp === 'button' || tg === 'summary')) return true;
-                        if ((roleFilter === 'button' || roleFilter === 'submit') && (r === 'button' || tg === 'button')) return true;
-                        if (roleFilter === 'textbox' && (tg === 'input' || tg === 'textarea')) return true;
-                        if ((roleFilter === 'input' || roleFilter === 'textarea') && (r === 'textbox' || tg === 'input' || tg === 'textarea')) return true;
-                        if (roleFilter === 'heading' && (tg.indexOf('h') === 0 && tg.length === 2)) return true;
-                        if (roleFilter.indexOf('h') === 0 && roleFilter.length === 2 && r === 'heading') return true;
+                        if (roleFilter === 'link' && (tg === 'a' || tg === 'area' || r === 'link')) return true;
+                        if (roleFilter === 'button' && (r === 'button' || tg === 'button' || tp === 'submit' || tp === 'button' || tg === 'summary')) return true;
+                        if (roleFilter === 'checkbox' && (r === 'checkbox' || tp === 'checkbox')) return true;
+                        if (roleFilter === 'radio' && (r === 'radio' || tp === 'radio')) return true;
+                        if (roleFilter === 'textbox') {
+                            if (r === 'textbox' || r === 'searchbox') return true;
+                            if (tg === 'textarea') return true;
+                            if (tg === 'input') {
+                                var nonText = ['checkbox', 'radio', 'button', 'submit', 'reset', 'image', 'file', 'range', 'color', 'hidden'];
+                                if (tp && nonText.indexOf(tp) !== -1) return false;
+                                return true;
+                            }
+                            return false;
+                        }
+                        if (roleFilter === 'searchbox' && (r === 'searchbox' || tp === 'search')) return true;
+                        if (roleFilter === 'heading' && (r === 'heading' || (tg.indexOf('h') === 0 && tg.length === 2))) return true;
                         if ((roleFilter === 'img' || roleFilter === 'image') && (tg === 'img' || r === 'img')) return true;
                         if (roleFilter === 'text' && (r === 'text' || r === 'paragraph' || tg === 'p' || tg === 'span' || tg === 'div')) return true;
+                        if (tg === roleFilter) return true;
                         return false;
                     });
                 }
@@ -1643,7 +1661,8 @@
                 if (targetId && !el && action !== 'scroll' && action !== 'press') {
                     var isExplicitSelector = Boolean(actionObj.selector && !actionObj.elementId);
                     var isRefPattern = /^(f[0-9]+:)?[e][0-9]+$/i.test(targetId);
-                    if (isExplicitSelector || !isRefPattern) {
+                    var isCssSelectorString = /^([#.\[:]|[a-z0-9_-]+[ >+~])/i.test(targetId);
+                    if (isExplicitSelector || isCssSelectorString) {
                         return {
                             success: false,
                             staleRef: false,
@@ -1652,11 +1671,20 @@
                             elementId: targetId
                         };
                     }
+                    if (isRefPattern) {
+                        return {
+                            success: false,
+                            staleRef: true,
+                            code: 'STALE_REF',
+                            message: "Target element '" + targetId + "' not found or no longer in DOM. Please re-snapshot the page.",
+                            elementId: targetId
+                        };
+                    }
                     return {
                         success: false,
-                        staleRef: true,
-                        code: 'STALE_REF',
-                        message: "Target element '" + targetId + "' not found or no longer in DOM. Please re-snapshot the page.",
+                        staleRef: false,
+                        code: 'ELEMENT_NOT_FOUND',
+                        message: "Target element '" + targetId + "' not found.",
                         elementId: targetId
                     };
                 }

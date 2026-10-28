@@ -72,7 +72,8 @@ enum NomadCLIClient {
         "--text", "--depth", "--mode", "--limit", "--offset", "--clip", "-c",
         "--element", "-e", "--world", "--port", "--socket", "--policy",
         "--press", "-p", "--wait", "-w", "--url", "--to-target", "--to-selector",
-        "--to-x", "--to-y", "--output", "-o", "--pixels", "--modifiers", "--value"
+        "--to-x", "--to-y", "--output", "-o", "--pixels", "--modifiers", "--value",
+        "--state", "--response", "--timeout"
     ]
 
     private static let allowedCommandOptions: [String: Set<String>] = [
@@ -91,7 +92,11 @@ enum NomadCLIClient {
         "hover": ["--tab"],
         "select": ["--text", "--value", "--wait", "-w", "--tab"],
         "scroll": ["--up", "--down", "--left", "--right", "--top", "--bottom", "--pixels", "--tab"],
-        "wait": ["--mode", "-m", "--duration", "--selector", "-s", "--target", "-t", "--url", "--tab"],
+        "wait": ["--mode", "-m", "--duration", "--timeout", "--selector", "-s", "--target", "-t", "--url", "--text", "--state", "--tab"],
+        "find": ["--role", "-r", "--text", "--selector", "-s", "--viewport", "-v", "--viewportOnly", "--ref-only", "--tab"],
+        "dialog": ["--policy", "--response", "--tab"],
+        "ext": ["--tab"],
+        "extensions": ["--tab"],
         "tab": ["--close", "--new", "--switch"],
         "tabs": ["--close", "--new", "--switch"],
         "eval": ["--world", "--tab"],
@@ -452,6 +457,14 @@ enum NomadCLIClient {
             handleWait(args: args, port: activePort, socketPath: activeSocket)
             return true
 
+        case "find":
+            handleFind(args: args, port: activePort, socketPath: activeSocket)
+            return true
+
+        case "dialog":
+            handleDialog(args: args, port: activePort, socketPath: activeSocket)
+            return true
+
         case "tabs", "tab":
             handleTabs(args: args, port: activePort, socketPath: activeSocket)
             return true
@@ -466,6 +479,10 @@ enum NomadCLIClient {
 
         case "upload":
             handleUpload(args: args, port: activePort, socketPath: activeSocket)
+            return true
+
+        case "ext", "extensions":
+            handleExtensions(args: args, port: activePort, socketPath: activeSocket)
             return true
 
         default:
@@ -1173,13 +1190,28 @@ enum NomadCLIClient {
 
     private static func handleWait(args: ParsedArgs, port: UInt16?, socketPath: String?) {
         var timeoutMs = 5000
-        if let first = args.positionals.first, let num = Int(first) {
-            timeoutMs = num
-        }
+        var selector = args.stringOption(["--selector", "-s", "--target", "-t"]) ?? ""
+        var urlPattern = args.stringOption(["--url"]) ?? ""
+        let textPattern = args.stringOption(["--text"]) ?? ""
+        let stateExpected = args.stringOption(["--state"]) ?? ""
+        var mode = args.stringOption(["--mode", "-m"]) ?? "auto"
 
-        let mode = args.stringOption(["--mode"]) ?? "auto"
-        let selector = args.stringOption(["--selector", "-s"]) ?? ""
-        let urlPattern = args.stringOption(["--url"]) ?? ""
+        for pos in args.positionals {
+            if let num = Int(pos) {
+                timeoutMs = num
+            } else if pos.hasPrefix("http://") || pos.hasPrefix("https://") {
+                urlPattern = pos
+                if mode == "auto" { mode = "navigation" }
+            } else if pos.hasPrefix("#") || pos.hasPrefix(".") || pos.hasPrefix("[") || selector.isEmpty {
+                selector = pos
+                if mode == "auto" && textPattern.isEmpty && stateExpected.isEmpty { mode = "selector" }
+            }
+        }
+        if let tStr = args.stringOption(["--timeout"]) ?? args.stringOption(["--duration"]), let t = Int(tStr) {
+            timeoutMs = t
+        }
+        if !textPattern.isEmpty && (mode == "auto" || mode == "default") { mode = "text" }
+        if !stateExpected.isEmpty && (mode == "auto" || mode == "default") { mode = "state" }
 
         var bodyObj: [String: Any] = [
             "mode": mode,
@@ -1187,6 +1219,8 @@ enum NomadCLIClient {
             "selector": selector,
             "urlPattern": urlPattern
         ]
+        if !textPattern.isEmpty { bodyObj["text"] = textPattern }
+        if !stateExpected.isEmpty { bodyObj["state"] = stateExpected }
         if let tabArg = args.stringOption(["--tab"]),
            let tid = resolveTabId(tabArg, port: port, socketPath: socketPath) {
             bodyObj["tabId"] = tid
@@ -1201,8 +1235,144 @@ enum NomadCLIClient {
         let resp = request(method: "POST", path: "/wait", body: bodyData, timeoutSeconds: sockTimeout, socketPath: socketPath, port: port)
         _ = validateActionResponse(resp, command: "wait")
 
-        emitOutput("Wait completed (\(mode))")
+        let desc: String
+        if !textPattern.isEmpty { desc = "text '\(textPattern)'" }
+        else if !stateExpected.isEmpty { desc = "state '\(stateExpected)' on \(selector)" }
+        else { desc = mode }
+        emitOutput("Wait completed (\(desc))")
         exit(0)
+    }
+
+    private static func handleFind(args: ParsedArgs, port: UInt16?, socketPath: String?) {
+        let query = args.positionals.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+        let role = args.stringOption(["--role", "-r"])
+        let selector = args.stringOption(["--selector", "-s"])
+        let textOpt = args.stringOption(["--text"])
+        let refOnly = args.boolFlag(["--ref-only"])
+        let vpOnly = args.boolFlag(["--viewport", "-v", "--viewportOnly"])
+
+        var bodyObj: [String: Any] = [:]
+        if !query.isEmpty && textOpt == nil && selector == nil {
+            if query.hasPrefix("#") || query.hasPrefix(".") || query.hasPrefix("[") {
+                bodyObj["selector"] = query
+            } else {
+                bodyObj["text"] = query
+            }
+        }
+        if let r = role { bodyObj["role"] = r }
+        if let s = selector { bodyObj["selector"] = s }
+        if let t = textOpt { bodyObj["text"] = t }
+        if vpOnly { bodyObj["viewportOnly"] = true }
+        if let tabArg = args.stringOption(["--tab"]),
+           let tid = resolveTabId(tabArg, port: port, socketPath: socketPath) {
+            bodyObj["tabId"] = tid
+        }
+
+        guard let bodyData = try? JSONSerialization.data(withJSONObject: bodyObj) else {
+            emitError("nomad find: failed to encode find payload")
+            exit(1)
+        }
+
+        let resp = request(method: "POST", path: "/find", body: bodyData, socketPath: socketPath, port: port)
+        if resp.statusCode == 404 {
+            emitError("nomad find: element not found")
+            exit(1)
+        }
+        guard let json = resp.jsonObject, let success = json["success"] as? Bool, success,
+              let ref = json["ref"] as? String else {
+            _ = validateActionResponse(resp, command: "find")
+            exit(1)
+        }
+
+        if refOnly {
+            emitOutput(ref)
+        } else {
+            let roleStr = json["role"] as? String ?? "generic"
+            let tagStr = json["tag"] as? String ?? ""
+            let textStr = (json["text"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let snippet = textStr.count > 40 ? String(textStr.prefix(37)) + "..." : textStr
+            emitOutput("[\(ref)] role: \(roleStr) tag: <\(tagStr)> text: \"\(snippet)\"")
+        }
+        exit(0)
+    }
+
+    private static func handleDialog(args: ParsedArgs, port: UInt16?, socketPath: String?) {
+        let action = args.positionals.first?.lowercased()
+        var bodyObj: [String: Any] = [:]
+
+        if let act = action, ["accept", "dismiss", "wait"].contains(act) {
+            bodyObj["policy"] = act
+            if act != "wait" { bodyObj["action"] = act }
+        }
+        if let pol = args.stringOption(["--policy"]) {
+            bodyObj["policy"] = pol
+        }
+        if let resp = args.stringOption(["--response"]) {
+            bodyObj["response"] = resp
+            bodyObj["promptResponse"] = resp
+        }
+        if let tabArg = args.stringOption(["--tab"]),
+           let tid = resolveTabId(tabArg, port: port, socketPath: socketPath) {
+            bodyObj["tabId"] = tid
+        }
+
+        let bodyData = try? JSONSerialization.data(withJSONObject: bodyObj)
+        let method = bodyObj.isEmpty ? "GET" : "POST"
+        let resp = request(method: method, path: "/dialog", body: bodyData, socketPath: socketPath, port: port)
+        if resp.statusCode >= 200 && resp.statusCode < 300, let json = resp.jsonObject {
+            let policy = json["policy"] as? String ?? "unknown"
+            let hasPending = json["hasPendingDialog"] as? Bool ?? false
+            let last = json["lastDialog"] as? String ?? "none"
+            emitOutput("dialog policy: \(policy)  hasPending: \(hasPending)  lastDialog: \(last)")
+            exit(0)
+        } else {
+            _ = validateActionResponse(resp, command: "dialog")
+            exit(1)
+        }
+    }
+
+    private static func handleExtensions(args: ParsedArgs, port: UInt16?, socketPath: String?) {
+        let sub = args.positionals.first?.lowercased()
+        if sub == "enable" || sub == "disable" || sub == "toggle" {
+            guard args.positionals.count > 1 else {
+                emitError("nomad ext \(sub ?? ""): missing extension id")
+                exit(1)
+            }
+            let extId = args.positionals[1]
+            var bodyObj: [String: Any] = ["id": extId]
+            if sub == "enable" { bodyObj["enabled"] = true }
+            if sub == "disable" { bodyObj["enabled"] = false }
+            let bodyData = try? JSONSerialization.data(withJSONObject: bodyObj)
+            let resp = request(method: "POST", path: "/extensions/toggle", body: bodyData, socketPath: socketPath, port: port)
+            _ = validateActionResponse(resp, command: "ext toggle")
+            if let json = resp.jsonObject, let enabled = json["enabled"] as? Bool {
+                emitOutput("extension \(extId): \(enabled ? "enabled" : "disabled")")
+            } else {
+                emitOutput("extension \(extId): toggled")
+            }
+            exit(0)
+        }
+
+        let resp = request(method: "GET", path: "/extensions", body: nil, socketPath: socketPath, port: port)
+        if resp.statusCode >= 200 && resp.statusCode < 300,
+           let json = resp.jsonObject,
+           let exts = json["extensions"] as? [[String: Any]] {
+            if exts.isEmpty {
+                emitOutput("No extensions installed.")
+            } else {
+                for ext in exts {
+                    let id = ext["id"] as? String ?? ""
+                    let name = ext["name"] as? String ?? "Unnamed"
+                    let ver = ext["version"] as? String ?? "0.0"
+                    let en = (ext["enabled"] as? Bool ?? false) ? "enabled" : "disabled"
+                    emitOutput("• \(name) (v\(ver)) [\(en)] id: \(id)")
+                }
+            }
+            exit(0)
+        } else {
+            _ = validateActionResponse(resp, command: "extensions")
+            exit(1)
+        }
     }
 
     private static func handleTabs(args: ParsedArgs, port: UInt16?, socketPath: String?) {

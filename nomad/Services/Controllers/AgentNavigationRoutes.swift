@@ -103,8 +103,21 @@ extension NomadAgentServer {
                     NomadRouteCache.shared.record(eventType: "navigationError", message: "Navigation failed for \(url.absoluteString): \(navError)", tabId: activeTab.id.uuidString)
                     sendJSON(connection: connection, status: "502 Bad Gateway", object: ["success": false, "error": navError, "code": "NAVIGATION_FAILED", "navigatedTo": url.absoluteString], origin: origin)
                 } else {
+                    var resolvedTitle = activeTab.webView.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    if resolvedTitle.isEmpty && activeTab.title != "New Tab" && !activeTab.title.isEmpty {
+                        resolvedTitle = activeTab.title
+                    }
+                    if resolvedTitle.isEmpty || resolvedTitle == "New Tab" {
+                        if let docTitle = (try? await activeTab.webView.evaluateJavaScript("document.title")) as? String,
+                           !docTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            resolvedTitle = docTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                            activeTab.title = resolvedTitle
+                        } else {
+                            resolvedTitle = url.host ?? activeTab.title
+                        }
+                    }
                     NomadRouteCache.shared.record(eventType: "navigation", message: "Navigated to \(url.absoluteString)", tabId: activeTab.id.uuidString)
-                    sendJSON(connection: connection, status: "200 OK", object: ["success": true, "navigatedTo": url.absoluteString, "title": activeTab.title], origin: origin)
+                    sendJSON(connection: connection, status: "200 OK", object: ["success": true, "navigatedTo": url.absoluteString, "title": resolvedTitle], origin: origin)
                 }
             }
             return true
@@ -131,6 +144,8 @@ extension NomadAgentServer {
             var durationMs = 1000
             var selector = ""
             var urlPattern = ""
+            var textPattern = queryItem("text") ?? ""
+            var stateExpected = queryItem("state")?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
             var idleMs = 500
             var tid: String? = nil
 
@@ -144,8 +159,12 @@ extension NomadAgentServer {
                 if let s = json["selector"] as? String { selector = s }
                 if let u = json["urlPattern"] as? String { urlPattern = u }
                 if let u = json["url"] as? String, urlPattern.isEmpty { urlPattern = u }
+                if let tp = json["text"] as? String { textPattern = tp }
+                if let st = json["state"] as? String { stateExpected = st.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
                 if let i = json["idleMs"] as? Int { idleMs = i }
             }
+            if !textPattern.isEmpty && (mode == "auto" || mode == "default") { mode = "text" }
+            if !stateExpected.isEmpty && (mode == "auto" || mode == "default") { mode = "state" }
             if mode.isEmpty { mode = "auto" }
 
             guard let activeTab = requireTab(id: tid, connection: connection, origin: origin) else { return true }
@@ -378,6 +397,109 @@ extension NomadAgentServer {
                 }
                 let timeoutMsg = !expectedPattern.isEmpty ? "Exceeded max wait of \(timeoutMs)ms waiting for navigation to \(expectedPattern)" : "Exceeded max wait of \(timeoutMs)ms waiting for navigation (no navigation observed)"
                 sendJSON(connection: connection, object: ["success": false, "reason": "timeout", "message": timeoutMsg], origin: origin)
+
+            case "text":
+                guard !textPattern.isEmpty else {
+                    sendResponse(connection: connection, status: "400 Bad Request", body: "{\"error\":\"Missing 'text' parameter for wait text mode\",\"code\":\"MISSING_TEXT\",\"success\":false}", origin: origin)
+                    return true
+                }
+                let startTime = Date()
+                let maxDuration = Double(timeoutMs) / 1000.0
+                let escapedText: String = (try? String(data: JSONEncoder().encode(textPattern), encoding: .utf8)) ?? "\"\(textPattern)\""
+                let escapedSel: String = selector.isEmpty ? "null" : ((try? String(data: JSONEncoder().encode(selector), encoding: .utf8)) ?? "\"\(selector)\"")
+
+                let checkTextScript = """
+                (() => {
+                    var targetText = \(escapedText).toLowerCase();
+                    var sel = \(escapedSel);
+                    var root = document;
+                    if (sel) {
+                        if (window.__nomad && window.__nomad.findInTree) {
+                            try { root = window.__nomad.findInTree(document, sel) || document.querySelector(sel); } catch(e) {}
+                        } else {
+                            try { root = document.querySelector(sel); } catch(e) {}
+                        }
+                    }
+                    if (!root) return false;
+                    var content = (root.innerText || root.textContent || '').toLowerCase();
+                    return content.indexOf(targetText) !== -1;
+                })()
+                """
+
+                var matched = false
+                while Date().timeIntervalSince(startTime) < maxDuration {
+                    if !activeTab.isLoading {
+                        let res = (try? await activeTab.webView.evaluateJavaScript(checkTextScript)) as? Bool ?? false
+                        if res {
+                            matched = true
+                            break
+                        }
+                    }
+                    try? await Task.sleep(nanoseconds: 50_000_000)
+                }
+
+                if matched {
+                    sendJSON(connection: connection, object: ["success": true, "text": textPattern, "message": "Text appeared in page"], origin: origin)
+                } else {
+                    sendJSON(connection: connection, object: ["success": false, "reason": "timeout", "message": "Timeout waiting for text '\(textPattern)'"], origin: origin)
+                }
+
+            case "state":
+                guard !selector.isEmpty else {
+                    sendResponse(connection: connection, status: "400 Bad Request", body: "{\"error\":\"Missing 'selector' parameter for wait state mode\",\"code\":\"MISSING_SELECTOR\",\"success\":false}", origin: origin)
+                    return true
+                }
+                let startTime = Date()
+                let maxDuration = Double(timeoutMs) / 1000.0
+                let escapedSel: String = (try? String(data: JSONEncoder().encode(selector), encoding: .utf8)) ?? "\"\(selector)\""
+                let escapedState: String = (try? String(data: JSONEncoder().encode(stateExpected), encoding: .utf8)) ?? "\"\(stateExpected)\""
+
+                let checkStateScript = """
+                (() => {
+                    var sel = \(escapedSel);
+                    var expected = \(escapedState).toLowerCase();
+                    var el = null;
+                    if (window.__nomad && window.__nomad.findInTree) {
+                        try { el = window.__nomad.findInTree(document, sel) || document.querySelector(sel); } catch(e) {}
+                    } else {
+                        try { el = document.querySelector(sel); } catch(e) {}
+                    }
+                    if (!el) return expected === 'hidden' || expected === 'detached';
+                    var style = window.getComputedStyle(el);
+                    var isVisible = (style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0' && (el.offsetWidth > 0 || el.offsetHeight > 0));
+                    switch(expected) {
+                        case 'visible': return isVisible;
+                        case 'hidden': return !isVisible;
+                        case 'enabled': return !el.disabled && !el.hasAttribute('disabled');
+                        case 'disabled': return Boolean(el.disabled || el.hasAttribute('disabled'));
+                        case 'checked': return Boolean(el.checked || el.getAttribute('aria-checked') === 'true');
+                        case 'unchecked': return !el.checked && el.getAttribute('aria-checked') !== 'true';
+                        case 'focused': return document.activeElement === el;
+                        default:
+                            if (el.getAttribute(expected) !== null) return true;
+                            if (String(el.value || '').toLowerCase() === expected) return true;
+                            return false;
+                    }
+                })()
+                """
+
+                var matched = false
+                while Date().timeIntervalSince(startTime) < maxDuration {
+                    if !activeTab.isLoading {
+                        let res = (try? await activeTab.webView.evaluateJavaScript(checkStateScript)) as? Bool ?? false
+                        if res {
+                            matched = true
+                            break
+                        }
+                    }
+                    try? await Task.sleep(nanoseconds: 50_000_000)
+                }
+
+                if matched {
+                    sendJSON(connection: connection, object: ["success": true, "selector": selector, "state": stateExpected, "message": "Element reached state '\(stateExpected)'"], origin: origin)
+                } else {
+                    sendJSON(connection: connection, object: ["success": false, "reason": "timeout", "message": "Timeout waiting for element '\(selector)' to reach state '\(stateExpected)'"], origin: origin)
+                }
 
             case "timeout", "sleep", "delay":
                 try? await Task.sleep(nanoseconds: UInt64(durationMs) * 1_000_000)

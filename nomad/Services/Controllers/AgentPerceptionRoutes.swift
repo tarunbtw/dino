@@ -117,6 +117,78 @@ extension NomadAgentServer {
             }
             return true
 
+        case ("GET", "/find"), ("POST", "/find"):
+            guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin) else { return true }
+            var roleQ = queryItem("role")?.trimmingCharacters(in: .whitespacesAndNewlines)
+            var textQ = queryItem("text")?.trimmingCharacters(in: .whitespacesAndNewlines)
+            var selQ = queryItem("selector")?.trimmingCharacters(in: .whitespacesAndNewlines)
+            var vpOnly = queryBool("viewportOnly") || queryBool("viewport")
+
+            if method == "POST", let bodyData = bodyData, !bodyData.isEmpty,
+               let json = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any] {
+                if let r = json["role"] as? String { roleQ = r.trimmingCharacters(in: .whitespacesAndNewlines) }
+                if let t = json["text"] as? String { textQ = t.trimmingCharacters(in: .whitespacesAndNewlines) }
+                if let s = json["selector"] as? String { selQ = s.trimmingCharacters(in: .whitespacesAndNewlines) }
+                if let v = json["viewportOnly"] as? Bool { vpOnly = v }
+            }
+
+            let escapedRole: String = roleQ.map { (try? String(data: JSONEncoder().encode($0), encoding: .utf8)) ?? "null" } ?? "null"
+            let escapedText: String = textQ.map { (try? String(data: JSONEncoder().encode($0), encoding: .utf8)) ?? "null" } ?? "null"
+            let escapedSel: String = selQ.map { (try? String(data: JSONEncoder().encode($0), encoding: .utf8)) ?? "null" } ?? "null"
+
+            await activeTab.ensureNomadScriptInjected()
+            let findScript = """
+            (() => {
+                if (!window.__nomad) return null;
+                var snap = window.__nomad.getSemanticTree();
+                var elements = (snap && snap.elements) ? snap.elements : [];
+                var role = \(escapedRole);
+                var text = \(escapedText);
+                var selector = \(escapedSel);
+                var vpOnly = \(vpOnly ? "true" : "false");
+
+                for (var i = 0; i < elements.length; i++) {
+                    var el = elements[i];
+                    if (vpOnly && !el.inViewport) continue;
+                    if (role) {
+                        var elRole = (el.role || '').toLowerCase();
+                        var targetRole = role.toLowerCase();
+                        if (elRole !== targetRole) {
+                            if (!(targetRole === 'textbox' && elRole === 'searchbox')) continue;
+                        }
+                    }
+                    if (text) {
+                        var combined = ((el.text || '') + ' ' + (el.value || '')).toLowerCase();
+                        if (combined.indexOf(text.toLowerCase()) === -1) continue;
+                    }
+                    if (selector) {
+                        try {
+                            var domEl = window.__nomad.elements && window.__nomad.elements[el.id];
+                            if (!domEl || !domEl.matches(selector)) continue;
+                        } catch(e) { continue; }
+                    }
+                    return {
+                        success: true,
+                        ref: el.id,
+                        role: el.role,
+                        tag: el.tag,
+                        text: el.text || el.value || '',
+                        inViewport: el.inViewport,
+                        bounds: el.bounds
+                    };
+                }
+                return { success: false, code: "ELEMENT_NOT_FOUND", message: "No element found matching query" };
+            })()
+            """
+
+            if let result = try? await activeTab.webView.evaluateJavaScript(findScript) as? [String: Any],
+               let success = result["success"] as? Bool, success {
+                sendJSON(connection: connection, object: result, origin: origin)
+            } else {
+                sendResponse(connection: connection, status: "404 Not Found", body: "{\"success\":false,\"code\":\"ELEMENT_NOT_FOUND\",\"message\":\"No element found matching query\"}", origin: origin)
+            }
+            return true
+
         case ("GET", "/dialog"), ("POST", "/dialog"):
             var targetTabId = queryItem("tabId")
             var bodyJson: [String: Any]? = nil

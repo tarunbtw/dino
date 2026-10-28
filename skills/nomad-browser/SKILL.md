@@ -280,7 +280,10 @@ When driving Nomad from the terminal, shell scripts, or an AI agent without MCP 
 | `curl -s -X POST http://.../action -d '{"type":"hover","elementId":"e5"}'` | **`nomad hover <ref>`** | Hovers over element (`--native`) |
 | `curl -s -X POST http://.../action -d '{"type":"selectOption","elementId":"e4","optionValue":"US"}'` | **`nomad select <ref> <val>`** | Selects dropdown option by value or text |
 | `curl -s -X POST http://.../action -d '{"type":"scroll","direction":"down","amount":300}'` | **`nomad scroll [dir] [px]`** | Scrolls active viewport (default: `down 300`) |
-| `curl -s -X POST http://.../wait` | **`nomad wait [timeout_ms]`** | Waits for auto-stability (`--mode`, `--selector`, `--url`) |
+| `curl -s -X POST http://.../wait` | **`nomad wait [timeout_ms]`** | Waits for auto-stability, element, or content (`--text`, `--state`, `--selector`, `--url`, `--mode`) |
+| `curl -s -X POST http://.../find -d '{"text":"..."}'` | **`nomad find <query>`** | Fast element lookup in ~15 tokens (`--role`, `--text`, `--selector`, `--ref-only`) |
+| `curl -s -X POST http://.../dialog` | **`nomad dialog [accept\|dismiss\|wait]`** | Controls modal dialog handling policy and sends prompt responses |
+| `curl -s http://127.0.0.1:9222/extensions` | **`nomad ext`** | Lists installed WebExtensions (`enable <id>`, `disable <id>`) |
 | `curl -s http://127.0.0.1:9222/tabs` | **`nomad tabs`** | Lists open tabs in clean tabular format |
 | `curl -s -X POST http://.../tabs/new` | **`nomad tab new [url]`** | Opens a new tab |
 | `curl -s -X POST http://.../tabs/switch` | **`nomad tab switch <id\|idx>`** | Switches tab by 1-based index or UUID |
