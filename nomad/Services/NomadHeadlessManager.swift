@@ -61,6 +61,13 @@ final class NomadHeadlessManager: ObservableObject {
         window.isOpaque = true
         window.hasShadow = false
         window.title = "Nomad Headless Host"
+        // Ensure offscreen window is strictly excluded from Mission Control, Exposé, and Spaces
+        window.collectionBehavior = [.transient, .ignoresCycle]
+        window.isExcludedFromWindowsMenu = true
+        window.canHide = false
+        window.hidesOnDeactivate = false
+        window.sharingType = .none
+        window.animationBehavior = .none
         // Order out so it remains invisible to the user while keeping backing store alive
         window.orderOut(nil)
         self.offscreenWindow = window

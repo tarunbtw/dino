@@ -160,6 +160,12 @@ extension Tab: WKUIDelegate {
             return
         }
 
+        if NomadHeadlessManager.isHeadless {
+            appendConsoleEntry(level: .warn, message: "[Upload] File upload dialog requested without staged files in headless mode. Use 'nomad upload <file>' before clicking upload.")
+            completionHandler(nil)
+            return
+        }
+
         // Native macOS NSOpenPanel modal sheet fallback for human browsing
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = parameters.allowsMultipleSelection

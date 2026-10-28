@@ -680,13 +680,21 @@ extension Tab {
 
         let rawType = action.action.lowercased().replacingOccurrences(of: "native_", with: "")
 
-        // 2. Bring window and web view to front for active hardware input
-        NSApp.activate(ignoringOtherApps: true)
-        if let win = webView.window {
-            if !win.isKeyWindow {
-                win.makeKeyAndOrderFront(nil)
+        // 2. Bring window and web view to front for active hardware input (GUI mode only)
+        if !NomadHeadlessManager.isHeadless {
+            NSApp.activate(ignoringOtherApps: true)
+            if let win = webView.window {
+                if !win.isKeyWindow {
+                    win.makeKeyAndOrderFront(nil)
+                }
+                if win.firstResponder != webView {
+                    win.makeFirstResponder(webView)
+                }
             }
-            if win.firstResponder != webView {
+        } else {
+            // Headless mode: Never activate application or order window front.
+            // Ensure webView is first responder in its own offscreen window hierarchy.
+            if let win = webView.window, win.firstResponder != webView {
                 win.makeFirstResponder(webView)
             }
         }
@@ -726,15 +734,19 @@ extension Tab {
                 pressure: 0.0
             )
 
-            // Low-level CoreGraphics HID injection for hardware queues
-            if let cgDown = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: cgPos, mouseButton: .left) {
-                cgDown.postToPid(ProcessInfo.processInfo.processIdentifier)
+            // Low-level CoreGraphics HID injection for hardware queues (GUI mode only)
+            if !NomadHeadlessManager.isHeadless {
+                if let cgDown = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: cgPos, mouseButton: .left) {
+                    cgDown.postToPid(ProcessInfo.processInfo.processIdentifier)
+                }
             }
             if let down = downEvent { webView.mouseDown(with: down) }
             try? await Task.sleep(nanoseconds: 35_000_000)
 
-            if let cgUp = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: cgPos, mouseButton: .left) {
-                cgUp.postToPid(ProcessInfo.processInfo.processIdentifier)
+            if !NomadHeadlessManager.isHeadless {
+                if let cgUp = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: cgPos, mouseButton: .left) {
+                    cgUp.postToPid(ProcessInfo.processInfo.processIdentifier)
+                }
             }
             if let up = upEvent { webView.mouseUp(with: up) }
             try? await Task.sleep(nanoseconds: 30_000_000)
@@ -782,14 +794,18 @@ extension Tab {
                 pressure: 0.0
             )
 
-            if let cgDown = CGEvent(mouseEventSource: nil, mouseType: .rightMouseDown, mouseCursorPosition: cgPos, mouseButton: .right) {
-                cgDown.postToPid(ProcessInfo.processInfo.processIdentifier)
+            if !NomadHeadlessManager.isHeadless {
+                if let cgDown = CGEvent(mouseEventSource: nil, mouseType: .rightMouseDown, mouseCursorPosition: cgPos, mouseButton: .right) {
+                    cgDown.postToPid(ProcessInfo.processInfo.processIdentifier)
+                }
             }
             if let down = downEvent { webView.rightMouseDown(with: down) }
             try? await Task.sleep(nanoseconds: 35_000_000)
 
-            if let cgUp = CGEvent(mouseEventSource: nil, mouseType: .rightMouseUp, mouseCursorPosition: cgPos, mouseButton: .right) {
-                cgUp.postToPid(ProcessInfo.processInfo.processIdentifier)
+            if !NomadHeadlessManager.isHeadless {
+                if let cgUp = CGEvent(mouseEventSource: nil, mouseType: .rightMouseUp, mouseCursorPosition: cgPos, mouseButton: .right) {
+                    cgUp.postToPid(ProcessInfo.processInfo.processIdentifier)
+                }
             }
             if let up = upEvent { webView.rightMouseUp(with: up) }
             try? await Task.sleep(nanoseconds: 30_000_000)
@@ -818,12 +834,14 @@ extension Tab {
                 win.acceptsMouseMovedEvents = true
             }
 
-            // 1. Move hardware system cursor to target location
-            CGWarpMouseCursorPosition(cgPos)
+            // 1. Move hardware system cursor to target location (GUI mode only)
+            if !NomadHeadlessManager.isHeadless {
+                CGWarpMouseCursorPosition(cgPos)
 
-            // 2. Post CoreGraphics mouseMoved event to application event stream
-            if let cgMove = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: cgPos, mouseButton: .center) {
-                cgMove.postToPid(ProcessInfo.processInfo.processIdentifier)
+                // 2. Post CoreGraphics mouseMoved event to application event stream
+                if let cgMove = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: cgPos, mouseButton: .center) {
+                    cgMove.postToPid(ProcessInfo.processInfo.processIdentifier)
+                }
             }
 
             // 3. Dispatch AppKit NSEvent directly to WKContentView and NSWindow
@@ -922,8 +940,10 @@ extension Tab {
             let cgToPos = CGPoint(x: screenToPoint.x, y: primaryScreenH - screenToPoint.y)
 
             // 1. Native mouse down (CoreGraphics & AppKit)
-            if let cgDown = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: cgFromPos, mouseButton: .left) {
-                cgDown.postToPid(ProcessInfo.processInfo.processIdentifier)
+            if !NomadHeadlessManager.isHeadless {
+                if let cgDown = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: cgFromPos, mouseButton: .left) {
+                    cgDown.postToPid(ProcessInfo.processInfo.processIdentifier)
+                }
             }
             if let down = NSEvent.mouseEvent(with: .leftMouseDown, location: fromWin, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1.0) {
                 webView.mouseDown(with: down)
@@ -936,8 +956,10 @@ extension Tab {
                 let intermediateScreen = webView.window?.convertPoint(toScreen: intermediateWin) ?? intermediateWin
                 let cgIntermediatePos = CGPoint(x: intermediateScreen.x, y: primaryScreenH - intermediateScreen.y)
 
-                if let cgDrag = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDragged, mouseCursorPosition: cgIntermediatePos, mouseButton: .left) {
-                    cgDrag.postToPid(ProcessInfo.processInfo.processIdentifier)
+                if !NomadHeadlessManager.isHeadless {
+                    if let cgDrag = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDragged, mouseCursorPosition: cgIntermediatePos, mouseButton: .left) {
+                        cgDrag.postToPid(ProcessInfo.processInfo.processIdentifier)
+                    }
                 }
                 if let drag = NSEvent.mouseEvent(with: .leftMouseDragged, location: intermediateWin, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1.0) {
                     webView.mouseDragged(with: drag)
@@ -1008,15 +1030,19 @@ extension Tab {
                 let primaryScreenH = NSScreen.screens.first?.frame.height ?? 1080
                 let cgPos = CGPoint(x: screenPoint.x, y: primaryScreenH - screenPoint.y)
 
-                if let cgDown = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: cgPos, mouseButton: .left) {
-                    cgDown.postToPid(ProcessInfo.processInfo.processIdentifier)
+                if !NomadHeadlessManager.isHeadless {
+                    if let cgDown = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: cgPos, mouseButton: .left) {
+                        cgDown.postToPid(ProcessInfo.processInfo.processIdentifier)
+                    }
                 }
                 if let down = NSEvent.mouseEvent(with: .leftMouseDown, location: winPoint, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1.0) {
                     webView.mouseDown(with: down)
                 }
                 try? await Task.sleep(nanoseconds: 20_000_000)
-                if let cgUp = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: cgPos, mouseButton: .left) {
-                    cgUp.postToPid(ProcessInfo.processInfo.processIdentifier)
+                if !NomadHeadlessManager.isHeadless {
+                    if let cgUp = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: cgPos, mouseButton: .left) {
+                        cgUp.postToPid(ProcessInfo.processInfo.processIdentifier)
+                    }
                 }
                 if let up = NSEvent.mouseEvent(with: .leftMouseUp, location: winPoint, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 0.0) {
                     webView.mouseUp(with: up)

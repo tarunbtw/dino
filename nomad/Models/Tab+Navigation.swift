@@ -91,8 +91,13 @@ extension Tab: WKNavigationDelegate {
                     return
                 }
 
-                // Prompt user for untrusted / self-signed certificate
+                // Prompt user for untrusted / self-signed certificate (or bypass modal in headless mode)
                 let host = challenge.protectionSpace.host
+                if NomadHeadlessManager.isHeadless {
+                    // Headless automation automatically trusts localhost/local certs without GUI blocking
+                    completionHandler(.useCredential, URLCredential(trust: serverTrust))
+                    return
+                }
                 let alert = NSAlert()
                 alert.messageText = "Security Warning: Untrusted Certificate"
                 alert.informativeText = "The certificate for \"\(host)\" is invalid or self-signed. Visiting this site may compromise your privacy.\n\nDo you want to continue anyway?"

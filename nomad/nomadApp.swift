@@ -23,7 +23,9 @@ struct nomadApp: App {
 
     var body: some Scene {
         Window("Nomad", id: "main") {
-            ContentView()
+            if !NomadHeadlessManager.isHeadless {
+                ContentView()
+            }
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1180, height: 780)
@@ -73,7 +75,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if !flag && !NomadHeadlessManager.isHeadless {
+        if NomadHeadlessManager.isHeadless {
+            return false
+        }
+        if !flag {
             for window in sender.windows where window != NomadHeadlessManager.shared.offscreenWindow {
                 window.makeKeyAndOrderFront(self)
             }

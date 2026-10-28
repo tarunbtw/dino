@@ -115,9 +115,16 @@ LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Versions/Current/F
 if [ -f "$LSREGISTER" ]; then
   "$LSREGISTER" -u "$STAGING_DIR/Nomad.app" 2>/dev/null || true
   "$LSREGISTER" -u "$BUILT_APP" 2>/dev/null || true
+  # Also unregister any stray DerivedData builds
+  for stray in ~/Library/Developer/Xcode/DerivedData/nomad-*/Build/Products/*/nomad.app; do
+    if [ -d "$stray" ]; then
+      "$LSREGISTER" -u "$stray" 2>/dev/null || true
+    fi
+  done
 fi
 rm -rf "$STAGING_DIR"
 rm -rf "$PROJECT_ROOT/build"
+rm -rf ~/Library/Developer/Xcode/DerivedData/nomad-*
 
 # 9. Update Checksums in Casks
 echo "==> Updating checksum in packaging/homebrew/nomad.rb and tap..."
