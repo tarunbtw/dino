@@ -70,7 +70,8 @@ enum NomadCLIClient {
     private static let valueOptionKeys: Set<String> = [
         "--tab", "--target", "-t", "--selector", "-s", "--role", "-r",
         "--text", "--depth", "--mode", "--limit", "--offset", "--clip", "-c",
-        "--element", "-e", "--world", "--port", "--socket", "--policy"
+        "--element", "-e", "--world", "--port", "--socket", "--policy",
+        "--press", "-p", "--wait", "-w", "--url"
     ]
 
     private static func parseArguments(_ args: [String]) -> ParsedArgs {
@@ -319,6 +320,11 @@ enum NomadCLIClient {
         let activePort = args.stringOption(["--port"]).flatMap(UInt16.init) ?? port
         let activeSocket = args.stringOption(["--socket"]) ?? socketPath
 
+        if args.boolFlag(["--help", "-h"]) {
+            showCommandHelp(command.lowercased())
+            exit(0)
+        }
+
         switch command.lowercased() {
         case "snap", "snapshot":
             handleSnap(args: args, port: activePort, socketPath: activeSocket)
@@ -393,6 +399,236 @@ enum NomadCLIClient {
         }
     }
 
+    static func showCommandHelp(_ cmd: String) {
+        switch cmd {
+        case "snap", "snapshot":
+            emitOutput("""
+            Usage: nomad snap [options]
+
+            Capture an accessibility tree snapshot of the active page.
+
+            Options:
+              -v, --viewport           Limit snapshot to currently visible viewport
+              --all                    Capture full DOM tree (overrides viewport filter)
+              -r, --role <role>        Filter elements by accessibility role (e.g. link, button, textbox)
+              --text <query>           Filter elements containing text (case-insensitive substring)
+              -t, --target <ref|sel>   Scope snapshot to a subtree rooted at an element ref or selector
+              --depth <n>              Limit traversal depth relative to target root
+              --limit <n>              Maximum elements to return (default: 50)
+              --offset <n>             Starting index offset for element pagination
+              --track                  Track element mutations across snapshots (tags [NEW] and returns +/- counts)
+              -u, --unrestricted       Bypass 250-element limit in JSON mode
+              -j, --json               Output raw JSON AST instead of markdown accessibility text
+              --tab <id|idx>           Target specific tab by index or ID (default: active tab)
+            """)
+
+        case "open", "nav", "navigate":
+            emitOutput("""
+            Usage: nomad open <url> [options]
+
+            Navigate the active or specified tab to a URL.
+
+            Arguments:
+              <url>                    Target URL or domain (e.g. https://example.com)
+
+            Options:
+              -w, --wait [mode]        Wait after navigation (auto, networkidle, domcontentloaded, load)
+              --tab <id|idx>           Target specific tab by index or ID (default: active tab)
+            """)
+
+        case "back", "forward", "reload":
+            emitOutput("""
+            Usage: nomad \(cmd) [options]
+
+            Navigate browser history or reload the tab.
+
+            Options:
+              --tab <id|idx>           Target specific tab by index or ID (default: active tab)
+            """)
+
+        case "click":
+            emitOutput("""
+            Usage: nomad click <ref|selector> [options]
+
+            Click on an element using its snapshot reference or CSS selector.
+
+            Arguments:
+              <ref|selector>           Element reference (e.g. e5, f0:e2) or CSS selector
+
+            Options:
+              --right, -r              Trigger context menu / right-click
+              --native                 Dispatch native hardware events via macOS CGEvent
+              -w, --wait [mode]        Wait after click (auto, networkidle, domcontentloaded, load)
+              --tab <id|idx>           Target specific tab by index or ID (default: active tab)
+            """)
+
+        case "type":
+            emitOutput("""
+            Usage: nomad type <ref|selector> <text> [options]
+
+            Type text into an input field or contenteditable element.
+
+            Arguments:
+              <ref|selector>           Element reference (e.g. e3) or CSS selector
+              <text>                   Text string to type
+
+            Options:
+              --submit                 Submit the enclosing form after typing
+              -p, --press <key>        Press a key chord after typing (e.g. Enter, Tab, Escape)
+              --clear                  Clear existing input before typing
+              --native                 Dispatch native hardware events via macOS CGEvent
+              --tab <id|idx>           Target specific tab by index or ID (default: active tab)
+            """)
+
+        case "press":
+            emitOutput("""
+            Usage: nomad press <key> [options]
+
+            Send a keyboard key press or key chord to the active page.
+
+            Arguments:
+              <key>                    Key or chord (e.g. Enter, Escape, Tab, Backspace, Meta+A, Control+C)
+
+            Options:
+              --native                 Dispatch native hardware events via macOS CGEvent
+              --tab <id|idx>           Target specific tab by index or ID (default: active tab)
+            """)
+
+        case "drag":
+            emitOutput("""
+            Usage: nomad drag <source-ref> <dest-ref> [options]
+
+            Drag an element to a destination element.
+
+            Arguments:
+              <source-ref>             Source element reference (e.g. e2)
+              <dest-ref>               Destination element reference (e.g. e8)
+
+            Options:
+              --native                 Dispatch native hardware events via macOS CGEvent
+              --tab <id|idx>           Target specific tab by index or ID (default: active tab)
+            """)
+
+        case "hover":
+            emitOutput("""
+            Usage: nomad hover <ref|selector> [options]
+
+            Hover the mouse cursor over an element.
+
+            Arguments:
+              <ref|selector>           Element reference (e.g. e5) or CSS selector
+
+            Options:
+              --native                 Dispatch native hardware events via macOS CGEvent (default: true)
+              --tab <id|idx>           Target specific tab by index or ID (default: active tab)
+            """)
+
+        case "select":
+            emitOutput("""
+            Usage: nomad select <ref|selector> <value> [options]
+
+            Select an option in a dropdown element.
+
+            Arguments:
+              <ref|selector>           Element reference (e.g. e4) or CSS selector
+              <value>                  Option value or visible text to select
+
+            Options:
+              --tab <id|idx>           Target specific tab by index or ID (default: active tab)
+            """)
+
+        case "scroll":
+            emitOutput("""
+            Usage: nomad scroll [direction] [amount] [options]
+
+            Scroll the page in a given direction.
+
+            Arguments:
+              [direction]              Scroll direction: down, up, left, right (default: down)
+              [amount]                 Scroll distance in pixels (default: 300)
+
+            Options:
+              --tab <id|idx>           Target specific tab by index or ID (default: active tab)
+            """)
+
+        case "wait":
+            emitOutput("""
+            Usage: nomad wait [timeoutMs] [options]
+
+            Wait for page settlement, selector, URL pattern, or timeout.
+
+            Arguments:
+              [timeoutMs]              Timeout in milliseconds (default: 5000)
+
+            Options:
+              --mode <mode>            Wait mode: auto, stability, selector, networkidle, domcontentloaded, load
+              -s, --selector <sel>     CSS selector to wait for (when --mode selector)
+              --url <pattern>          URL substring to wait for (when --mode url)
+              --tab <id|idx>           Target specific tab by index or ID (default: active tab)
+            """)
+
+        case "tabs", "tab":
+            emitOutput("""
+            Usage: nomad tabs [subcommand] [args] [options]
+
+            Inspect and manage browser tabs.
+
+            Subcommands:
+              (no args)                List open tabs with IDs, titles, and URLs
+              new [url]                Open a new tab (optionally navigating to URL)
+              close [id|idx]           Close a tab by index or ID (default: active tab)
+              focus <id|idx>           Switch active focus to a tab (alias: switch)
+            """)
+
+        case "eval", "evaluate":
+            emitOutput("""
+            Usage: nomad eval <expression> [options]
+
+            Execute JavaScript expression in page context.
+
+            Arguments:
+              <expression>             JavaScript expression to evaluate
+
+            Options:
+              --world <page|isolated>  Execution world: page (default) or isolated
+              --tab <id|idx>           Target specific tab by index or ID (default: active tab)
+            """)
+
+        case "shot", "screenshot":
+            emitOutput("""
+            Usage: nomad shot [filepath] [options]
+
+            Capture a PNG screenshot of the page or an element.
+
+            Arguments:
+              [filepath]               Output PNG path (prints base64 data URI if omitted, '-' for stdout pipe)
+
+            Options:
+              -l, --labeled            Annotate interactive elements with numbered visual badges
+              -e, --element <ref|sel>  Capture only a specific element
+              -c, --clip <x,y,w,h>     Capture a specific viewport bounding box
+              --tab <id|idx>           Target specific tab by index or ID (default: active tab)
+            """)
+
+        case "upload":
+            emitOutput("""
+            Usage: nomad upload <ref|selector> <filepath...> [options]
+
+            Set files on a file input (<input type="file">) element.
+
+            Arguments:
+              <ref|selector>           Element reference or CSS selector
+              <filepath...>            One or more file paths to upload
+
+            Options:
+              --tab <id|idx>           Target specific tab by index or ID (default: active tab)
+            """)
+
+        default:
+            emitOutput("No detailed help available for command '\(cmd)'. Run 'nomad help' for all commands.")
+        }
+    }
+
     // MARK: - Subcommand Handlers
 
     @discardableResult
@@ -453,11 +689,16 @@ enum NomadCLIClient {
         }
         if let limit = args.stringOption(["--limit"]) {
             queryItems.append("limit=\(limit)")
+        } else {
+            queryItems.append("limit=50")
         }
         if let offset = args.stringOption(["--offset"]) {
             queryItems.append("offset=\(offset)")
         }
-        if args.boolFlag(["--unrestricted", "--force"]) {
+        if args.boolFlag(["--track"]) {
+            queryItems.append("track=true")
+        }
+        if args.boolFlag(["--unrestricted", "--force", "-u"]) {
             queryItems.append("unrestricted=true")
         }
         if let tabArg = args.stringOption(["--tab"]),
@@ -510,8 +751,9 @@ enum NomadCLIClient {
         }
 
         var bodyObj: [String: Any] = ["url": url]
-        if let tabArg = args.stringOption(["--tab"]),
-           let tid = resolveTabId(tabArg, port: port, socketPath: socketPath) {
+        let tabArg = args.stringOption(["--tab"])
+        let resolvedTid = tabArg.flatMap { resolveTabId($0, port: port, socketPath: socketPath) }
+        if let tid = resolvedTid {
             bodyObj["tabId"] = tid
         }
 
@@ -538,6 +780,17 @@ enum NomadCLIClient {
             let code = (json["code"] as? String) ?? "NAVIGATION_FAILED"
             emitError("nomad open: [\(code)] \(errMsg)")
             exit(1)
+        }
+
+        // Compound --wait support for open (e.g. nomad open https://example.com --wait auto)
+        let waitMode = args.stringOption(["--wait", "-w"]) ?? (args.boolFlag(["--wait", "-w"]) ? "auto" : nil)
+        if let waitArg = waitMode {
+            var waitBody: [String: Any] = ["mode": waitArg]
+            if let tid = resolvedTid { waitBody["tabId"] = tid }
+            if let wData = try? JSONSerialization.data(withJSONObject: waitBody) {
+                let waitResp = request(method: "POST", path: "/wait", body: wData, timeoutSeconds: 15, socketPath: socketPath, port: port)
+                _ = validateActionResponse(waitResp, command: "wait")
+            }
         }
 
         let finalURL = (json["navigatedTo"] as? String) ?? (json["url"] as? String) ?? url
@@ -614,8 +867,9 @@ enum NomadCLIClient {
         let resp = request(method: "POST", path: "/action", body: bodyData, socketPath: socketPath, port: port)
         _ = validateActionResponse(resp, command: "click")
 
-        // Compound --wait support (e.g. nomad click e5 --wait auto)
-        if let waitArg = args.stringOption(["--wait"]) {
+        // Compound --wait support (e.g. nomad click e5 --wait auto or nomad click e5 --wait)
+        let waitMode = args.stringOption(["--wait", "-w"]) ?? (args.boolFlag(["--wait", "-w"]) ? "auto" : nil)
+        if let waitArg = waitMode {
             var waitBody: [String: Any] = ["mode": waitArg]
             if let tid = resolvedTid { waitBody["tabId"] = tid }
             if let wData = try? JSONSerialization.data(withJSONObject: waitBody) {
@@ -640,7 +894,7 @@ enum NomadCLIClient {
         let isSubmit = args.boolFlag(["--submit"])
         let isClear = args.boolFlag(["--clear"])
         let isNative = args.boolFlag(["--native"])
-        let pressKey = args.stringOption(["--press", "-p"])
+        let pressKey = args.stringOption(["--press", "-p"]) ?? (args.boolFlag(["--press", "-p"]) ? "Enter" : nil)
 
         var bodyObj: [String: Any] = [
             "type": "type",

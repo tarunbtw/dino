@@ -60,8 +60,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        NSApplication.shared.setActivationPolicy(.regular)
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        DispatchQueue.main.async {
+            for window in NSApplication.shared.windows where window != NomadHeadlessManager.shared.offscreenWindow {
+                window.makeKeyAndOrderFront(nil)
+            }
+        }
+
         NomadAgentServer.shared.start()
         Updater.shared.checkIfDue()
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag && !NomadHeadlessManager.isHeadless {
+            for window in sender.windows where window != NomadHeadlessManager.shared.offscreenWindow {
+                window.makeKeyAndOrderFront(self)
+            }
+        }
+        sender.activate(ignoringOtherApps: true)
+        return true
     }
 
     func applicationWillTerminate(_ notification: Notification) {

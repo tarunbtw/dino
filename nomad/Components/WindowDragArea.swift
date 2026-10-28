@@ -37,8 +37,10 @@ final class DragNSView: NSView {
     override func mouseDown(with event: NSEvent) {
         if event.clickCount == 2 {
             window?.zoom(nil)
-        } else {
-            window?.performDrag(with: event)
+        } else if let win = window {
+            win.isMovable = true
+            win.performDrag(with: event)
+            win.isMovable = false
         }
     }
 }

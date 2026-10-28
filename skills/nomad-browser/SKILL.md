@@ -270,11 +270,11 @@ When driving Nomad from the terminal, shell scripts, or an AI agent without MCP 
 
 | Verbose Shell `curl` (~75 tokens) | Concise Nomad CLI (~4 tokens) | Purpose |
 | :--- | :--- | :--- |
-| `curl -s http://127.0.0.1:9222/snapshot` | **`nomad snap`** | Outputs compact semantic markdown tree to stdout (`-v`/`--viewport`, `--role <r>`, `--text <t>`, `--all`) |
-| `curl -s http://127.0.0.1:9222/snapshot?mode=json` | **`nomad snap --json`** | Outputs raw JSON AST |
-| `curl -s -X POST http://.../navigate -d '{"url":"..."}'` | **`nomad open <url>`** | Navigates active tab to URL (`nomad nav`, `nomad navigate`) |
-| `curl -s -X POST http://.../action -d '{"type":"click","elementId":"e5"}'` | **`nomad click <ref>`** | Clicks element by ref (`--wait auto`, `--native`, `--right` / `-r`) |
-| `curl -s -X POST http://.../action -d '{"type":"type","elementId":"e2","text":"..."}'` | **`nomad type <ref> <text>`** | Types into input field (`--submit`, `--press Enter`, `--clear`, `--native`) |
+| `curl -s http://127.0.0.1:9222/snapshot` | **`nomad snap`** | Outputs compact semantic markdown tree (default: `--limit 50`, `-v`/`--viewport`, `--track`, `--role <r>`, `--text <t>`, `-u`) |
+| `curl -s http://127.0.0.1:9222/snapshot?mode=json` | **`nomad snap --json`** | Outputs raw JSON AST (`-u`/`--unrestricted` to bypass 250 clamp) |
+| `curl -s -X POST http://.../navigate -d '{"url":"..."}'` | **`nomad open <url>`** | Navigates active tab to URL (`--wait [mode]`, `nomad nav`, `nomad navigate`) |
+| `curl -s -X POST http://.../action -d '{"type":"click","elementId":"e5"}'` | **`nomad click <ref>`** | Clicks element by ref (`--wait [mode]`, `--native`, `--right` / `-r`) |
+| `curl -s -X POST http://.../action -d '{"type":"type","elementId":"e2","text":"..."}'` | **`nomad type <ref> <text>`** | Types into input field (`--submit`, `-p`/`--press <key>`, `--clear`, `--native`) |
 | `curl -s -X POST http://.../action -d '{"type":"press","key":"Enter"}'` | **`nomad press <key>`** | Presses key chord (e.g. `Enter`, `Escape`, `Meta+A`) |
 | `curl -s -X POST http://.../action -d '{"type":"drag","elementId":"e3","toElementId":"e8"}'` | **`nomad drag <from> <to>`** | Drags element to destination element (`--native`) |
 | `curl -s -X POST http://.../action -d '{"type":"hover","elementId":"e5"}'` | **`nomad hover <ref>`** | Hovers over element (`--native`) |
@@ -290,14 +290,16 @@ When driving Nomad from the terminal, shell scripts, or an AI agent without MCP 
 | `curl -s -X POST http://.../upload` | **`nomad upload <ref> <files>`** | Stages and uploads files to file input |
 | `curl -s -X POST http://.../navigate -d '{"action":"back"}'` | **`nomad back`**, **`nomad forward`**, **`nomad reload`** | History and page reload navigation |
 
-### Options
+### Options & Subcommand Help
+
+Every subcommand supports `--help` or `-h` (e.g. `nomad snap --help`, `nomad click -h`, or `nomad help snap`) for detailed flags and argument syntax.
 
 | Option | Description |
 | :--- | :--- |
 | `--port <port>` | Set agent HTTP server port (default: `9222`, or via `NOMAD_AGENT_PORT` env) |
 | `--socket <path>` | Set agent IPC Unix domain socket path (default: `~/.nomad/nomad.sock`, or via `NOMAD_SOCKET_PATH` env) |
 | `--version, -v` | Alias for `version` |
-| `--help, -h` | Alias for `help` |
+| `--help, -h` | Alias for `help` (global or subcommand-specific) |
 
 > [!NOTE]
 > **Strict Command Validation:**

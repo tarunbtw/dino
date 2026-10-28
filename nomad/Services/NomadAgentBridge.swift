@@ -656,10 +656,15 @@ extension Tab {
             } else {
                 let isRef = (target.range(of: "^(f[0-9]+:)?[e][0-9]+$", options: .regularExpression) != nil)
                 let isExplicitSelector = (action.selector != nil)
-                let code = (isExplicitSelector || !isRef) ? "SELECTOR_NOT_FOUND" : "ELEMENT_NOT_FOUND"
-                let message = (isExplicitSelector || !isRef)
-                    ? "Target element matching selector '\(target)' not found in DOM."
-                    : "Cannot execute native action: target element '\(target)' not found or has zero geometry in viewport."
+                let code = isRef ? "STALE_REF" : (isExplicitSelector ? "SELECTOR_NOT_FOUND" : "ELEMENT_NOT_FOUND")
+                let message: String
+                if isRef {
+                    message = "Target element '\(target)' not found. Please re-snapshot."
+                } else if isExplicitSelector {
+                    message = "Target element matching selector '\(target)' not found in DOM."
+                } else {
+                    message = "Target element '\(target)' not found or has zero geometry in viewport."
+                }
                 return NomadActionResult(
                     success: false,
                     message: message,

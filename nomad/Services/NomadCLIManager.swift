@@ -94,8 +94,13 @@ enum NomadCLIManager {
 
         let rawArgs = Array(CommandLine.arguments.dropFirst())
 
-        // 1. No arguments: launch native GUI browser
+        // 1. No arguments: launch native GUI browser (or activate existing instance)
         if rawArgs.isEmpty {
+            if let pid = getRunningPID(), let app = NSRunningApplication(processIdentifier: pid) {
+                app.activate(options: [.activateIgnoringOtherApps])
+                print("[nomad] Nomad is already running (PID \(pid)). Brought window to front.")
+                return true
+            }
             return false
         }
 
@@ -251,8 +256,12 @@ enum NomadCLIManager {
             i += 1
         }
 
-        // 4. Reject unrecognized tokens strictly
+        // 4. Reject unrecognized tokens strictly (unless help <driver_command>)
         if let firstUnrecognized = unrecognizedTokens.first {
+            if subcommand == "help", driverCommands.contains(firstUnrecognized.lowercased()) {
+                NomadCLIClient.showCommandHelp(firstUnrecognized.lowercased())
+                exit(0)
+            }
             if firstUnrecognized.hasPrefix("-") {
                 emitError("nomad: unknown option '\(firstUnrecognized)'")
             } else {

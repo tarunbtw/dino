@@ -117,7 +117,7 @@ if [ -f "$LSREGISTER" ]; then
   "$LSREGISTER" -u "$BUILT_APP" 2>/dev/null || true
 fi
 rm -rf "$STAGING_DIR"
-rm -rf "$BUILT_APP"
+rm -rf "$PROJECT_ROOT/build"
 
 # 9. Update Checksums in Casks
 echo "==> Updating checksum in packaging/homebrew/nomad.rb and tap..."
