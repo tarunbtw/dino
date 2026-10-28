@@ -71,7 +71,34 @@ enum NomadCLIClient {
         "--tab", "--target", "-t", "--selector", "-s", "--role", "-r",
         "--text", "--depth", "--mode", "--limit", "--offset", "--clip", "-c",
         "--element", "-e", "--world", "--port", "--socket", "--policy",
-        "--press", "-p", "--wait", "-w", "--url"
+        "--press", "-p", "--wait", "-w", "--url", "--to-target", "--to-selector",
+        "--to-x", "--to-y", "--output", "-o", "--pixels", "--modifiers", "--value"
+    ]
+
+    private static let allowedCommandOptions: [String: Set<String>] = [
+        "snap": ["--json", "-j", "--all", "--viewport", "-v", "--viewportOnly", "--target", "-t", "--role", "-r", "--text", "--depth", "--limit", "--offset", "--track", "--unrestricted", "--force", "-u", "--tab", "--labeled", "-l"],
+        "snapshot": ["--json", "-j", "--all", "--viewport", "-v", "--viewportOnly", "--target", "-t", "--role", "-r", "--text", "--depth", "--limit", "--offset", "--track", "--unrestricted", "--force", "-u", "--tab", "--labeled", "-l"],
+        "open": ["--allow-local-files", "--local", "-l", "--wait", "-w", "--tab"],
+        "nav": ["--allow-local-files", "--local", "-l", "--wait", "-w", "--tab"],
+        "navigate": ["--allow-local-files", "--local", "-l", "--wait", "-w", "--tab"],
+        "back": ["--tab"],
+        "forward": ["--tab"],
+        "reload": ["--tab"],
+        "click": ["--native", "--right", "-r", "--middle", "--double", "--wait", "-w", "--tab"],
+        "type": ["--press", "-p", "--submit", "--clear", "--native", "--wait", "-w", "--tab"],
+        "press": ["--native", "--modifiers", "--wait", "-w", "--tab"],
+        "drag": ["--native", "--to-target", "--to-selector", "--to-x", "--to-y", "--wait", "-w", "--tab"],
+        "hover": ["--tab"],
+        "select": ["--text", "--value", "--wait", "-w", "--tab"],
+        "scroll": ["--up", "--down", "--left", "--right", "--top", "--bottom", "--pixels", "--tab"],
+        "wait": ["--mode", "-m", "--duration", "--selector", "-s", "--target", "-t", "--url", "--tab"],
+        "tab": ["--close", "--new", "--switch"],
+        "tabs": ["--close", "--new", "--switch"],
+        "eval": ["--world", "--tab"],
+        "evaluate": ["--world", "--tab"],
+        "shot": ["--clip", "-c", "--element", "-e", "--labeled", "-l", "--output", "-o", "--tab"],
+        "screenshot": ["--clip", "-c", "--element", "-e", "--labeled", "-l", "--output", "-o", "--tab"],
+        "upload": ["--tab"]
     ]
 
     private static func parseArguments(_ args: [String]) -> ParsedArgs {
@@ -323,6 +350,23 @@ enum NomadCLIClient {
         if args.boolFlag(["--help", "-h"]) {
             showCommandHelp(command.lowercased())
             exit(0)
+        }
+
+        if let allowed = allowedCommandOptions[command.lowercased()] {
+            var valid = allowed
+            valid.formUnion(["--port", "--socket", "--help", "-h"])
+            for f in args.flags {
+                if !valid.contains(f) {
+                    emitError("nomad \(command): unknown option '\(f)'")
+                    exit(1)
+                }
+            }
+            for opt in args.options.keys {
+                if !valid.contains(opt) {
+                    emitError("nomad \(command): unknown option '\(opt)'")
+                    exit(1)
+                }
+            }
         }
 
         switch command.lowercased() {
@@ -751,6 +795,9 @@ enum NomadCLIClient {
         }
 
         var bodyObj: [String: Any] = ["url": url]
+        if args.boolFlag(["--allow-local-files", "--local", "-l"]) || url.hasPrefix("file://") {
+            bodyObj["allowLocalFiles"] = true
+        }
         let tabArg = args.stringOption(["--tab"])
         let resolvedTid = tabArg.flatMap { resolveTabId($0, port: port, socketPath: socketPath) }
         if let tid = resolvedTid {
@@ -1250,7 +1297,7 @@ enum NomadCLIClient {
         }
 
         let expr = args.positionals.joined(separator: " ")
-        let world = args.stringOption(["--world"]) ?? "page"
+        let world = args.stringOption(["--world"]) ?? "isolated"
 
         var bodyObj: [String: Any] = [
             "expression": expr,
@@ -1275,6 +1322,27 @@ enum NomadCLIClient {
 
         guard let json = resp.jsonObject else {
             emitOutput(resp.bodyString)
+            exit(0)
+        }
+
+        if let success = json["success"] as? Bool, !success {
+            let errMsg = (json["error"] as? String) ?? "Evaluation failed"
+            let code = (json["code"] as? String) ?? "EVAL_ERROR"
+            emitError("nomad eval: [\(code)] \(errMsg)")
+            exit(1)
+        }
+        if let errMsg = json["error"] as? String {
+            let code = (json["code"] as? String) ?? "EVAL_ERROR"
+            emitError("nomad eval: [\(code)] \(errMsg)")
+            exit(1)
+        }
+
+        if let isUndef = json["isUndefined"] as? Bool, isUndef {
+            emitOutput("undefined")
+            exit(0)
+        }
+        if let isNull = json["isNull"] as? Bool, isNull {
+            emitOutput("null")
             exit(0)
         }
 

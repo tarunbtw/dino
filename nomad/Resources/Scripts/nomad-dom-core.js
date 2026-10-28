@@ -1976,6 +1976,7 @@
 
                     case 'drag':
                         if (!el) return { success: false, code: 'MISSING_TARGET', message: 'No target element for drag action', elementId: targetId };
+                        var nomad = (typeof window !== 'undefined' && window.__nomad) ? window.__nomad : (this || {});
                         var toTargetId = actionObj.toTarget || actionObj.toElementId || actionObj.toSelector || null;
                         var destEl = null;
                         var destX = (actionObj.toX !== undefined && actionObj.toX !== null) ? Number(actionObj.toX) : null;

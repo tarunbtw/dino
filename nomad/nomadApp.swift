@@ -12,6 +12,7 @@ struct nomadApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     init() {
+        signal(SIGPIPE, SIG_IGN)
         if NomadCLIManager.run() {
             exit(0)
         }

@@ -449,18 +449,23 @@ final class NomadAgentServer: ObservableObject {
             }
 
             if isUnbind {
+                // When unbinding a custom socket (e.g. ./nomad.sock), clean it up and restore the default socket (~/.nomad/nomad.sock)
+                let customPath = NomadUnixSocketBridge.configuredSocketPath
                 NomadUnixSocketBridge.shared.unbind { _ in
-                    let currentPath = NomadUnixSocketBridge.defaultSocketPath
-                    let exists = FileManager.default.fileExists(atPath: currentPath)
-                    self.sendJSON(connection: connection, object: [
-                        "success": true,
-                        "active": false,
-                        "unbound": true,
-                        "socketPath": currentPath,
-                        "path": currentPath,
-                        "exists": exists,
-                        "error": NSNull()
-                    ], origin: origin)
+                    NomadUnixSocketBridge.shared.rebind(newPath: nil) { active, error in
+                        let defaultPath = NomadUnixSocketBridge.defaultSocketPath
+                        let exists = FileManager.default.fileExists(atPath: defaultPath)
+                        self.sendJSON(connection: connection, object: [
+                            "success": true,
+                            "active": active,
+                            "unbound": true,
+                            "previousPath": (customPath as Any?) ?? NSNull(),
+                            "socketPath": defaultPath,
+                            "path": defaultPath,
+                            "exists": exists,
+                            "error": (error as Any?) ?? NSNull()
+                        ], origin: origin)
+                    }
                 }
                 return
             }
@@ -519,6 +524,8 @@ final class NomadAgentServer: ObservableObject {
                 "status": "healthy",
                 "version": Updater.currentVersion,
                 "build": Updater.currentBuild,
+                "mode": NomadHeadlessManager.isHeadless ? "headless_daemon" : "gui",
+                "isHeadless": NomadHeadlessManager.isHeadless,
                 "port": self.port,
                 "unixSocket": unixSocketInfo,
                 "tabsCount": self.store?.tabs.count ?? 0,

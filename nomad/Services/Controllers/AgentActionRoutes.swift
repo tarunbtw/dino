@@ -146,21 +146,21 @@ extension NomadAgentServer {
                     try {
                         fn = new AsyncFunction("return (" + code + ");");
                         const val = await fn.call(window);
-                        return { __nomad_ok: true, value: val };
+                        return { __nomad_ok: true, value: val, isUndefined: (val === undefined), isNull: (val === null) };
                     } catch (_) {}
 
                     // 2. If it contains an explicit return statement, execute as function body
                     if (code.includes("return ") || code.includes("return;")) {
                         fn = new AsyncFunction(code);
                         const val = await fn.call(window);
-                        return { __nomad_ok: true, value: val };
+                        return { __nomad_ok: true, value: val, isUndefined: (val === undefined), isNull: (val === null) };
                     }
 
                     // 3. Multi-statement code without explicit return:
                     // Try evaluating with eval to capture completion value of last expression
                     try {
                         const val = await window.eval(code);
-                        return { __nomad_ok: true, value: val };
+                        return { __nomad_ok: true, value: val, isUndefined: (val === undefined), isNull: (val === null) };
                     } catch (evalErr) {
                         // 4. If window.eval fails (e.g. top-level await or strict CSP), try wrapping last statement in return
                         let lastLineRetried = false;
@@ -182,7 +182,7 @@ extension NomadAgentServer {
                             fn = new AsyncFunction(code);
                             val = await fn.call(window);
                         }
-                        return { __nomad_ok: true, value: val };
+                        return { __nomad_ok: true, value: val, isUndefined: (val === undefined), isNull: (val === null) };
                     }
                 } catch (err) {
                     return {
@@ -287,12 +287,22 @@ extension NomadAgentServer {
                 }
 
                 var rawValue: Any? = evalResult
+                var isUndefined = false
+                var isNull = false
                 if let dict = evalResult as? [String: Any], dict["__nomad_ok"] as? Bool == true {
                     rawValue = dict["value"]
+                    isUndefined = (dict["isUndefined"] as? Bool) ?? false
+                    isNull = (dict["isNull"] as? Bool) ?? false
                 }
 
                 var responseObj: [String: Any] = ["success": true]
-                if let val = rawValue {
+                if isUndefined {
+                    responseObj["result"] = "undefined"
+                    responseObj["isUndefined"] = true
+                } else if isNull {
+                    responseObj["result"] = NSNull()
+                    responseObj["isNull"] = true
+                } else if let val = rawValue {
                     if let strVal = val as? String {
                         if strVal.count > 50_000 {
                             responseObj["result"] = String(strVal.prefix(50_000)) + "\n... [truncated by Nomad: result exceeded 50,000 chars]"

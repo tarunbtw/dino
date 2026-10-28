@@ -113,9 +113,26 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
     }
 
     var downloadsDirectory: URL {
+        if let custom = ProcessInfo.processInfo.environment["NOMAD_DOWNLOADS_PATH"], !custom.isEmpty {
+            let u = URL(fileURLWithPath: (custom as NSString).expandingTildeInPath)
+            try? FileManager.default.createDirectory(at: u, withIntermediateDirectories: true)
+            return u
+        }
         let folder = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Downloads")
-        return folder.resolvingSymlinksInPath()
+        let resolved = folder.resolvingSymlinksInPath()
+
+        // Probe write permission to ~/Downloads (TCC may restrict access in automated/CLI/daemon sessions)
+        let testFile = resolved.appendingPathComponent(".nomad_tcc_probe_\(ProcessInfo.processInfo.processIdentifier)")
+        if (try? "probe".write(to: testFile, atomically: true, encoding: .utf8)) != nil {
+            try? FileManager.default.removeItem(at: testFile)
+            return resolved
+        }
+
+        // TCC restricted ~/Downloads -> fall back to ~/.nomad/downloads
+        let fallback = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".nomad/downloads")
+        try? FileManager.default.createDirectory(at: fallback, withIntermediateDirectories: true)
+        return fallback
     }
 
     var displayPath: String {
@@ -374,25 +391,42 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
     /// Deletes a downloaded file from disk and removes it from the downloads list.
     @discardableResult
     func deleteDownload(filenameOrPath: String) -> Bool {
-        let downloadsDir = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+        let clean = filenameOrPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return false }
+
+        let expanded = (clean as NSString).expandingTildeInPath
         var targetURL: URL? = nil
-        let expanded = (filenameOrPath as NSString).expandingTildeInPath
+
         if FileManager.default.fileExists(atPath: expanded) {
             targetURL = URL(fileURLWithPath: expanded)
-        } else if let dir = downloadsDir {
-            let candidate = dir.appendingPathComponent(filenameOrPath)
-            if FileManager.default.fileExists(atPath: candidate.path) {
-                targetURL = candidate
+        } else {
+            let candidate1 = downloadsDirectory.appendingPathComponent(clean)
+            if FileManager.default.fileExists(atPath: candidate1.path) {
+                targetURL = candidate1
+            } else if let stdDir = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first {
+                let candidate2 = stdDir.appendingPathComponent(clean)
+                if FileManager.default.fileExists(atPath: candidate2.path) {
+                    targetURL = candidate2
+                }
             }
         }
-        guard let url = targetURL else { return false }
-        do {
-            try FileManager.default.removeItem(at: url)
-            downloads.removeAll(where: { $0.destinationURL?.path == url.path || $0.suggestedFilename == filenameOrPath })
-            return true
-        } catch {
-            return false
+
+        var deletedFromDisk = false
+        if let url = targetURL {
+            try? FileManager.default.removeItem(at: url)
+            deletedFromDisk = true
         }
+
+        let initialCount = downloads.count
+        downloads.removeAll(where: {
+            $0.destinationURL?.path == expanded ||
+            $0.destinationURL?.path == targetURL?.path ||
+            $0.suggestedFilename == clean ||
+            $0.id.uuidString.lowercased() == clean.lowercased()
+        })
+        let removedFromList = downloads.count < initialCount
+
+        return deletedFromDisk || removedFromList
     }
 
     func openFile(_ item: DownloadItem) {

@@ -1317,6 +1317,9 @@ extension Tab {
         let config = WKSnapshotConfiguration()
         if let rect = targetRect {
             config.rect = rect
+        } else {
+            let viewWidth = self.webView.frame.width > 0 ? self.webView.frame.width : 1280
+            config.snapshotWidth = NSNumber(value: Double(viewWidth))
         }
 
         do {

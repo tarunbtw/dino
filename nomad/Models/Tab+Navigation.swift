@@ -124,6 +124,22 @@ extension Tab: WKNavigationDelegate {
         self.committedNavigationSeq = self.navigationSeq
         self.lastNavigationError = nil
         self.lastNavigationFinishTime = Date()
+        if let start = self.lastNavigationStartTime {
+            let elapsed = Int(Date().timeIntervalSince(start) * 1000.0)
+            if let idx = self.networkEntries.lastIndex(where: { $0.type == "document" }) {
+                let old = self.networkEntries[idx]
+                self.networkEntries[idx] = NetworkEntry(
+                    id: old.id,
+                    method: old.method,
+                    url: webView.url?.absoluteString ?? old.url,
+                    status: 200,
+                    durationMs: max(1, elapsed),
+                    timestamp: old.timestamp,
+                    type: "document",
+                    error: nil
+                )
+            }
+        }
         NomadAgentServer.shared.broadcastEvent(name: "navigation", payload: [
             "tabId": self.id.uuidString,
             "url": webView.url?.absoluteString ?? self.url?.absoluteString ?? "",

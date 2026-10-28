@@ -483,7 +483,8 @@ enum NomadCLIManager {
         let probe = probeStatus(port: activePort)
 
         if let probe = probe {
-            let modeDesc = (probe.mode == "headless_daemon") ? "daemon" : "GUI"
+            let isDaemon = probe.mode == "headless_daemon" || probe.mode == "daemon"
+            let modeDesc = isDaemon ? "daemon" : "GUI"
             if let pid = pid {
                 print("Nomad: running (mode: \(modeDesc), PID \(pid))")
             } else {
@@ -527,6 +528,7 @@ enum NomadCLIManager {
     // MARK: - Signal Handling
 
     private static func setupSignalHandlers() {
+        signal(SIGPIPE, SIG_IGN)
         signal(SIGINT, SIG_IGN)
         signal(SIGTERM, SIG_IGN)
 
