@@ -341,12 +341,34 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
     }
 
     /// Asynchronously waits for an active or impending file download to complete.
-    func waitForDownload(timeoutMs: Int = 15000, since: Date? = nil) async -> [String: Any] {
-        let referenceDate = since ?? Date().addingTimeInterval(-2.0)
+    func waitForDownload(timeoutMs: Int = 15000, since: Date? = nil, filename: String? = nil) async -> [String: Any] {
+        let referenceDate = since ?? Date().addingTimeInterval(-300.0) // 5 minutes window
 
-        // 1. Check if a download already completed after referenceDate
-        if let completedItem = downloads.first(where: { $0.state == .completed && ($0.completedAt ?? $0.date) >= referenceDate }) {
-            return ["success": true, "download": itemDictionary(completedItem)]
+        let formatResponse: (DownloadItem, Bool, String?) -> [String: Any] = { item, success, error in
+            let dict = self.itemDictionary(item)
+            var resp = dict
+            resp["download"] = dict
+            resp["success"] = success
+            if let error = error {
+                resp["error"] = error
+                resp["reason"] = "failed"
+            }
+            return resp
+        }
+
+        // 1. Check if a matching download already completed within the window
+        let completedMatch = downloads.first { item in
+            guard item.state == .completed else { return false }
+            if let targetName = filename, !targetName.isEmpty,
+               item.suggestedFilename != targetName && item.destinationURL?.lastPathComponent != targetName {
+                return false
+            }
+            let itemDate = item.completedAt ?? item.date
+            return itemDate >= referenceDate
+        }
+
+        if let completedItem = completedMatch {
+            return formatResponse(completedItem, true, nil)
         }
 
         // 2. Wait up to timeoutMs for completion
@@ -361,10 +383,14 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
             }
 
             self.waiters[waiterId] = { item in
+                if let targetName = filename, !targetName.isEmpty,
+                   item.suggestedFilename != targetName && item.destinationURL?.lastPathComponent != targetName {
+                    return
+                }
                 if item.state == .completed {
-                    safeResume(["success": true, "download": self.itemDictionary(item)])
+                    safeResume(formatResponse(item, true, nil))
                 } else {
-                    safeResume(["success": false, "reason": "failed", "error": item.errorMessage ?? "Download failed", "download": self.itemDictionary(item)])
+                    safeResume(formatResponse(item, false, item.errorMessage ?? "Download failed"))
                 }
             }
 
@@ -373,7 +399,18 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
                 try? await Task.sleep(nanoseconds: sleepNanos)
                 await MainActor.run {
                     if self.waiters.removeValue(forKey: waiterId) != nil {
-                        safeResume(["success": false, "reason": "timeout", "message": "Timed out waiting for download after \(timeoutMs)ms"])
+                        if let lastCompleted = self.downloads.first(where: { item in
+                            guard item.state == .completed else { return false }
+                            if let targetName = filename, !targetName.isEmpty,
+                               item.suggestedFilename != targetName && item.destinationURL?.lastPathComponent != targetName {
+                                return false
+                            }
+                            return (item.completedAt ?? item.date) >= referenceDate
+                        }) {
+                            safeResume(formatResponse(lastCompleted, true, nil))
+                        } else {
+                            safeResume(["success": false, "reason": "timeout", "message": "Timed out waiting for download after \(timeoutMs)ms"])
+                        }
                     }
                 }
             }

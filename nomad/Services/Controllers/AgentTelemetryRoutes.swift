@@ -177,10 +177,10 @@ extension NomadAgentServer {
 
         case ("GET", "/downloads/last"):
             if let last = DownloadManager.shared.lastDownloadInfo() {
-                sendJSON(connection: connection, object: [
-                    "success": true,
-                    "download": last
-                ], origin: origin)
+                var resp = last
+                resp["success"] = true
+                resp["download"] = last
+                sendJSON(connection: connection, object: resp, origin: origin)
             } else {
                 sendResponse(connection: connection, status: "404 Not Found", body: "{\"error\":\"No downloads found\",\"code\":\"NO_DOWNLOADS\",\"success\":false}", origin: origin)
             }
@@ -189,10 +189,12 @@ extension NomadAgentServer {
         case ("POST", "/downloads/wait"), ("GET", "/downloads/wait"):
             var timeoutMs = 15000
             var sinceDate: Date? = nil
+            var targetFilename: String? = queryItem("filename")
             let iso = ISO8601DateFormatter()
             if method == "POST", let bodyData = bodyData,
                let json = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any] {
                 if let t = json["timeoutMs"] as? Int { timeoutMs = t }
+                if let f = json["filename"] as? String { targetFilename = f }
                 if let s = json["since"] as? String {
                     sinceDate = iso.date(from: s)
                 } else if let sNum = json["since"] as? Double {
@@ -204,7 +206,7 @@ extension NomadAgentServer {
                     sinceDate = iso.date(from: sStr) ?? Double(sStr).map { Date(timeIntervalSince1970: $0 > 1_000_000_000_000 ? $0 / 1000.0 : $0) }
                 }
             }
-            let res = await DownloadManager.shared.waitForDownload(timeoutMs: timeoutMs, since: sinceDate)
+            let res = await DownloadManager.shared.waitForDownload(timeoutMs: timeoutMs, since: sinceDate, filename: targetFilename)
             sendJSON(connection: connection, object: res, origin: origin)
             return true
 

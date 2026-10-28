@@ -78,12 +78,13 @@ xcodebuild -project nomad.xcodeproj \
   MARKETING_VERSION="${NEW_VERSION}" \
   SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
   GCC_TREAT_WARNINGS_AS_ERRORS=YES \
-  build 2>&1 | tee "$BUILD_LOG"
-BUILD_STATUS="${PIPESTATUS[0]}"
+  build > "$BUILD_LOG" 2>&1
+BUILD_STATUS=$?
 set -e
 
 if [ "$BUILD_STATUS" -ne 0 ]; then
   echo "❌ Error: Compilation failed with exit code ${BUILD_STATUS}." >&2
+  tail -n 25 "$BUILD_LOG" >&2
   exit 1
 fi
 
@@ -94,6 +95,7 @@ if [ -n "$CODE_WARNINGS" ]; then
   echo "$CODE_WARNINGS" >&2
   exit 1
 fi
+echo "==> Build succeeded cleanly (0 warnings, 0 errors)."
 
 BUILT_APP="$BUILD_DIR/Build/Products/Release/nomad.app"
 

@@ -1414,19 +1414,30 @@ extension Tab {
         guard rep.pixelsWide > 0 && rep.pixelsHigh > 0 else { return true }
         let w = rep.pixelsWide
         let h = rep.pixelsHigh
-        let points = [
-            (w / 2, h / 2),
-            (min(10, w - 1), min(10, h - 1)),
-            (max(0, w - 10), min(10, h - 1)),
-            (min(10, w - 1), max(0, h - 10)),
-            (max(0, w - 10), max(0, h - 10))
-        ]
-        for (x, y) in points {
-            if let color = rep.colorAt(x: x, y: y), color.alphaComponent > 0.05 {
-                return false
+        
+        var sampleColors: [NSColor] = []
+        for xi in 1...4 {
+            for yi in 1...4 {
+                let x = min(w - 1, (w * xi) / 5)
+                let y = min(h - 1, (h * yi) / 5)
+                if let c = rep.colorAt(x: x, y: y) {
+                    sampleColors.append(c)
+                }
             }
         }
-        return true
+        guard !sampleColors.isEmpty else { return true }
+
+        // If all pixels are transparent (alpha < 0.05), frame is blank
+        if sampleColors.allSatisfy({ $0.alphaComponent < 0.05 }) {
+            return true
+        }
+
+        // If all pixels are pure solid white (#FFFFFF, typical of WindowServer without display session), frame is blank
+        if sampleColors.allSatisfy({ $0.redComponent > 0.99 && $0.greenComponent > 0.99 && $0.blueComponent > 0.99 }) {
+            return true
+        }
+
+        return false
     }
 }
 
