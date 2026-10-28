@@ -73,7 +73,7 @@ final class NomadAgentServer: ObservableObject {
     private init() {}
 
     /// Loads an existing agent token from ~/.nomad/agent-token or generates a new cryptographically secure token.
-    private static func loadOrCreateAgentToken() -> String {
+    static func loadOrCreateAgentToken() -> String {
         if let envToken = ProcessInfo.processInfo.environment["NOMAD_TOKEN"], !envToken.isEmpty {
             return envToken.trimmingCharacters(in: .whitespacesAndNewlines)
         }

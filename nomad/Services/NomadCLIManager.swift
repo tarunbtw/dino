@@ -64,11 +64,14 @@ enum NomadCLIManager {
             return nil
         }
 
-        if kill(pid, 0) == 0 {
+        let res = kill(pid, 0)
+        if res == 0 || errno == EPERM {
             return pid
-        } else {
+        } else if errno == ESRCH {
             unlink(path)
             return nil
+        } else {
+            return pid
         }
     }
 
@@ -101,7 +104,42 @@ enum NomadCLIManager {
             return false
         }
 
-        // 3. Parse options and subcommand tokens
+        // 3. Intercept browser automation driver subcommands (snap, click, type, etc.)
+        let driverCommands: Set<String> = [
+            "snap", "snapshot", "open", "nav", "navigate",
+            "back", "forward", "reload", "click", "type",
+            "press", "drag", "hover", "select", "scroll",
+            "wait", "tabs", "tab", "eval", "evaluate",
+            "shot", "screenshot", "upload"
+        ]
+
+        var driverCmdIndex: Int? = nil
+        var scanIdx = 0
+        while scanIdx < rawArgs.count {
+            let tok = rawArgs[scanIdx]
+            if tok == "--port" || tok == "--socket" {
+                scanIdx += 2
+                continue
+            }
+            if tok.hasPrefix("-") {
+                scanIdx += 1
+                continue
+            }
+            if driverCommands.contains(tok.lowercased()) {
+                driverCmdIndex = scanIdx
+                break
+            }
+            break
+        }
+
+        if let cmdIdx = driverCmdIndex {
+            let cmd = rawArgs[cmdIdx].lowercased()
+            var cmdArgs = rawArgs
+            cmdArgs.remove(at: cmdIdx)
+            return NomadCLIClient.execute(command: cmd, rawArgs: cmdArgs, port: nil, socketPath: nil)
+        }
+
+        // 4. Parse daemon options and process lifecycle subcommand tokens
         var subcommand: String? = nil
         var configuredPort: UInt16? = nil
         var configuredSocket: String? = nil
@@ -281,20 +319,50 @@ enum NomadCLIManager {
         Usage:
           nomad [command] [options]
 
-        Commands:
-          start         Run as a background daemon in RAM
-          stop          Stop the running background daemon
-          status        Check background daemon status
-          headless      Run in foreground with live console logs
-          mcp           Run stdio Model Context Protocol (MCP) server
-          version       Print version information
-          help          Show available commands and options
+        Daemon & Process Commands:
+          start               Run as a background daemon in RAM
+          stop                Stop the running background daemon
+          status              Check background daemon status
+          headless            Run in foreground with live console logs
+          mcp                 Run stdio Model Context Protocol (MCP) server
+          version             Print version information
+          help                Show available commands and options
 
-        Options:
-          --port <port>       Set agent HTTP server port (default: 9222)
-          --socket <path>     Set agent IPC Unix domain socket path
-          --version, -v       Alias for 'version'
-          --help, -h          Alias for 'help'
+        Browser Automation Commands (Token-Optimized Driver):
+          snap [options]      Capture compact semantic markdown snapshot
+          open <url>          Navigate active tab to URL
+          click <ref>         Click element by reference (e.g. e5)
+          type <ref> <text>   Type text into input field (e.g. e2)
+          press <key>         Dispatch key chord (e.g. Enter, Meta+A)
+          drag <from> <to>    Drag source element to destination element
+          hover <ref>         Hover over element
+          select <ref> <val>  Select dropdown option by value or text
+          scroll [dir] [px]   Scroll active page (default: down 300)
+          wait [ms]           Wait for page stability, selector, or timeout
+          tabs                List open tabs in clean tabular format
+          tab new [url]       Open a new tab
+          tab switch <id|idx> Switch active tab by index (1-based) or ID
+          tab close [id|idx]  Close tab by index or ID (default: active)
+          eval <script>       Evaluate JavaScript and print result
+          shot [file]         Capture screenshot (saves PNG or '-' for stdout)
+          upload <ref> <file> Stage and upload files to file input
+          back, forward       Navigate history backward or forward
+          reload              Reload the current page
+
+        Driver Options:
+          --native            Dispatch native hardware events via macOS CGEvent
+          --right, -r         Trigger context menu / right-click (for click)
+          --submit            Press Enter after typing (for type)
+          --clear             Clear input field before typing (for type)
+          --json, -j          Output raw JSON AST (for snap)
+          -v, --viewport      Capture viewport elements only (for snap)
+          -t, --target <ref>  Target subtree or element ID (for snap)
+          -r, --role <role>   Filter elements by ARIA role (for snap)
+          --mode <mode>       Wait mode: auto, stability, selector, networkidle
+          --tab <id|idx>      Target specific tab by index or ID
+          -l, --labeled       Render element ID badges on screenshot (for shot)
+          --port <port>       Agent HTTP port (default: 9222)
+          --socket <path>     Agent Unix domain socket (default: ~/.nomad/nomad.sock)
         """
         print(helpText)
         exit(0)
@@ -481,6 +549,18 @@ enum NomadCLIManager {
     }
 
     private static func probeStatus(port: UInt16) -> StatusProbeResult? {
+        let sock = NomadUnixSocketBridge.defaultSocketPath
+        if FileManager.default.fileExists(atPath: sock),
+           let resp = NomadCLIClient.sendUnixSocketRequest(method: "GET", path: "/status", body: nil, socketPath: sock, timeoutSeconds: 1),
+           resp.statusCode == 200, let json = resp.jsonObject {
+            let mode = (json["mode"] as? String) ?? "daemon"
+            let tabCount = (json["tabCount"] as? Int) ?? (json["tabsCount"] as? Int) ?? 0
+            let p = (json["port"] as? Int) ?? Int(port)
+            let unixSocket = json["unixSocket"] as? [String: Any]
+            let socketPath = (unixSocket?["path"] as? String) ?? sock
+            return StatusProbeResult(mode: mode, tabCount: tabCount, port: p, socketPath: socketPath)
+        }
+
         guard let url = URL(string: "http://127.0.0.1:\(port)/status") else { return nil }
         var request = URLRequest(url: url)
         request.timeoutInterval = 0.6

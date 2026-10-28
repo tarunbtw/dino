@@ -250,7 +250,7 @@ Usage:
   nomad [command] [options]
 ```
 
-### Commands
+### Daemon & Process Commands
 
 | Command | Description |
 | :--- | :--- |
@@ -263,6 +263,32 @@ Usage:
 | `nomad version` | Print version and build information (`nomad version 0.1 (build 1)`) |
 | `nomad help` | Display available commands and options |
 | `nomadd` | Direct alias for `nomad headless` |
+
+### Browser Automation CLI Driver (Token-Optimized Shell Control)
+
+When driving Nomad from the terminal, shell scripts, or an AI agent without MCP tools, use these first-class driver subcommands. They connect over the sub-millisecond POSIX Unix Domain Socket (`~/.nomad/nomad.sock`) and consume **~90% fewer tokens** than crafting verbose `curl` HTTP calls.
+
+| Verbose Shell `curl` (~75 tokens) | Concise Nomad CLI (~4 tokens) | Purpose |
+| :--- | :--- | :--- |
+| `curl -s http://127.0.0.1:9222/snapshot` | **`nomad snap`** | Outputs compact semantic markdown tree to stdout |
+| `curl -s http://127.0.0.1:9222/snapshot?mode=json` | **`nomad snap --json`** | Outputs raw JSON AST |
+| `curl -s -X POST http://.../navigate -d '{"url":"..."}'` | **`nomad open <url>`** | Navigates active tab to URL (`nomad nav`, `nomad navigate`) |
+| `curl -s -X POST http://.../action -d '{"type":"click","elementId":"e5"}'` | **`nomad click <ref>`** | Clicks element by ref (`--native`, `--right` / `-r`) |
+| `curl -s -X POST http://.../action -d '{"type":"type","elementId":"e2","text":"..."}'` | **`nomad type <ref> <text>`** | Types into input field (`--submit`, `--clear`, `--native`) |
+| `curl -s -X POST http://.../action -d '{"type":"press","key":"Enter"}'` | **`nomad press <key>`** | Presses key chord (e.g. `Enter`, `Escape`, `Meta+A`) |
+| `curl -s -X POST http://.../action -d '{"type":"drag","elementId":"e3","toElementId":"e8"}'` | **`nomad drag <from> <to>`** | Drags element to destination element (`--native`) |
+| `curl -s -X POST http://.../action -d '{"type":"hover","elementId":"e5"}'` | **`nomad hover <ref>`** | Hovers over element (`--native`) |
+| `curl -s -X POST http://.../action -d '{"type":"selectOption","elementId":"e4","optionValue":"US"}'` | **`nomad select <ref> <val>`** | Selects dropdown option by value or text |
+| `curl -s -X POST http://.../action -d '{"type":"scroll","direction":"down","amount":300}'` | **`nomad scroll [dir] [px]`** | Scrolls active viewport (default: `down 300`) |
+| `curl -s -X POST http://.../wait` | **`nomad wait [timeout_ms]`** | Waits for auto-stability (`--mode`, `--selector`, `--url`) |
+| `curl -s http://127.0.0.1:9222/tabs` | **`nomad tabs`** | Lists open tabs in clean tabular format |
+| `curl -s -X POST http://.../tabs/new` | **`nomad tab new [url]`** | Opens a new tab |
+| `curl -s -X POST http://.../tabs/switch` | **`nomad tab switch <id\|idx>`** | Switches tab by 1-based index or UUID |
+| `curl -s -X POST http://.../tabs/close` | **`nomad tab close [id\|idx]`** | Closes tab by index or UUID (default: active tab) |
+| `curl -s -X POST http://.../evaluate` | **`nomad eval <js_code>`** | Evaluates JavaScript and prints raw value to stdout |
+| `curl -s http://127.0.0.1:9222/screenshot` | **`nomad shot [file.png]`** | Saves screenshot (`-l`/`--labeled`, `-e <ref>`, `-` for stdout pipe) |
+| `curl -s -X POST http://.../upload` | **`nomad upload <ref> <files>`** | Stages and uploads files to file input |
+| `curl -s -X POST http://.../navigate -d '{"action":"back"}'` | **`nomad back`**, **`nomad forward`**, **`nomad reload`** | History and page reload navigation |
 
 ### Options
 

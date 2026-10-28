@@ -84,6 +84,7 @@ struct NomadAction: Codable {
     var submit: Bool?
     var blur: Bool?
     var change: Bool?
+    var clear: Bool?
     var force: Bool?
     var native: Bool?
     var x: CGFloat?
@@ -103,7 +104,7 @@ struct NomadAction: Codable {
         paths ?? []
     }
 
-    init(action: String = "click", target: String? = nil, selector: String? = nil, elementId: String? = nil, toTarget: String? = nil, toElementId: String? = nil, toSelector: String? = nil, text: String? = nil, key: String? = nil, direction: String? = nil, amount: CGFloat? = nil, submit: Bool? = nil, blur: Bool? = nil, change: Bool? = nil, force: Bool? = nil, native: Bool? = nil, x: CGFloat? = nil, y: CGFloat? = nil, toX: CGFloat? = nil, toY: CGFloat? = nil, scrollDeltaY: CGFloat? = nil, scrollDeltaX: CGFloat? = nil, optionValue: String? = nil, optionText: String? = nil, modifiers: [String]? = nil, paths: [String]? = nil, dialogPolicy: String? = nil, dialogResponse: String? = nil) {
+    init(action: String = "click", target: String? = nil, selector: String? = nil, elementId: String? = nil, toTarget: String? = nil, toElementId: String? = nil, toSelector: String? = nil, text: String? = nil, key: String? = nil, direction: String? = nil, amount: CGFloat? = nil, submit: Bool? = nil, blur: Bool? = nil, change: Bool? = nil, clear: Bool? = nil, force: Bool? = nil, native: Bool? = nil, x: CGFloat? = nil, y: CGFloat? = nil, toX: CGFloat? = nil, toY: CGFloat? = nil, scrollDeltaY: CGFloat? = nil, scrollDeltaX: CGFloat? = nil, optionValue: String? = nil, optionText: String? = nil, modifiers: [String]? = nil, paths: [String]? = nil, dialogPolicy: String? = nil, dialogResponse: String? = nil) {
         self.action = action
         self.target = target ?? elementId ?? selector
         self.selector = selector
@@ -118,6 +119,7 @@ struct NomadAction: Codable {
         self.submit = submit
         self.blur = blur
         self.change = change
+        self.clear = clear
         self.force = force
         self.native = native
         self.x = x
@@ -136,7 +138,7 @@ struct NomadAction: Codable {
 
     enum CodingKeys: String, CodingKey {
         case action, type, target, elementId, selector, toTarget, toElementId, toSelector, text, key, direction, amount
-        case submit, blur, change, force, native, isNative, hardware, x, y, toX, toY
+        case submit, blur, change, clear, force, native, isNative, hardware, x, y, toX, toY
         case scrollDeltaY, deltaY, scrollDeltaX, deltaX, optionValue, optionText, modifiers
         case paths, path, files, file
         case dialogPolicy, policy, dialogAction, dialogResponse, promptResponse
@@ -167,6 +169,7 @@ struct NomadAction: Codable {
         self.submit = try c.decodeIfPresent(Bool.self, forKey: .submit)
         self.blur = try c.decodeIfPresent(Bool.self, forKey: .blur)
         self.change = try c.decodeIfPresent(Bool.self, forKey: .change)
+        self.clear = try c.decodeIfPresent(Bool.self, forKey: .clear)
         self.force = try c.decodeIfPresent(Bool.self, forKey: .force)
         let decNative = (try? c.decodeIfPresent(Bool.self, forKey: .native))
             ?? (try? c.decodeIfPresent(Bool.self, forKey: .isNative))
@@ -224,6 +227,7 @@ struct NomadAction: Codable {
         try c.encodeIfPresent(submit, forKey: .submit)
         try c.encodeIfPresent(blur, forKey: .blur)
         try c.encodeIfPresent(change, forKey: .change)
+        try c.encodeIfPresent(clear, forKey: .clear)
         try c.encodeIfPresent(force, forKey: .force)
         try c.encodeIfPresent(native, forKey: .native)
         try c.encodeIfPresent(x, forKey: .x)
