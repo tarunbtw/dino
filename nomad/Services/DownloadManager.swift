@@ -440,20 +440,26 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
         let clean = filenameOrPath.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else { return false }
 
+        let canonicalDownloads = downloadsDirectory.resolvingSymlinksInPath().standardized.path
         let expanded = (clean as NSString).expandingTildeInPath
         var targetURL: URL? = nil
 
         if FileManager.default.fileExists(atPath: expanded) {
-            targetURL = URL(fileURLWithPath: expanded)
+            let candidate = URL(fileURLWithPath: expanded)
+            let canonicalCandidate = candidate.resolvingSymlinksInPath().standardized.path
+            let isInsideDownloads = canonicalCandidate.hasPrefix(canonicalDownloads + "/") || canonicalCandidate == canonicalDownloads
+            let isRegistered = downloads.contains {
+                $0.destinationURL?.resolvingSymlinksInPath().standardized.path == canonicalCandidate
+            }
+            if isInsideDownloads || isRegistered {
+                targetURL = candidate
+            }
         } else {
-            let candidate1 = downloadsDirectory.appendingPathComponent(clean)
-            if FileManager.default.fileExists(atPath: candidate1.path) {
-                targetURL = candidate1
-            } else if let stdDir = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first {
-                let candidate2 = stdDir.appendingPathComponent(clean)
-                if FileManager.default.fileExists(atPath: candidate2.path) {
-                    targetURL = candidate2
-                }
+            let candidate = downloadsDirectory.appendingPathComponent(clean)
+            let canonicalCandidate = candidate.resolvingSymlinksInPath().standardized.path
+            if (canonicalCandidate.hasPrefix(canonicalDownloads + "/") || canonicalCandidate == canonicalDownloads) &&
+               FileManager.default.fileExists(atPath: candidate.path) {
+                targetURL = candidate
             }
         }
 

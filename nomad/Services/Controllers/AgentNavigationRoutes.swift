@@ -70,12 +70,7 @@ extension NomadAgentServer {
                         sendResponse(connection: connection, status: "404 Not Found", body: "{\"error\":\"File not found at path '\(filePath)'\",\"code\":\"FILE_NOT_FOUND\",\"success\":false}", origin: origin)
                         return true
                     }
-                    let rawLower = filePath.lowercased()
-                    let canonicalLower = URL(fileURLWithPath: filePath).resolvingSymlinksInPath().standardized.path.lowercased()
-                    let isSensitive = [rawLower, canonicalLower].contains { p in
-                        p.contains("/.ssh") || p.contains("/.nomad") || p.contains("/library/keychains") || p.contains("/etc/master.passwd") || p.contains("/etc/sudoers")
-                    }
-                    if isSensitive {
+                    if NomadAgentServer.isSensitivePath(filePath) {
                         sendResponse(connection: connection, status: "403 Forbidden", body: "{\"error\":\"Access to sensitive directory or credential file is blocked by Nomad security policy.\",\"code\":\"ACCESS_DENIED\",\"success\":false}", origin: origin)
                         return true
                     }

@@ -460,6 +460,9 @@ extension Tab {
             var validatedURLs: [URL] = []
             for path in paths {
                 let expanded = (path as NSString).expandingTildeInPath
+                if NomadAgentServer.isSensitivePath(expanded) {
+                    return NomadActionResult(success: false, message: "Access to sensitive file or directory is blocked by Nomad security policy: \(path)", elementId: action.target, code: "ACCESS_DENIED", lastDialog: self.lastDialog, hasPendingDialog: self.pendingDialog != nil)
+                }
                 guard FileManager.default.fileExists(atPath: expanded) else {
                     return NomadActionResult(success: false, message: "File not found at path: \(path)", elementId: action.target, code: "FILE_NOT_FOUND", lastDialog: self.lastDialog, hasPendingDialog: self.pendingDialog != nil)
                 }

@@ -190,21 +190,24 @@ extension NomadAgentServer {
             var timeoutMs = 15000
             var sinceDate: Date? = nil
             var targetFilename: String? = queryItem("filename")
-            let iso = ISO8601DateFormatter()
+            let parseSince: (Any?) -> Date? = { val in
+                guard let val = val else { return nil }
+                if let s = val as? String {
+                    return ISO8601DateFormatter().date(from: s) ?? Double(s).map { Date(timeIntervalSince1970: $0 > 1_000_000_000_000 ? $0 / 1000.0 : $0) }
+                }
+                if let d = val as? Double {
+                    return Date(timeIntervalSince1970: d > 1_000_000_000_000 ? d / 1000.0 : d)
+                }
+                return nil
+            }
             if method == "POST", let bodyData = bodyData,
                let json = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any] {
                 if let t = json["timeoutMs"] as? Int { timeoutMs = t }
                 if let f = json["filename"] as? String { targetFilename = f }
-                if let s = json["since"] as? String {
-                    sinceDate = iso.date(from: s)
-                } else if let sNum = json["since"] as? Double {
-                    sinceDate = Date(timeIntervalSince1970: sNum > 1_000_000_000_000 ? sNum / 1000.0 : sNum)
-                }
+                sinceDate = parseSince(json["since"])
             } else {
                 if let tStr = queryItem("timeoutMs"), let t = Int(tStr) { timeoutMs = t }
-                if let sStr = queryItem("since") {
-                    sinceDate = iso.date(from: sStr) ?? Double(sStr).map { Date(timeIntervalSince1970: $0 > 1_000_000_000_000 ? $0 / 1000.0 : $0) }
-                }
+                sinceDate = parseSince(queryItem("since"))
             }
             let res = await DownloadManager.shared.waitForDownload(timeoutMs: timeoutMs, since: sinceDate, filename: targetFilename)
             sendJSON(connection: connection, object: res, origin: origin)

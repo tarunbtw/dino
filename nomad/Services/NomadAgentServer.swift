@@ -49,6 +49,17 @@ final class NomadAgentServer: ObservableObject {
         return host == "127.0.0.1" || host == "localhost" || host == "::1" || host == "[::1]"
     }
 
+    /// Checks if a file path points to sensitive OS or user credentials (SSH keys, Nomad tokens, Keychains, system passwd).
+    nonisolated static func isSensitivePath(_ path: String) -> Bool {
+        let expanded = (path as NSString).expandingTildeInPath
+        let rawLower = expanded.lowercased()
+        let canonicalLower = URL(fileURLWithPath: expanded).resolvingSymlinksInPath().standardized.path.lowercased()
+        let sensitiveTokens = ["/.ssh", "/.nomad", "/library/keychains", "/etc/master.passwd", "/etc/sudoers"]
+        return [rawLower, canonicalLower].contains { p in
+            sensitiveTokens.contains { p.contains($0) }
+        }
+    }
+
     @Published private(set) var isRunning: Bool = false
     @Published private(set) var port: UInt16 = NomadAgentServer.defaultPort
     @Published private(set) var requestCount: Int = 0
