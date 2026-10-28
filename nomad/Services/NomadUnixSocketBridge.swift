@@ -251,6 +251,19 @@ final class NomadUnixSocketBridge: @unchecked Sendable {
     private func handleClient(clientFd: Int32) {
         defer { Darwin.close(clientFd) }
 
+        // Accepted socket inherits O_NONBLOCK from listening serverFd on BSD/Darwin.
+        // Clear O_NONBLOCK on clientFd to prevent premature EAGAIN drops on large payloads.
+        let flags = fcntl(clientFd, F_GETFL, 0)
+        _ = fcntl(clientFd, F_SETFL, flags & ~O_NONBLOCK)
+
+        var tv = timeval(tv_sec: 15, tv_usec: 0)
+        setsockopt(clientFd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+        setsockopt(clientFd, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+
+        var sockBufSize: Int32 = 1024 * 1024
+        setsockopt(clientFd, SOL_SOCKET, SO_SNDBUF, &sockBufSize, socklen_t(MemoryLayout<Int32>.size))
+        setsockopt(clientFd, SOL_SOCKET, SO_RCVBUF, &sockBufSize, socklen_t(MemoryLayout<Int32>.size))
+
         // Read request from client
         var buffer = [UInt8](repeating: 0, count: 65536)
         var requestData = Data()
@@ -281,6 +294,7 @@ final class NomadUnixSocketBridge: @unchecked Sendable {
             } else if n == 0 {
                 break
             } else {
+                if errno == EINTR { continue }
                 if errno == EAGAIN || errno == EWOULDBLOCK {
                     usleep(1000)
                     continue
@@ -326,9 +340,21 @@ final class NomadUnixSocketBridge: @unchecked Sendable {
 
         guard connRes == 0 else { return }
 
-        // Send modified request to TCP server
+        // Send modified request to TCP server in a robust write loop
         finalRequest.withUnsafeBytes { ptr in
-            _ = Darwin.write(tcpFd, ptr.baseAddress, finalRequest.count)
+            guard let base = ptr.baseAddress else { return }
+            var totalWritten = 0
+            while totalWritten < finalRequest.count {
+                let w = Darwin.write(tcpFd, base + totalWritten, finalRequest.count - totalWritten)
+                if w > 0 {
+                    totalWritten += w
+                } else if w < 0 {
+                    if errno == EINTR { continue }
+                    break
+                } else {
+                    break
+                }
+            }
         }
 
         // Read response from TCP server and stream back to clientFd
@@ -341,10 +367,27 @@ final class NomadUnixSocketBridge: @unchecked Sendable {
                     let w = respBuf.withUnsafeBufferPointer { p in
                         Darwin.write(clientFd, p.baseAddress! + bytesWritten, bytesRead - bytesWritten)
                     }
-                    if w <= 0 { break }
-                    bytesWritten += w
+                    if w > 0 {
+                        bytesWritten += w
+                    } else if w < 0 {
+                        if errno == EINTR { continue }
+                        if errno == EAGAIN || errno == EWOULDBLOCK {
+                            usleep(1000)
+                            continue
+                        }
+                        break // Broken pipe or socket closed
+                    } else {
+                        break
+                    }
                 }
+                if bytesWritten < bytesRead {
+                    // Output socket closed by client
+                    break
+                }
+            } else if bytesRead == 0 {
+                break
             } else {
+                if errno == EINTR { continue }
                 break
             }
         }

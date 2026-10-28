@@ -29,7 +29,7 @@ Nomad is an ultra-lightweight, native macOS WebKit browser engine featuring an e
 | `nomad_snapshot` | **Primary perception:** Dense semantic markdown of interactive & text elements (`li`, `p`, `td`, `th`), deterministic IDs, cross-origin iframe piercing (`f1:e1`), redaction, pagination, and JSON mode | ~400–2,000 tokens |
 | `nomad_action` | Atomic interactions (`click`, `right_click`, `context_menu`, `hover`, `type`, `clear`, `press`, `selectOption`, `scroll`, `drag` with `toElementId`, `highlight`, `upload`) with optional `native: true` (`isTrusted: true`) | ~40 tokens |
 | `nomad_upload` | Programmatic file upload to `<input type="file">`, label, or dropzone without modal system dialogs (`paths: string[]`) | ~40 tokens |
-| `nomad_downloads` | List recent file downloads, showing destination paths in `~/Downloads`, file sizes, and states | ~80 tokens |
+| `nomad_downloads` | List recent file downloads, showing destination paths in `~/Downloads` (or `~/.nomad/downloads` in headless daemon mode), file sizes, and states | ~80 tokens |
 | `nomad_wait_for_download` | Await active or impending file download to complete; returns local disk path, size, and SHA-256 hash | ~60 tokens |
 | `nomad_screenshot` | GPU snapshot; set `labeled: true` for vision badges, or `elementId` / `clip` for cropped region capture | Base64 image |
 | `nomad_evaluate` | Run expression-oriented JavaScript in page or isolated context (`world: 'page' | 'isolated'`); returns value or descriptive error | Minimal |
@@ -126,7 +126,7 @@ Supported action types:
 
 > [!TIP]
 > **Download Interception & Local Handoff:**
-> When an agent interaction triggers a file download (clicking an export button, PDF download, or CSV report), Nomad intercepts the `WKDownload` stream, saves the file to `~/Downloads` without blocking system dialogs, and records full file metadata.
+> When an agent interaction triggers a file download (clicking an export button, PDF download, or CSV report), Nomad intercepts the `WKDownload` stream, saves the file to `~/Downloads` (or `~/.nomad/downloads` in headless daemon mode, or custom `NOMAD_DOWNLOADS_PATH`) without blocking system dialogs, and records full file metadata.
 > - Call `nomad_wait_for_download({ "timeoutMs": 15000 })` to await the completion of an active or impending download.
 > - Returns `{ "success": true, "download": { "filename": "report.csv", "path": "/Users/.../Downloads/report.csv", "size": 1048576, "sha256": "e3b0c442..." } }`.
 > - Call `nomad_downloads({ "limit": 20 })` to inspect recent completed or in-progress downloads.

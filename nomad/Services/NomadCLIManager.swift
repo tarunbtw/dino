@@ -97,7 +97,11 @@ enum NomadCLIManager {
         // 1. No arguments: launch native GUI browser (or activate existing instance)
         if rawArgs.isEmpty {
             if let pid = getRunningPID(), let app = NSRunningApplication(processIdentifier: pid) {
-                app.activate(options: [.activateIgnoringOtherApps])
+                if #available(macOS 14.0, *) {
+                    app.activate()
+                } else {
+                    app.activate(options: [.activateIgnoringOtherApps])
+                }
                 print("[nomad] Nomad is already running (PID \(pid)). Brought window to front.")
                 return true
             }

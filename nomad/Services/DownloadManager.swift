@@ -118,6 +118,15 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
             try? FileManager.default.createDirectory(at: u, withIntermediateDirectories: true)
             return u
         }
+
+        // Headless daemon: Always use ~/.nomad/downloads to guarantee zero TCC prompts and 100% write reliability
+        // (com.apple.WebKit.Networking.xpc is blocked from ~/Downloads by TCC in headless/daemon environments)
+        if NomadHeadlessManager.isHeadless {
+            let headlessFolder = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".nomad/downloads")
+            try? FileManager.default.createDirectory(at: headlessFolder, withIntermediateDirectories: true)
+            return headlessFolder
+        }
+
         let folder = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Downloads")
         let resolved = folder.resolvingSymlinksInPath()

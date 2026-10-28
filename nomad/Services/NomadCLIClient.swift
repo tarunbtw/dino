@@ -178,6 +178,10 @@ enum NomadCLIClient {
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
 
+        var sockBufSize: Int32 = 1024 * 1024
+        setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &sockBufSize, socklen_t(MemoryLayout<Int32>.size))
+        setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sockBufSize, socklen_t(MemoryLayout<Int32>.size))
+
         var addr = sockaddr_un()
         addr.sun_family = sa_family_t(AF_UNIX)
         let maxPathLen = MemoryLayout.size(ofValue: addr.sun_path) - 1
@@ -216,8 +220,14 @@ enum NomadCLIClient {
             var written = 0
             while written < reqData.count {
                 let w = Darwin.write(fd, base + written, reqData.count - written)
-                if w <= 0 { return false }
-                written += w
+                if w > 0 {
+                    written += w
+                } else if w < 0 {
+                    if errno == EINTR { continue }
+                    return false
+                } else {
+                    return false
+                }
             }
             return true
         }
@@ -225,10 +235,30 @@ enum NomadCLIClient {
 
         var respData = Data()
         var buf = [UInt8](repeating: 0, count: 65536)
+        var expectedTotalBytes: Int? = nil
+
         while true {
             let n = Darwin.read(fd, &buf, buf.count)
             if n > 0 {
                 respData.append(buf, count: n)
+                if expectedTotalBytes == nil, let headerEndRange = respData.range(of: Data("\r\n\r\n".utf8)) {
+                    let headerData = respData.subdata(in: 0..<headerEndRange.lowerBound)
+                    if let headerStr = String(data: headerData, encoding: .utf8) {
+                        for line in headerStr.components(separatedBy: "\r\n") {
+                            let lower = line.lowercased()
+                            if lower.hasPrefix("content-length:") {
+                                let valStr = line.dropFirst("content-length:".count).trimmingCharacters(in: .whitespaces)
+                                if let len = Int(valStr) {
+                                    expectedTotalBytes = headerEndRange.upperBound + len
+                                }
+                                break
+                            }
+                        }
+                    }
+                }
+                if let exp = expectedTotalBytes, respData.count >= exp {
+                    break
+                }
             } else if n == 0 {
                 break
             } else {

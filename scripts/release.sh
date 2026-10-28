@@ -62,18 +62,38 @@ sed -i '' -E "s/static let version = \"[0-9.]+\"/static let version = \"${NEW_VE
 sed -i '' -E "s/version \"[0-9.]+\"/version \"${NEW_VERSION}\"/g" packaging/homebrew/nomad.rb
 sed -i '' -E "s/version \"[0-9.]+\"/version \"${NEW_VERSION}\"/g" "$TAP_DIR/Casks/nomad.rb"
 
-# 4. Clean & Build Release via Xcode
-echo "==> Compiling Release binary with Xcode..."
+# 4. Clean & Build Release via Xcode (Zero Warnings & Zero Errors Enforcement)
+echo "==> Compiling Release binary with Xcode (strict: zero warnings, zero errors)..."
 BUILD_DIR="$PROJECT_ROOT/build/DerivedData"
 rm -rf "$BUILD_DIR"
+mkdir -p "$BUILD_DIR"
+BUILD_LOG="$BUILD_DIR/xcodebuild.log"
 
+set +e
 xcodebuild -project nomad.xcodeproj \
   -scheme nomad \
   -configuration Release \
+  -destination "generic/platform=macOS" \
   -derivedDataPath "$BUILD_DIR" \
   MARKETING_VERSION="${NEW_VERSION}" \
-  -quiet \
-  build
+  SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
+  GCC_TREAT_WARNINGS_AS_ERRORS=YES \
+  build 2>&1 | tee "$BUILD_LOG"
+BUILD_STATUS="${PIPESTATUS[0]}"
+set -e
+
+if [ "$BUILD_STATUS" -ne 0 ]; then
+  echo "❌ Error: Compilation failed with exit code ${BUILD_STATUS}." >&2
+  exit 1
+fi
+
+# Strict check: reject release if any compiler/code warnings occurred
+CODE_WARNINGS=$(grep -E "(:[0-9]+:[0-9]+: warning:)" "$BUILD_LOG" || true)
+if [ -n "$CODE_WARNINGS" ]; then
+  echo "❌ Error: Release build produced compiler warnings. Aborting release." >&2
+  echo "$CODE_WARNINGS" >&2
+  exit 1
+fi
 
 BUILT_APP="$BUILD_DIR/Build/Products/Release/nomad.app"
 

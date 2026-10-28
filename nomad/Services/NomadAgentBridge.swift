@@ -1334,12 +1334,99 @@ extension Tab {
                     }
                 }
             }
+
+            // In displayless sessions (remote SSH, display asleep), WindowServer has no hardware framebuffer,
+            // producing a blank/transparent frame. Fall back to WebKit vector PDF layout rendering.
+            if self.isBlankImage(image) {
+                let pdfConfig = WKPDFConfiguration()
+                if let rect = targetRect {
+                    pdfConfig.rect = rect
+                }
+                if let pdfData = try? await self.generatePDF(configuration: pdfConfig),
+                   let fallbackImg = self.renderPDFToImage(pdfData: pdfData) {
+                    _ = try? await webView.evaluateJavaScript("window.__nomad && window.__nomad.hideBadges && window.__nomad.hideBadges();")
+                    return fallbackImg
+                }
+            }
+
             _ = try? await webView.evaluateJavaScript("window.__nomad && window.__nomad.hideBadges && window.__nomad.hideBadges();")
             return image
         } catch {
+            // If takeSnapshot failed due to display session absence, fall back to createPDF
+            let pdfConfig = WKPDFConfiguration()
+            if let rect = targetRect {
+                pdfConfig.rect = rect
+            }
+            if let pdfData = try? await self.generatePDF(configuration: pdfConfig),
+               let fallbackImg = self.renderPDFToImage(pdfData: pdfData) {
+                _ = try? await webView.evaluateJavaScript("window.__nomad && window.__nomad.hideBadges && window.__nomad.hideBadges();")
+                return fallbackImg
+            }
+
             _ = try? await webView.evaluateJavaScript("window.__nomad && window.__nomad.hideBadges && window.__nomad.hideBadges();")
             throw error
         }
+    }
+
+    private func generatePDF(configuration: WKPDFConfiguration) async throws -> Data {
+        try await withCheckedThrowingContinuation { continuation in
+            self.webView.createPDF(configuration: configuration) { result in
+                continuation.resume(with: result)
+            }
+        }
+    }
+
+    private func renderPDFToImage(pdfData: Data) -> NSImage? {
+        guard let provider = CGDataProvider(data: pdfData as CFData),
+              let document = CGPDFDocument(provider),
+              let page = document.page(at: 1) else {
+            return nil
+        }
+
+        let pageRect = page.getBoxRect(.mediaBox)
+        let width = Int(pageRect.width * 2.0)
+        let height = Int(pageRect.height * 2.0)
+        guard width > 0, height > 0 else { return nil }
+
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+
+        context.setFillColor(CGColor.white)
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        context.scaleBy(x: 2.0, y: 2.0)
+        context.drawPDFPage(page)
+
+        guard let cgImage = context.makeImage() else { return nil }
+        return NSImage(cgImage: cgImage, size: pageRect.size)
+    }
+
+    private func isBlankImage(_ image: NSImage) -> Bool {
+        guard let tiff = image.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff) else { return true }
+        guard rep.pixelsWide > 0 && rep.pixelsHigh > 0 else { return true }
+        let w = rep.pixelsWide
+        let h = rep.pixelsHigh
+        let points = [
+            (w / 2, h / 2),
+            (min(10, w - 1), min(10, h - 1)),
+            (max(0, w - 10), min(10, h - 1)),
+            (min(10, w - 1), max(0, h - 10)),
+            (max(0, w - 10), max(0, h - 10))
+        ]
+        for (x, y) in points {
+            if let color = rep.colorAt(x: x, y: y), color.alphaComponent > 0.05 {
+                return false
+            }
+        }
+        return true
     }
 }
 
