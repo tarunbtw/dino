@@ -150,9 +150,9 @@ struct NomadAction: Codable {
             throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Missing required 'type' or 'action' field in action object"))
         }
         let validActions: Set<String> = [
-            "click", "right_click", "rightclick", "context_menu", "contextmenu",
+            "click", "dblclick", "double_click", "doubleclick", "right_click", "rightclick", "context_menu", "contextmenu",
             "hover", "type", "clear", "press", "selectoption", "scroll", "drag", "highlight", "upload",
-            "native_click", "native_right_click", "native_context_menu", "native_hover", "native_type", "native_press", "native_drag"
+            "native_click", "native_dblclick", "native_double_click", "native_right_click", "native_context_menu", "native_hover", "native_type", "native_press", "native_drag"
         ]
         guard validActions.contains(rawAction.lowercased()) else {
             throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Unknown action type '\(rawAction)'"))
@@ -528,7 +528,12 @@ extension Tab {
                         }
                     }
                     if res.success {
-                        NomadRouteCache.shared.record(eventType: "action", message: "Action '\(action.action)' succeeded on \(action.target ?? "element")", tabId: self.id.uuidString)
+                        if res.obscured == true {
+                            let tag = res.interceptedBy.map { "<\($0)>" } ?? "overlay"
+                            NomadRouteCache.shared.record(eventType: "action", message: "Action '\(action.action)' on \(action.target ?? "element") was obscured (intercepted by \(tag))", tabId: self.id.uuidString)
+                        } else {
+                            NomadRouteCache.shared.record(eventType: "action", message: "Action '\(action.action)' succeeded on \(action.target ?? "element")", tabId: self.id.uuidString)
+                        }
                         if let domain = self.url?.host, let target = action.target, !target.isEmpty {
                             NomadRouteCache.shared.recordSuccess(domain: domain, intent: action.action, selector: target, action: action.action)
                         }
@@ -757,6 +762,70 @@ extension Tab {
             return NomadActionResult(
                 success: true,
                 message: "Native click dispatched at (\(Int(pt.x)), \(Int(pt.y))) with isTrusted: true",
+                elementId: action.target,
+                code: "SUCCESS",
+                native: true,
+                isTrusted: true,
+                lastDialog: self.lastDialog,
+                hasPendingDialog: self.pendingDialog != nil
+            )
+
+        case "dblclick", "double_click", "doubleclick", "native_dblclick", "native_double_click":
+            guard let pt = targetPoint else {
+                return NomadActionResult(success: false, message: "Missing target element or (x, y) coordinates for native double click", elementId: action.target, code: "MISSING_TARGET")
+            }
+            let winPoint = webView.convert(pt, to: nil)
+            let screenPoint = webView.window?.convertPoint(toScreen: winPoint) ?? winPoint
+            let primaryScreenH = NSScreen.screens.first?.frame.height ?? 1080
+            let cgPos = CGPoint(x: screenPoint.x, y: primaryScreenH - screenPoint.y)
+
+            // Click 1
+            if !NomadHeadlessManager.isHeadless {
+                if let cgDown1 = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: cgPos, mouseButton: .left) {
+                    cgDown1.setIntegerValueField(.mouseEventClickState, value: 1)
+                    cgDown1.postToPid(ProcessInfo.processInfo.processIdentifier)
+                }
+            }
+            if let down1 = NSEvent.mouseEvent(with: .leftMouseDown, location: winPoint, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1.0) {
+                webView.mouseDown(with: down1)
+            }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+            if !NomadHeadlessManager.isHeadless {
+                if let cgUp1 = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: cgPos, mouseButton: .left) {
+                    cgUp1.setIntegerValueField(.mouseEventClickState, value: 1)
+                    cgUp1.postToPid(ProcessInfo.processInfo.processIdentifier)
+                }
+            }
+            if let up1 = NSEvent.mouseEvent(with: .leftMouseUp, location: winPoint, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 0.0) {
+                webView.mouseUp(with: up1)
+            }
+            try? await Task.sleep(nanoseconds: 25_000_000)
+
+            // Click 2 (with clickCount = 2)
+            if !NomadHeadlessManager.isHeadless {
+                if let cgDown2 = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: cgPos, mouseButton: .left) {
+                    cgDown2.setIntegerValueField(.mouseEventClickState, value: 2)
+                    cgDown2.postToPid(ProcessInfo.processInfo.processIdentifier)
+                }
+            }
+            if let down2 = NSEvent.mouseEvent(with: .leftMouseDown, location: winPoint, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: windowNumber, context: nil, eventNumber: 0, clickCount: 2, pressure: 1.0) {
+                webView.mouseDown(with: down2)
+            }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+            if !NomadHeadlessManager.isHeadless {
+                if let cgUp2 = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: cgPos, mouseButton: .left) {
+                    cgUp2.setIntegerValueField(.mouseEventClickState, value: 2)
+                    cgUp2.postToPid(ProcessInfo.processInfo.processIdentifier)
+                }
+            }
+            if let up2 = NSEvent.mouseEvent(with: .leftMouseUp, location: winPoint, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: windowNumber, context: nil, eventNumber: 0, clickCount: 2, pressure: 0.0) {
+                webView.mouseUp(with: up2)
+            }
+            try? await Task.sleep(nanoseconds: 30_000_000)
+
+            return NomadActionResult(
+                success: true,
+                message: "Native double click dispatched at (\(Int(pt.x)), \(Int(pt.y))) with isTrusted: true",
                 elementId: action.target,
                 code: "SUCCESS",
                 native: true,

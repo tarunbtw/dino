@@ -10,8 +10,28 @@ import Network
 import WebKit
 
 extension NomadAgentServer {
-    func handleTabsRoute(method: String, cleanPath: String, bodyData: Data?, connection: NWConnection, origin: String?) -> Bool {
+    func handleTabsRoute(method: String, cleanPath: String, bodyData: Data?, queryItem: ((String) -> String?)? = nil, connection: NWConnection, origin: String?) -> Bool {
         guard let store = self.store else { return false }
+
+        func extractTargetTabId(json: [String: Any]?) -> String? {
+            if let json = json {
+                if let s = json["id"] as? String, !s.isEmpty { return s }
+                if let n = json["id"] as? Int { return String(n) }
+                if let s = json["tabId"] as? String, !s.isEmpty { return s }
+                if let n = json["tabId"] as? Int { return String(n) }
+                if let s = json["tab"] as? String, !s.isEmpty { return s }
+                if let n = json["tab"] as? Int { return String(n) }
+                if let s = json["index"] as? String, !s.isEmpty { return s }
+                if let n = json["index"] as? Int { return String(n) }
+            }
+            if let qi = queryItem {
+                if let s = qi("id"), !s.isEmpty { return s }
+                if let s = qi("tabId"), !s.isEmpty { return s }
+                if let s = qi("tab"), !s.isEmpty { return s }
+                if let s = qi("index"), !s.isEmpty { return s }
+            }
+            return nil
+        }
 
         switch (method, cleanPath) {
         case ("GET", "/tabs"):
@@ -79,53 +99,53 @@ extension NomadAgentServer {
             return true
 
         case ("POST", "/tabs/switch"):
-            guard let bodyData = bodyData,
-                  let json = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any],
-                  let idStr = json["id"] as? String,
-                  let id = UUID(uuidString: idStr) else {
-                sendResponse(connection: connection, status: "400 Bad Request", body: "{\"error\":\"Missing or invalid tab id\",\"code\":\"INVALID_TAB_ID\",\"success\":false}", origin: origin)
+            var json: [String: Any]? = nil
+            if let bodyData = bodyData {
+                json = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any]
+            }
+            guard let targetId = extractTargetTabId(json: json),
+                  let tab = self.resolveTab(id: targetId) else {
+                sendResponse(connection: connection, status: "404 Not Found", body: "{\"error\":\"Tab not found: \(extractTargetTabId(json: json) ?? "unknown")\",\"code\":\"TAB_NOT_FOUND\",\"success\":false}", origin: origin)
                 return true
             }
-            guard store.tabs.contains(where: { $0.id == id }) else {
-                sendResponse(connection: connection, status: "404 Not Found", body: "{\"error\":\"Tab not found: \(id.uuidString)\",\"code\":\"TAB_NOT_FOUND\",\"success\":false}", origin: origin)
-                return true
-            }
-            store.selectTab(id: id)
-            sendJSON(connection: connection, object: ["success": true, "activeTabId": id.uuidString, "tabsCount": store.tabs.count, "tabCount": store.tabs.count], origin: origin)
+            store.selectTab(id: tab.id)
+            sendJSON(connection: connection, object: ["success": true, "activeTabId": tab.id.uuidString, "tabsCount": store.tabs.count, "tabCount": store.tabs.count], origin: origin)
             return true
 
-        case ("POST", "/tabs/close"):
-            guard let bodyData = bodyData,
-                  let json = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any],
-                  let idStr = json["id"] as? String,
-                  let id = UUID(uuidString: idStr) else {
-                sendResponse(connection: connection, status: "400 Bad Request", body: "{\"error\":\"Missing or invalid tab id\",\"code\":\"INVALID_TAB_ID\",\"success\":false}", origin: origin)
+        case ("POST", "/tabs/close"), ("DELETE", "/tabs/close"), ("DELETE", "/tabs"):
+            var json: [String: Any]? = nil
+            if let bodyData = bodyData {
+                json = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any]
+            }
+            let targetTab: Tab?
+            if let targetId = extractTargetTabId(json: json) {
+                targetTab = self.resolveTab(id: targetId)
+            } else {
+                targetTab = store.activeTab
+            }
+            guard let tab = targetTab else {
+                sendResponse(connection: connection, status: "404 Not Found", body: "{\"error\":\"Tab not found\",\"code\":\"TAB_NOT_FOUND\",\"success\":false}", origin: origin)
                 return true
             }
-            guard store.tabs.contains(where: { $0.id == id }) else {
-                sendResponse(connection: connection, status: "404 Not Found", body: "{\"error\":\"Tab not found: \(id.uuidString)\",\"code\":\"TAB_NOT_FOUND\",\"success\":false}", origin: origin)
-                return true
-            }
-            store.closeTab(id: id)
-            sendJSON(connection: connection, object: ["success": true, "closedTabId": id.uuidString, "tabsCount": store.tabs.count, "tabCount": store.tabs.count], origin: origin)
+            let closedId = tab.id.uuidString
+            store.closeTab(id: tab.id)
+            sendJSON(connection: connection, object: ["success": true, "closedTabId": closedId, "tabsCount": store.tabs.count, "tabCount": store.tabs.count], origin: origin)
             return true
 
         case ("POST", "/tabs/tier"):
-            guard let bodyData = bodyData,
-                  let json = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any],
-                  let idStr = json["id"] as? String,
-                  let id = UUID(uuidString: idStr),
-                  let tierStr = json["tier"] as? String,
+            var json: [String: Any]? = nil
+            if let bodyData = bodyData {
+                json = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any]
+            }
+            let targetTab = extractTargetTabId(json: json).flatMap { self.resolveTab(id: $0) } ?? store.activeTab
+            guard let tab = targetTab,
+                  let tierStr = (json?["tier"] as? String) ?? queryItem?("tier"),
                   let newTier = TabTier(rawValue: tierStr.lowercased()) else {
                 sendResponse(connection: connection, status: "400 Bad Request", body: "{\"error\":\"Missing or invalid 'id' or 'tier' (expected 'hot', 'warm', or 'cold')\",\"code\":\"INVALID_PAYLOAD\",\"success\":false}", origin: origin)
                 return true
             }
-            guard let tab = store.tabs.first(where: { $0.id == id }) else {
-                sendResponse(connection: connection, status: "404 Not Found", body: "{\"error\":\"Tab not found: \(id.uuidString)\",\"code\":\"TAB_NOT_FOUND\",\"success\":false}", origin: origin)
-                return true
-            }
             tab.tier = newTier
-            sendJSON(connection: connection, object: ["success": true, "tabId": id.uuidString, "tier": newTier.rawValue], origin: origin)
+            sendJSON(connection: connection, object: ["success": true, "tabId": tab.id.uuidString, "tier": newTier.rawValue], origin: origin)
             return true
 
         case ("GET", "/extensions"):

@@ -178,8 +178,10 @@ enum WebKitPool {
                                     throw new TypeError('Failed to fetch (blocked by client)');
                                 }
                                 const mockStatus = matched.status || 200;
-                                const mockBody = matched.body !== undefined ? String(matched.body) : '';
-                                const mockHeaders = new Headers(matched.headers || { 'content-type': matched.contentType || 'application/json' });
+                                const rawBody = matched.responseBody !== undefined ? matched.responseBody : (matched.body !== undefined ? matched.body : '');
+                                const mockBody = (typeof rawBody === 'object' && rawBody !== null) ? JSON.stringify(rawBody) : String(rawBody);
+                                const defaultContentType = (typeof rawBody === 'object' && rawBody !== null) ? 'application/json' : 'text/plain';
+                                const mockHeaders = new Headers(matched.headers || { 'content-type': matched.contentType || defaultContentType });
                                 const duration = Math.round(performance.now() - startTime);
                                 sendNet({
                                     method: method,
@@ -272,7 +274,8 @@ enum WebKitPool {
                             return;
                         }
                         const mockStatus = matched.status || 200;
-                        const mockBody = matched.body !== undefined ? String(matched.body) : '';
+                        const rawBody = matched.responseBody !== undefined ? matched.responseBody : (matched.body !== undefined ? matched.body : '');
+                        const mockBody = (typeof rawBody === 'object' && rawBody !== null) ? JSON.stringify(rawBody) : String(rawBody);
                         const duration = Math.round(performance.now() - startTime);
                         sendNet({
                             method: reqMethod,
@@ -315,7 +318,8 @@ enum WebKitPool {
             maskNative(XMLHttpRequest.prototype.send, 'send');
         })();
         """
-        ucc.addUserScript(WKUserScript(source: networkInterceptor, injectionTime: .atDocumentStart, forMainFrameOnly: false))
+        ucc.addUserScript(WKUserScript(source: networkInterceptor, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page))
+        ucc.addUserScript(WKUserScript(source: networkInterceptor, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .defaultClient))
 
         // Nomad Sub-Frame Script: Pierces cross-origin iframes (Stripe, OAuth, reCAPTCHA, embeds)
         // Injected with forMainFrameOnly: false at document start so nested execution contexts are captured immediately.

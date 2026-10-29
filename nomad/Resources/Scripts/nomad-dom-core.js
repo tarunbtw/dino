@@ -1401,7 +1401,8 @@
                     summaryLines.push('[... and ' + (totalCount - (offset + limit)) + ' more elements. Call nomad_snapshot with offset=' + (offset + limit) + ']');
                 }
 
-                var fullSummary = summaryLines.join('\\n');
+                var bodyText = summaryLines.join('\\n');
+                var fullSummary = '<!-- BEGIN UNTRUSTED WEB CONTENT (origin: ' + displayUrl + ') -->\\n' + bodyText + '\\n<!-- END UNTRUSTED WEB CONTENT -->';
                 var tokenEst = Math.round(fullSummary.length / 4);
                 this.lastResults = results;
 
@@ -1417,6 +1418,7 @@
                     unfilteredTotal: results.length,
                     elements: pagedItems,
                     summary: fullSummary,
+                    securityBoundary: { untrusted: true, origin: displayUrl },
                     tokenEstimate: tokenEst
                 };
             },
@@ -1838,6 +1840,65 @@
                         }
                         return { success: false, code: 'MISSING_TARGET', message: 'No target element or coordinates specified for click action' };
 
+                    case 'dblclick':
+                    case 'double_click':
+                    case 'doubleclick':
+                        if (el) {
+                            var elDocD = el.ownerDocument || document;
+                            var elWinD = elDocD.defaultView || window;
+                            if (elDocD !== document && elWinD.frameElement) {
+                                try { elWinD.frameElement.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch(e) {}
+                            }
+                            el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+                            var rectD = el.getBoundingClientRect();
+                            var cxD = rectD.left + rectD.width / 2;
+                            var cyD = rectD.top + rectD.height / 2;
+
+                            var targetToDbl = el;
+                            var hitTopD = elDocD.elementFromPoint(cxD, cyD);
+                            var wasObscuredD = false;
+                            var interceptorTagD = '';
+                            if (hitTopD && hitTopD !== el && !el.contains(hitTopD)) {
+                                wasObscuredD = true;
+                                interceptorTagD = hitTopD.tagName ? hitTopD.tagName.toLowerCase() : 'overlay';
+                                targetToDbl = hitTopD;
+                            }
+
+                            function dispatchClickSeq(detail) {
+                                var pOpts = { bubbles: true, cancelable: true, view: elWinD, clientX: cxD, clientY: cyD, isPrimary: true, pointerId: 1, pointerType: 'mouse', button: 0, buttons: 1, detail: detail };
+                                targetToDbl.dispatchEvent(new elWinD.PointerEvent('pointerdown', pOpts));
+                                targetToDbl.dispatchEvent(new elWinD.MouseEvent('mousedown', { bubbles: true, cancelable: true, view: elWinD, clientX: cxD, clientY: cyD, button: 0, buttons: 1, detail: detail }));
+                                try { targetToDbl.focus(); } catch(e) {}
+                                var upOpts = { bubbles: true, cancelable: true, view: elWinD, clientX: cxD, clientY: cyD, isPrimary: true, pointerId: 1, pointerType: 'mouse', button: 0, buttons: 0, detail: detail };
+                                targetToDbl.dispatchEvent(new elWinD.PointerEvent('pointerup', upOpts));
+                                targetToDbl.dispatchEvent(new elWinD.MouseEvent('mouseup', { bubbles: true, cancelable: true, view: elWinD, clientX: cxD, clientY: cyD, button: 0, buttons: 0, detail: detail }));
+                                targetToDbl.dispatchEvent(new elWinD.MouseEvent('click', { bubbles: true, cancelable: true, view: elWinD, clientX: cxD, clientY: cyD, button: 0, buttons: 0, detail: detail }));
+                            }
+
+                            dispatchClickSeq(1);
+                            dispatchClickSeq(2);
+                            targetToDbl.dispatchEvent(new elWinD.MouseEvent('dblclick', { bubbles: true, cancelable: true, view: elWinD, clientX: cxD, clientY: cyD, button: 0, buttons: 0, detail: 2 }));
+
+                            if (wasObscuredD) {
+                                return {
+                                    success: true,
+                                    message: 'Double-clicked point of ' + (targetId || 'element') + ' (intercepted by <' + interceptorTagD + '>)',
+                                    elementId: targetId,
+                                    obscured: true,
+                                    interceptedBy: interceptorTagD
+                                };
+                            }
+                            return { success: true, message: 'Double-clicked ' + (targetId || 'element'), elementId: targetId };
+                        } else if (actionObj.x !== undefined && actionObj.y !== undefined) {
+                            var hitD = document.elementFromPoint(actionObj.x, actionObj.y);
+                            if (hitD) {
+                                hitD.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true, clientX: actionObj.x, clientY: actionObj.y, detail: 2 }));
+                                return { success: true, message: 'Double-clicked coordinates (' + actionObj.x + ', ' + actionObj.y + ')' };
+                            }
+                            return { success: false, code: 'ELEMENT_NOT_FOUND', message: 'No element at coordinates (' + actionObj.x + ', ' + actionObj.y + ')' };
+                        }
+                        return { success: false, code: 'MISSING_TARGET', message: 'No target element or coordinates specified for dblclick action' };
+
                     case 'right_click':
                     case 'rightclick':
                     case 'context_menu':
@@ -2256,6 +2317,16 @@
                             };
                         }
 
+                        var incomingPaths = actionObj.paths || actionObj.files || [];
+                        if (fileInput && !fileInput.multiple && incomingPaths.length > 1) {
+                            return {
+                                success: false,
+                                code: 'MULTIPLE_NOT_ALLOWED',
+                                message: "Target file input does not accept multiple files (missing 'multiple' attribute). Received " + incomingPaths.length + " files.",
+                                elementId: targetId
+                            };
+                        }
+
                         // If element is a drag-and-drop dropzone, dispatch simulated HTML5 DragEvent sequence
                         if (isDrop) {
                             try {
@@ -2389,24 +2460,57 @@
                 var vpH = window.innerHeight || 2000;
                 var renderedBadges = {};
 
-                // 1. Overlay badges for all elements in semantic perception tree (including subframe targets)
+                // 1. Overlay badges for interactive elements only, with spatial collision avoidance and max badge cap
                 var sourceList = this.lastResults || [];
+                var countRendered = 0;
+                var maxBadges = 75;
+                var occupiedBoxes = [];
+
+                var interactiveRoles = {
+                    'button': true, 'link': true, 'textbox': true, 'checkbox': true,
+                    'radio': true, 'combobox': true, 'menuitem': true, 'tab': true,
+                    'switch': true, 'option': true, 'searchbox': true
+                };
+
                 for (var ri = 0; ri < sourceList.length; ri++) {
+                    if (countRendered >= maxBadges) break;
                     var item = sourceList[ri];
                     if (!item || !item.id || !item.bounds) continue;
                     if (!item.inViewport || item.isObscured) continue;
+
+                    // Filter to actionable elements only (skip passive text nodes: p, li, td, etc.)
+                    var tag = (item.tag || '').toLowerCase();
+                    var role = (item.role || '').toLowerCase();
+                    var isActionable = (tag === 'button' || tag === 'a' || tag === 'input' || tag === 'select' || tag === 'textarea' || tag === 'details' || tag === 'summary' || interactiveRoles[role]);
+                    if (!isActionable) continue;
+
                     var b = item.bounds;
                     if (b.width <= 0 || b.height <= 0) continue;
                     if (b.y + b.height < 0 || b.y > vpH || b.x + b.width < 0 || b.x > vpW) continue;
 
+                    var badgeLeft = Math.max(0, Math.min(vpW - 60, b.x));
+                    var badgeTop = (b.y >= 14) ? (b.y - 12) : Math.max(0, b.y + 2);
+
+                    // Spatial collision avoidance: skip if another badge is within 12px horizontally and 10px vertically
+                    var collides = false;
+                    for (var oi = 0; oi < occupiedBoxes.length; oi++) {
+                        var ob = occupiedBoxes[oi];
+                        if (Math.abs(badgeLeft - ob.x) < 12 && Math.abs(badgeTop - ob.y) < 10) {
+                            collides = true;
+                            break;
+                        }
+                    }
+                    if (collides) continue;
+
+                    occupiedBoxes.push({ x: badgeLeft, y: badgeTop });
                     var badge = document.createElement('span');
                     badge.className = '__nb';
                     badge.textContent = item.id;
-                    var bTop = (b.y >= 14) ? (b.y - 12) : Math.max(0, b.y + 2);
-                    badge.style.left = Math.max(0, Math.min(vpW - 60, b.x)) + 'px';
-                    badge.style.top = Math.max(0, Math.min(vpH - 16, bTop)) + 'px';
+                    badge.style.left = badgeLeft + 'px';
+                    badge.style.top = badgeTop + 'px';
                     container.appendChild(badge);
                     renderedBadges[item.id] = true;
+                    countRendered++;
                 }
 
                 if (document.body) {

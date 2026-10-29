@@ -347,6 +347,7 @@ enum NomadCLIManager {
           find [options]      Fast element lookup returning target ref (~15 tokens)
           open <url>          Navigate active tab to URL
           click <ref>         Click element by reference (e.g. e5)
+          dblclick <ref>      Double-click element by reference (or click --double)
           type <ref> <text>   Type text into input field (e.g. e2)
           press <key>         Dispatch key chord (e.g. Enter, Meta+A)
           drag <from> <to>    Drag source element to destination element
@@ -363,6 +364,10 @@ enum NomadCLIManager {
           eval <script>       Evaluate JavaScript and print result
           shot [file]         Capture screenshot (saves PNG or '-' for stdout)
           upload <ref> <file> Stage and upload files to file input
+          storage [op]        Inspect, set, or clear web storage & storageState
+          console [level]     Inspect console entries (log, warn, error)
+          network [filter]    Inspect HTTP/XHR network requests
+          downloads [subcmd]  List or wait for active file downloads
           back, forward       Navigate history backward or forward
           reload              Reload the current page
 
@@ -585,6 +590,9 @@ enum NomadCLIManager {
         guard let url = URL(string: "http://127.0.0.1:\(port)/status") else { return nil }
         var request = URLRequest(url: url)
         request.timeoutInterval = 0.6
+        if let token = ProcessInfo.processInfo.environment["NOMAD_TOKEN"] ?? (try? String(contentsOf: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".nomad/agent-token"), encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines), !token.isEmpty {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
 
         let semaphore = DispatchSemaphore(value: 0)
         var result: StatusProbeResult? = nil

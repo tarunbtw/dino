@@ -227,6 +227,184 @@ extension NomadAgentServer {
             sendJSON(connection: connection, object: ["success": deleted, "filename": targetFile], origin: origin)
             return true
 
+        case ("GET", "/storage"):
+            guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin) else { return true }
+            let shouldRedact = queryItem("redact") != "false" && queryItem("raw") != "true"
+            let targetType = (queryItem("type") ?? "all").lowercased()
+
+            let script = """
+            (() => {
+                var ls = {};
+                var ss = {};
+                try {
+                    for (var i = 0; i < localStorage.length; i++) {
+                        var k = localStorage.key(i);
+                        if (k !== null) ls[k] = localStorage.getItem(k);
+                    }
+                } catch(e) {}
+                try {
+                    for (var j = 0; j < sessionStorage.length; j++) {
+                        var sk = sessionStorage.key(j);
+                        if (sk !== null) ss[sk] = sessionStorage.getItem(sk);
+                    }
+                } catch(e) {}
+                return {
+                    origin: window.location.origin || '',
+                    localStorage: ls,
+                    sessionStorage: ss
+                };
+            })()
+            """
+            let storeData = (try? await activeTab.webView.evaluateJavaScript(script)) as? [String: Any] ?? [:]
+            var ls = storeData["localStorage"] as? [String: String] ?? [:]
+            var ss = storeData["sessionStorage"] as? [String: String] ?? [:]
+            let originStr = (storeData["origin"] as? String) ?? (activeTab.url?.host ?? "")
+
+            if shouldRedact {
+                func redactDict(_ dict: [String: String]) -> [String: String] {
+                    var out: [String: String] = [:]
+                    for (k, v) in dict {
+                        let lk = k.lowercased()
+                        let isSens = lk.contains("token") || lk.contains("jwt") || lk.contains("auth") || lk.contains("secret") || lk.contains("key") || lk.contains("password") || lk.contains("pass") || lk.contains("credential") || lk.contains("session") || v.hasPrefix("eyJ")
+                        out[k] = isSens ? "[REDACTED]" : v
+                    }
+                    return out
+                }
+                ls = redactDict(ls)
+                ss = redactDict(ss)
+            }
+
+            var resp: [String: Any] = [
+                "success": true,
+                "origin": originStr,
+                "tabId": activeTab.id.uuidString
+            ]
+            if targetType == "all" || targetType == "local" { resp["localStorage"] = ls }
+            if targetType == "all" || targetType == "session" { resp["sessionStorage"] = ss }
+
+            if targetType == "all" || targetType == "cookies" {
+                let host = activeTab.url?.host ?? ""
+                let allCookies = await activeTab.webView.configuration.websiteDataStore.httpCookieStore.allCookies()
+                let matched = allCookies.filter { c in
+                    host.isEmpty || c.domain.hasSuffix(host) || host.hasSuffix(c.domain.trimmingCharacters(in: CharacterSet(charactersIn: ".")))
+                }.map { c -> [String: Any] in
+                    var d: [String: Any] = [
+                        "name": c.name,
+                        "value": shouldRedact && (c.name.lowercased().contains("token") || c.name.lowercased().contains("auth") || c.name.lowercased().contains("session") || c.name.lowercased().contains("jwt") || c.value.hasPrefix("eyJ")) ? "[REDACTED]" : c.value,
+                        "domain": c.domain,
+                        "path": c.path,
+                        "isSecure": c.isSecure,
+                        "isHTTPOnly": c.isHTTPOnly
+                    ]
+                    if let exp = c.expiresDate { d["expires"] = exp.timeIntervalSince1970 }
+                    return d
+                }
+                resp["cookies"] = matched
+            }
+
+            sendJSON(connection: connection, object: resp, origin: origin)
+            return true
+
+        case ("POST", "/storage"):
+            guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin) else { return true }
+            guard let bodyData = bodyData,
+                  let json = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any] else {
+                sendResponse(connection: connection, status: "400 Bad Request", body: "{\"error\":\"Missing or invalid JSON body in /storage\",\"code\":\"INVALID_PAYLOAD\",\"success\":false}", origin: origin)
+                return true
+            }
+
+            var updated: [String] = []
+            if let lsUpdates = json["localStorage"] as? [String: Any],
+               let lsData = try? JSONSerialization.data(withJSONObject: lsUpdates),
+               let lsJSON = String(data: lsData, encoding: .utf8) {
+                let script = """
+                (() => {
+                    var u = \(lsJSON);
+                    for (var k in u) {
+                        if (Object.prototype.hasOwnProperty.call(u, k)) {
+                            localStorage.setItem(k, String(u[k]));
+                        }
+                    }
+                })()
+                """
+                _ = try? await activeTab.webView.evaluateJavaScript(script)
+                updated.append("localStorage")
+            }
+
+            if let ssUpdates = json["sessionStorage"] as? [String: Any],
+               let ssData = try? JSONSerialization.data(withJSONObject: ssUpdates),
+               let ssJSON = String(data: ssData, encoding: .utf8) {
+                let script = """
+                (() => {
+                    var u = \(ssJSON);
+                    for (var k in u) {
+                        if (Object.prototype.hasOwnProperty.call(u, k)) {
+                            sessionStorage.setItem(k, String(u[k]));
+                        }
+                    }
+                })()
+                """
+                _ = try? await activeTab.webView.evaluateJavaScript(script)
+                updated.append("sessionStorage")
+            }
+
+            if let cookieList = json["cookies"] as? [[String: Any]] {
+                let cookieStore = activeTab.webView.configuration.websiteDataStore.httpCookieStore
+                let curHost = activeTab.url?.host ?? "localhost"
+                for cDict in cookieList {
+                    guard let name = cDict["name"] as? String, !name.isEmpty,
+                          let val = (cDict["value"] as? String) ?? (cDict["val"] as? String) else { continue }
+                    var props: [HTTPCookiePropertyKey: Any] = [
+                        .name: name,
+                        .value: val,
+                        .domain: (cDict["domain"] as? String) ?? curHost,
+                        .path: (cDict["path"] as? String) ?? "/"
+                    ]
+                    if let sec = cDict["isSecure"] as? Bool { props[.secure] = sec ? "TRUE" : "FALSE" }
+                    if let exp = cDict["expires"] as? Double { props[.expires] = Date(timeIntervalSince1970: exp) }
+                    if let cookie = HTTPCookie(properties: props) {
+                        await cookieStore.setCookie(cookie)
+                    }
+                }
+                updated.append("cookies")
+            }
+
+            sendJSON(connection: connection, object: ["success": true, "updated": updated], origin: origin)
+            return true
+
+        case ("DELETE", "/storage"):
+            guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin) else { return true }
+            var targetType = "all"
+            if let t = queryItem("type") { targetType = t.lowercased() }
+            if let bodyData = bodyData,
+               let json = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any],
+               let t = json["type"] as? String {
+                targetType = t.lowercased()
+            }
+
+            let script = """
+            (() => {
+                var t = '\(targetType)';
+                if (t === 'all' || t === 'local') { try { localStorage.clear(); } catch(e) {} }
+                if (t === 'all' || t === 'session') { try { sessionStorage.clear(); } catch(e) {} }
+            })()
+            """
+            _ = try? await activeTab.webView.evaluateJavaScript(script)
+
+            if targetType == "all" || targetType == "cookies" {
+                let host = activeTab.url?.host ?? ""
+                let cookieStore = activeTab.webView.configuration.websiteDataStore.httpCookieStore
+                let allCookies = await cookieStore.allCookies()
+                for c in allCookies {
+                    if host.isEmpty || c.domain.hasSuffix(host) || host.hasSuffix(c.domain.trimmingCharacters(in: CharacterSet(charactersIn: "."))) {
+                        await cookieStore.deleteCookie(c)
+                    }
+                }
+            }
+
+            sendJSON(connection: connection, object: ["success": true, "cleared": targetType], origin: origin)
+            return true
+
         case ("GET", "/events"):
             registerEventStream(connection: connection, origin: origin)
             return true
@@ -316,7 +494,8 @@ extension NomadAgentServer {
             }
             let serialized = String(data: bodyData, encoding: .utf8) ?? "{}"
             let js = "window.__nomad_mock_routes = (window.__nomad_mock_routes || []).concat([\(serialized)]);"
-            _ = try? await activeTab.webView.evaluateJavaScript(js)
+            activeTab.webView.evaluateJavaScript(js, in: nil, in: .page, completionHandler: nil)
+            activeTab.webView.evaluateJavaScript(js, in: nil, in: .defaultClient, completionHandler: nil)
             sendJSON(connection: connection, object: ["success": true, "mockedUrl": mockUrl], origin: origin)
             return true
 
@@ -331,7 +510,8 @@ extension NomadAgentServer {
 
         case ("DELETE", "/network/mock"):
             guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin) else { return true }
-            _ = try? await activeTab.webView.evaluateJavaScript("window.__nomad_mock_routes = [];")
+            activeTab.webView.evaluateJavaScript("window.__nomad_mock_routes = [];", in: nil, in: .page, completionHandler: nil)
+            activeTab.webView.evaluateJavaScript("window.__nomad_mock_routes = [];", in: nil, in: .defaultClient, completionHandler: nil)
             sendJSON(connection: connection, object: ["success": true, "cleared": true], origin: origin)
             return true
 
@@ -363,7 +543,8 @@ extension NomadAgentServer {
             }
             let rulesJson = (try? JSONSerialization.data(withJSONObject: rules)).flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
             let js = "window.__nomad_mock_routes = (window.__nomad_mock_routes || []).concat(\(rulesJson));"
-            _ = try? await activeTab.webView.evaluateJavaScript(js)
+            activeTab.webView.evaluateJavaScript(js, in: nil, in: .page, completionHandler: nil)
+            activeTab.webView.evaluateJavaScript(js, in: nil, in: .defaultClient, completionHandler: nil)
             sendJSON(connection: connection, object: ["success": true, "blocked": true, "count": activeTab.blockedURLPatterns.count, "url": blockUrl, "patterns": activeTab.blockedURLPatterns], origin: origin)
             return true
 
@@ -376,7 +557,9 @@ extension NomadAgentServer {
         case ("DELETE", "/network/block"):
             guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin) else { return true }
             activeTab.blockedURLPatterns.removeAll()
-            _ = try? await activeTab.webView.evaluateJavaScript("window.__nomad_mock_routes = (window.__nomad_mock_routes || []).filter(m => !m || !m.block);")
+            let cleanJs = "window.__nomad_mock_routes = (window.__nomad_mock_routes || []).filter(m => !m || !m.block);"
+            activeTab.webView.evaluateJavaScript(cleanJs, in: nil, in: .page, completionHandler: nil)
+            activeTab.webView.evaluateJavaScript(cleanJs, in: nil, in: .defaultClient, completionHandler: nil)
             sendJSON(connection: connection, object: ["success": true, "cleared": true], origin: origin)
             return true
 

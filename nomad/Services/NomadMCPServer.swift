@@ -73,7 +73,9 @@ final class NomadMCPServer {
             let result: [String: Any] = [
                 "protocolVersion": "2024-11-05",
                 "capabilities": [
-                    "tools": [:] as [String: Any]
+                    "tools": [:] as [String: Any],
+                    "resources": [:] as [String: Any],
+                    "prompts": [:] as [String: Any]
                 ],
                 "serverInfo": [
                     "name": "nomad-browser",
@@ -96,6 +98,21 @@ final class NomadMCPServer {
             let toolName = params["name"] as? String ?? ""
             let toolArgs = params["arguments"] as? [String: Any] ?? [:]
             executeTool(name: toolName, args: toolArgs, id: id)
+
+        case "resources/list":
+            sendResponse(id: id, result: ["resources": resourcesManifest])
+
+        case "resources/read":
+            let uri = params["uri"] as? String ?? ""
+            handleResourceRead(uri: uri, id: id)
+
+        case "prompts/list":
+            sendResponse(id: id, result: ["prompts": promptsManifest])
+
+        case "prompts/get":
+            let promptName = params["name"] as? String ?? ""
+            let promptArgs = (params["arguments"] as? [String: String]) ?? [:]
+            handlePromptGet(name: promptName, args: promptArgs, id: id)
 
         default:
             if id != nil {
@@ -316,9 +333,87 @@ final class NomadMCPServer {
                 respondTool(id: id, res: res, error: err)
             }
 
+        case "nomad_storage":
+            let op = (args["operation"] as? String) ?? "get"
+            let method = op == "set" ? "POST" : (op == "clear" ? "DELETE" : "GET")
+            var q = ""
+            if let tabId = args["tabId"] as? String {
+                q = "?tabId=\(tabId)"
+            }
+            callNomad(method: method, path: "/storage\(q)", body: method == "GET" ? nil : args) { res, err in
+                respondTool(id: id, res: res, error: err)
+            }
+
         default:
             sendError(id: id, code: -32601, message: "Unknown tool: \(name)")
         }
+    }
+
+    private static func handleResourceRead(uri: String, id: Any?) {
+        let endpoint: String
+        switch uri {
+        case "nomad://tabs":
+            endpoint = "/tabs"
+        case "nomad://console":
+            endpoint = "/console"
+        case "nomad://network":
+            endpoint = "/network"
+        case "nomad://status":
+            endpoint = "/status"
+        default:
+            sendError(id: id, code: -32602, message: "Resource not found: \(uri)")
+            return
+        }
+
+        callNomadHTTP(method: "GET", path: endpoint) { data, _, error in
+            if let error = error {
+                sendError(id: id, code: -32603, message: error.localizedDescription)
+                return
+            }
+            let text = data.flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+            let result: [String: Any] = [
+                "contents": [
+                    [
+                        "uri": uri,
+                        "mimeType": "application/json",
+                        "text": text
+                    ]
+                ]
+            ]
+            sendResponse(id: id, result: result)
+        }
+    }
+
+    private static func handlePromptGet(name: String, args: [String: String], id: Any?) {
+        guard name == "nomad_browser_task" else {
+            sendError(id: id, code: -32602, message: "Unknown prompt: \(name)")
+            return
+        }
+        let task = args["task"] ?? "Navigate and complete task"
+        let promptText = """
+        You are driving Nomad, a fast, lightweight native macOS browser engine.
+        To accomplish this task efficiently:
+        1. Call `nomad_status` or `nomad_tabs` to inspect the browser state.
+        2. Navigate using `nomad_navigate`.
+        3. Use `nomad_snapshot` with a limit (e.g. limit: 50) or `nomad_find` to locate target elements.
+        4. Perform actions using `nomad_action` with target element references (e.g. e5).
+        5. Verify outcomes using `nomad_wait` or snapshot before finishing.
+
+        Current task: \(task)
+        """
+        let result: [String: Any] = [
+            "description": "Instruct an AI agent on how to use Nomad's token-efficient driver to navigate and complete web automation tasks",
+            "messages": [
+                [
+                    "role": "user",
+                    "content": [
+                        "type": "text",
+                        "text": promptText
+                    ]
+                ]
+            ]
+        ]
+        sendResponse(id: id, result: result)
     }
 
     private static func callNomadHTTP(method: String, path: String, body: [String: Any]? = nil, completion: @escaping (Data?, HTTPURLResponse?, Error?) -> Void) {
@@ -809,6 +904,76 @@ final class NomadMCPServer {
                 ] as [String: Any],
                 "additionalProperties": false
             ] as [String: Any]
+        ],
+        [
+            "name": "nomad_storage",
+            "description": "Inspect, set, or clear web storage (localStorage, sessionStorage) and cookies.",
+            "inputSchema": [
+                "type": "object",
+                "properties": [
+                    "operation": [
+                        "type": "string",
+                        "enum": ["get", "set", "clear"],
+                        "description": "Storage operation to perform (default: 'get')"
+                    ] as [String: Any],
+                    "tabId": [
+                        "type": "string",
+                        "description": "Optional target tab UUID"
+                    ],
+                    "localStorage": [
+                        "type": "object",
+                        "description": "Key-value dictionary to set in localStorage"
+                    ],
+                    "sessionStorage": [
+                        "type": "object",
+                        "description": "Key-value dictionary to set in sessionStorage"
+                    ]
+                ] as [String: Any],
+                "additionalProperties": false
+            ] as [String: Any]
+        ]
+    ]
+
+    // MARK: - MCP Resources Manifest
+    private static let resourcesManifest: [[String: Any]] = [
+        [
+            "uri": "nomad://tabs",
+            "name": "Open Tabs",
+            "description": "List of open tabs and their active states, URLs, and titles",
+            "mimeType": "application/json"
+        ],
+        [
+            "uri": "nomad://console",
+            "name": "Console Logs",
+            "description": "Recent console log, warning, and error messages from the active tab",
+            "mimeType": "application/json"
+        ],
+        [
+            "uri": "nomad://network",
+            "name": "Network Activity",
+            "description": "Recent HTTP and XHR network requests in the active tab",
+            "mimeType": "application/json"
+        ],
+        [
+            "uri": "nomad://status",
+            "name": "Nomad Engine Status",
+            "description": "Nomad browser engine and daemon health status and capabilities",
+            "mimeType": "application/json"
+        ]
+    ]
+
+    // MARK: - MCP Prompts Manifest
+    private static let promptsManifest: [[String: Any]] = [
+        [
+            "name": "nomad_browser_task",
+            "description": "Instruct an AI agent on how to use Nomad's token-efficient driver to navigate and complete web automation tasks",
+            "arguments": [
+                [
+                    "name": "task",
+                    "description": "Goal or description of what to perform in the browser",
+                    "required": true
+                ]
+            ]
         ]
     ]
 }

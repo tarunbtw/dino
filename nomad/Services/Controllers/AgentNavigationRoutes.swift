@@ -425,17 +425,32 @@ extension NomadAgentServer {
                 (() => {
                     var targetText = \(escapedText).toLowerCase();
                     var sel = \(escapedSel);
-                    var root = document;
+                    var root = null;
                     if (sel) {
                         if (window.__nomad && window.__nomad.findInTree) {
                             try { root = window.__nomad.findInTree(document, sel) || document.querySelector(sel); } catch(e) {}
                         } else {
                             try { root = document.querySelector(sel); } catch(e) {}
                         }
+                    } else {
+                        root = document.body || document.documentElement;
                     }
                     if (!root) return false;
-                    var content = (root.innerText || root.textContent || '').toLowerCase();
-                    return content.indexOf(targetText) !== -1;
+                    function hasText(node) {
+                        if (!node) return false;
+                        var txt = (node.innerText || node.textContent || node.value || '').toLowerCase();
+                        if (txt.indexOf(targetText) !== -1) return true;
+                        if (node.shadowRoot && hasText(node.shadowRoot)) return true;
+                        try {
+                            var iframes = node.querySelectorAll ? node.querySelectorAll('iframe') : [];
+                            for (var i = 0; i < iframes.length; i++) {
+                                var fDoc = iframes[i].contentDocument || (iframes[i].contentWindow ? iframes[i].contentWindow.document : null);
+                                if (fDoc && hasText(fDoc.body || fDoc.documentElement)) return true;
+                            }
+                        } catch(e) {}
+                        return false;
+                    }
+                    return hasText(root);
                 })()
                 """
 

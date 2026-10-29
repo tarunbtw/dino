@@ -267,12 +267,14 @@ final class Tab: NSObject, Identifiable, ObservableObject {
         let ucc = effectiveConfig.userContentController
         ucc.removeScriptMessageHandler(forName: "nomadConsole")
         ucc.removeScriptMessageHandler(forName: "nomadInspect")
-        ucc.removeScriptMessageHandler(forName: "nomadNetwork")
+        ucc.removeScriptMessageHandler(forName: "nomadNetwork", contentWorld: .page)
+        ucc.removeScriptMessageHandler(forName: "nomadNetwork", contentWorld: .defaultClient)
         ucc.removeScriptMessageHandler(forName: "nomadZapper")
         ucc.removeScriptMessageHandler(forName: "nomadFrameBridge")
         ucc.add(WeakScriptMessageHandler(delegate: self), name: "nomadConsole")
         ucc.add(WeakScriptMessageHandler(delegate: self), name: "nomadInspect")
-        ucc.add(WeakScriptMessageHandler(delegate: self), name: "nomadNetwork")
+        ucc.add(WeakScriptMessageHandler(delegate: self), contentWorld: .page, name: "nomadNetwork")
+        ucc.add(WeakScriptMessageHandler(delegate: self), contentWorld: .defaultClient, name: "nomadNetwork")
         ucc.add(WeakScriptMessageHandler(delegate: self), name: "nomadZapper")
         ucc.add(WeakScriptMessageHandler(delegate: self), name: "nomadFrameBridge")
 
@@ -355,7 +357,8 @@ final class Tab: NSObject, Identifiable, ObservableObject {
         observers.removeAll()
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "nomadConsole")
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "nomadInspect")
-        webView.configuration.userContentController.removeScriptMessageHandler(forName: "nomadNetwork")
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: "nomadNetwork", contentWorld: .page)
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: "nomadNetwork", contentWorld: .defaultClient)
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "nomadZapper")
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "nomadFrameBridge")
     }

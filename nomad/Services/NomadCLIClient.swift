@@ -82,10 +82,12 @@ enum NomadCLIClient {
         "open": ["--allow-local-files", "--local", "-l", "--wait", "-w", "--tab"],
         "nav": ["--allow-local-files", "--local", "-l", "--wait", "-w", "--tab"],
         "navigate": ["--allow-local-files", "--local", "-l", "--wait", "-w", "--tab"],
-        "back": ["--tab"],
-        "forward": ["--tab"],
-        "reload": ["--tab"],
+        "back": ["--wait", "-w", "--tab"],
+        "forward": ["--wait", "-w", "--tab"],
+        "reload": ["--wait", "-w", "--tab"],
         "click": ["--native", "--right", "-r", "--middle", "--double", "--wait", "-w", "--tab"],
+        "dblclick": ["--native", "--wait", "-w", "--tab"],
+        "double-click": ["--native", "--wait", "-w", "--tab"],
         "type": ["--press", "-p", "--submit", "--clear", "--native", "--wait", "-w", "--tab"],
         "press": ["--native", "--modifiers", "--wait", "-w", "--tab"],
         "drag": ["--native", "--to-target", "--to-selector", "--to-x", "--to-y", "--wait", "-w", "--tab"],
@@ -97,13 +99,17 @@ enum NomadCLIClient {
         "dialog": ["--policy", "--response", "--tab"],
         "ext": ["--tab"],
         "extensions": ["--tab"],
-        "tab": ["--close", "--new", "--switch"],
-        "tabs": ["--close", "--new", "--switch"],
+        "tab": ["--close", "--new", "--switch", "--wait", "-w", "--incognito"],
+        "tabs": ["--close", "--new", "--switch", "--wait", "-w", "--incognito"],
         "eval": ["--world", "--tab"],
         "evaluate": ["--world", "--tab"],
         "shot": ["--clip", "-c", "--element", "-e", "--labeled", "-l", "--output", "-o", "--tab"],
         "screenshot": ["--clip", "-c", "--element", "-e", "--labeled", "-l", "--output", "-o", "--tab"],
-        "upload": ["--tab"]
+        "upload": ["--tab"],
+        "storage": ["--tab", "--json", "-j"],
+        "console": ["--tab", "--level", "-l", "--clear", "-c", "--json", "-j"],
+        "network": ["--tab", "--filter", "-f", "--clear", "-c", "--json", "-j"],
+        "downloads": ["--wait", "-w", "--timeout", "-t", "--delete", "-d", "--clear", "--json", "-j"]
     ]
 
     private static func parseArguments(_ args: [String]) -> ParsedArgs {
@@ -426,7 +432,11 @@ enum NomadCLIClient {
             return true
 
         case "click":
-            handleClick(args: args, port: activePort, socketPath: activeSocket)
+            handleClick(args: args, port: activePort, socketPath: activeSocket, isDouble: false)
+            return true
+
+        case "dblclick", "double-click":
+            handleClick(args: args, port: activePort, socketPath: activeSocket, isDouble: true)
             return true
 
         case "type":
@@ -483,6 +493,22 @@ enum NomadCLIClient {
 
         case "ext", "extensions":
             handleExtensions(args: args, port: activePort, socketPath: activeSocket)
+            return true
+
+        case "storage":
+            handleStorage(args: args, port: activePort, socketPath: activeSocket)
+            return true
+
+        case "console":
+            handleConsole(args: args, port: activePort, socketPath: activeSocket)
+            return true
+
+        case "network":
+            handleNetwork(args: args, port: activePort, socketPath: activeSocket)
+            return true
+
+        case "downloads", "download":
+            handleDownloads(args: args, port: activePort, socketPath: activeSocket)
             return true
 
         default:
@@ -763,6 +789,74 @@ enum NomadCLIClient {
               disable <id>             Disable an installed extension
             """)
 
+        case "storage":
+            emitOutput("""
+            Usage: nomad storage [get|set|clear] [args] [options]
+
+            Inspect and manage web storage (localStorage, sessionStorage) and cookies.
+
+            Subcommands:
+              get [key]                Get all storage or specific key
+              set <key> <val>          Set storage key to value
+              clear                    Clear all storage and cookies
+
+            Options:
+              --session                Target sessionStorage instead of localStorage
+              --json, -j               Output raw JSON
+              --tab <id|idx>           Target specific tab by index or ID (default: active tab)
+            """)
+
+        case "console":
+            emitOutput("""
+            Usage: nomad console [level] [options]
+
+            Inspect JavaScript console logs, warnings, and errors.
+
+            Arguments:
+              [level]                  Filter by log level (log, warn, error)
+
+            Options:
+              -l, --level <level>      Filter by log level (log, warn, error)
+              -c, --clear              Clear console buffer after reading
+              -j, --json               Output raw JSON entries
+              --tab <id|idx>           Target specific tab by index or ID (default: active tab)
+            """)
+
+        case "network":
+            emitOutput("""
+            Usage: nomad network [filter] [options]
+
+            Inspect network requests, HTTP statuses, and timings.
+
+            Arguments:
+              [filter]                 Filter requests (errors, success, or status code e.g. 404)
+
+            Options:
+              -f, --filter <filter>    Filter requests (errors, success, or status code)
+              -c, --clear              Clear network log
+              -j, --json               Output raw JSON entries
+              --tab <id|idx>           Target specific tab by index or ID (default: active tab)
+            """)
+
+        case "downloads", "download":
+            emitOutput("""
+            Usage: nomad downloads [subcommand] [options]
+
+            Inspect and manage downloaded files.
+
+            Subcommands:
+              (no args)                List all completed downloads
+              last                     Inspect most recent download
+              wait                     Wait for in-progress download to complete
+              delete <file>            Delete downloaded file by filename
+
+            Options:
+              -w, --wait               Wait for next download to finish
+              -t, --timeout <ms>       Wait timeout in milliseconds (default: 10000)
+              -d, --delete <file>      Delete downloaded file
+              -j, --json               Output raw JSON
+            """)
+
         default:
             emitOutput("No detailed help available for command '\(cmd)'. Run 'nomad help' for all commands.")
         }
@@ -972,6 +1066,17 @@ enum NomadCLIClient {
             exit(1)
         }
 
+        // Compound --wait support (e.g. nomad back --wait auto or nomad reload -w)
+        let waitMode = args.stringOption(["--wait", "-w"]) ?? (args.boolFlag(["--wait", "-w"]) ? "auto" : nil)
+        if let waitArg = waitMode {
+            var waitBody: [String: Any] = ["mode": waitArg]
+            if let tid = bodyObj["tabId"] as? String { waitBody["tabId"] = tid }
+            if let wData = try? JSONSerialization.data(withJSONObject: waitBody) {
+                let waitResp = request(method: "POST", path: "/wait", body: wData, timeoutSeconds: 15, socketPath: socketPath, port: port)
+                _ = validateActionResponse(waitResp, command: "wait")
+            }
+        }
+
         switch action {
         case "back": emitOutput("Navigated back")
         case "forward": emitOutput("Navigated forward")
@@ -981,15 +1086,16 @@ enum NomadCLIClient {
         exit(0)
     }
 
-    private static func handleClick(args: ParsedArgs, port: UInt16?, socketPath: String?) {
+    private static func handleClick(args: ParsedArgs, port: UInt16?, socketPath: String?, isDouble: Bool = false) {
         guard let ref = args.positionals.first, !ref.isEmpty else {
             emitError("nomad click: element reference is required (e.g. 'nomad click e5')")
             exit(1)
         }
 
         let isRight = args.boolFlag(["--right", "-r", "--context-menu"])
+        let isDouble = isDouble || args.boolFlag(["--double", "-d"])
         let isNative = args.boolFlag(["--native"])
-        let actionType = isRight ? "right_click" : "click"
+        let actionType = isRight ? "right_click" : (isDouble ? "dblclick" : "click")
 
         var bodyObj: [String: Any] = [
             "type": actionType,
@@ -1008,7 +1114,7 @@ enum NomadCLIClient {
         }
 
         let resp = request(method: "POST", path: "/action", body: bodyData, socketPath: socketPath, port: port)
-        _ = validateActionResponse(resp, command: "click")
+        let json = validateActionResponse(resp, command: "click")
 
         // Compound --wait support (e.g. nomad click e5 --wait auto or nomad click e5 --wait)
         let waitMode = args.stringOption(["--wait", "-w"]) ?? (args.boolFlag(["--wait", "-w"]) ? "auto" : nil)
@@ -1021,8 +1127,15 @@ enum NomadCLIClient {
             }
         }
 
-        let desc = isRight ? "Right-clicked" : "Clicked"
-        emitOutput("\(desc) \(ref)")
+        var desc = isRight ? "Right-clicked" : (isDouble ? "Double-clicked" : "Clicked")
+        if let obs = json["obscured"] as? Bool, obs {
+            let interceptor = json["interceptedBy"] as? String
+            let tag = interceptor != nil ? "<\(interceptor!)>" : "overlay"
+            desc += " \(ref) (warning: obscured, intercepted by \(tag))"
+        } else {
+            desc += " \(ref)"
+        }
+        emitOutput(desc)
         exit(0)
     }
 
@@ -1455,6 +1568,18 @@ enum NomadCLIClient {
 
             let tabId = json["tabId"] as? String ?? ""
             let url = json["url"] as? String ?? ""
+
+            // Compound --wait support (e.g. nomad tab new https://example.com --wait)
+            let waitMode = args.stringOption(["--wait", "-w"]) ?? (args.boolFlag(["--wait", "-w"]) ? "auto" : nil)
+            if let waitArg = waitMode {
+                var waitBody: [String: Any] = ["mode": waitArg]
+                if !tabId.isEmpty { waitBody["tabId"] = tabId }
+                if let wData = try? JSONSerialization.data(withJSONObject: waitBody) {
+                    let waitResp = request(method: "POST", path: "/wait", body: wData, timeoutSeconds: 15, socketPath: socketPath, port: port)
+                    _ = validateActionResponse(waitResp, command: "wait")
+                }
+            }
+
             emitOutput("Created tab: \(tabId) (\(url.isEmpty ? "about:blank" : url))")
             exit(0)
         }
@@ -1715,6 +1840,219 @@ enum NomadCLIClient {
         _ = validateActionResponse(resp, command: "upload")
 
         emitOutput("Uploaded \(resolvedPaths.count) file(s) to \(ref)")
+        exit(0)
+    }
+
+    private static func handleStorage(args: ParsedArgs, port: UInt16?, socketPath: String?) {
+        let sub = args.positionals.first?.lowercased() ?? "get"
+        let tabArg = args.stringOption(["--tab"])
+        let resolvedTid = tabArg.flatMap { resolveTabId($0, port: port, socketPath: socketPath) }
+        var queryParts: [String] = []
+        if let tid = resolvedTid { queryParts.append("tabId=\(tid)") }
+        if args.boolFlag(["--raw"]) { queryParts.append("raw=true") }
+        if let t = args.stringOption(["--type"]) { queryParts.append("type=\(t)") }
+        let qStr = queryParts.isEmpty ? "" : "?" + queryParts.joined(separator: "&")
+
+        switch sub {
+        case "get":
+            let resp = request(method: "GET", path: "/storage\(qStr)", socketPath: socketPath, port: port)
+            let json = validateActionResponse(resp, command: "storage get")
+            if let data = try? JSONSerialization.data(withJSONObject: json, options: .prettyPrinted),
+               let str = String(data: data, encoding: .utf8) {
+                emitOutput(str)
+            }
+            exit(0)
+
+        case "clear":
+            var bodyObj: [String: Any] = [:]
+            if let tid = resolvedTid { bodyObj["tabId"] = tid }
+            if let t = args.stringOption(["--type"]) { bodyObj["type"] = t }
+            let bData = try? JSONSerialization.data(withJSONObject: bodyObj)
+            let resp = request(method: "DELETE", path: "/storage\(qStr)", body: bData, socketPath: socketPath, port: port)
+            _ = validateActionResponse(resp, command: "storage clear")
+            emitOutput("Storage cleared")
+            exit(0)
+
+        case "set":
+            guard args.positionals.count >= 3 else {
+                emitError("nomad storage set: requires key and value (e.g. 'nomad storage set auth_token abc')")
+                exit(1)
+            }
+            let key = args.positionals[1]
+            let val = args.positionals[2]
+            let isSession = args.boolFlag(["--session"])
+            var bodyObj: [String: Any] = [:]
+            if let tid = resolvedTid { bodyObj["tabId"] = tid }
+            if isSession {
+                bodyObj["sessionStorage"] = [key: val]
+            } else {
+                bodyObj["localStorage"] = [key: val]
+            }
+            let bData = try? JSONSerialization.data(withJSONObject: bodyObj)
+            let resp = request(method: "POST", path: "/storage", body: bData, socketPath: socketPath, port: port)
+            _ = validateActionResponse(resp, command: "storage set")
+            emitOutput("Set \(isSession ? "sessionStorage" : "localStorage") '\(key)' = '\(val)'")
+            exit(0)
+
+        default:
+            emitError("Unknown storage subcommand '\(sub)'. Expected 'get', 'set', or 'clear'.")
+            exit(1)
+        }
+    }
+
+    private static func handleConsole(args: ParsedArgs, port: UInt16?, socketPath: String?) {
+        var queryParts: [String] = []
+        let tabArg = args.stringOption(["--tab"])
+        if let tid = tabArg.flatMap({ resolveTabId($0, port: port, socketPath: socketPath) }) {
+            queryParts.append("tabId=\(tid)")
+        }
+        let level = args.stringOption(["--level", "-l"]) ?? args.positionals.first
+        if let lvl = level, !lvl.isEmpty {
+            queryParts.append("level=\(lvl.lowercased())")
+        }
+        if args.boolFlag(["--clear", "-c"]) {
+            queryParts.append("clear=true")
+        }
+        let q = queryParts.isEmpty ? "" : "?" + queryParts.joined(separator: "&")
+        let resp = request(method: "GET", path: "/console\(q)", socketPath: socketPath, port: port)
+        guard resp.statusCode == 200, let json = resp.jsonObject else {
+            let errMsg = (resp.jsonObject?["error"] as? String) ?? resp.bodyString
+            emitError("nomad console: \(errMsg)")
+            exit(1)
+        }
+        if args.boolFlag(["--json", "-j"]) {
+            emitOutput(resp.bodyString)
+            exit(0)
+        }
+        guard let entries = json["entries"] as? [[String: Any]], !entries.isEmpty else {
+            emitOutput("No console entries")
+            exit(0)
+        }
+        for e in entries {
+            let lvl = (e["level"] as? String)?.uppercased() ?? "LOG"
+            let msg = e["message"] as? String ?? ""
+            emitOutput("[\(lvl)] \(msg)")
+        }
+        exit(0)
+    }
+
+    private static func handleNetwork(args: ParsedArgs, port: UInt16?, socketPath: String?) {
+        var queryParts: [String] = []
+        let tabArg = args.stringOption(["--tab"])
+        if let tid = tabArg.flatMap({ resolveTabId($0, port: port, socketPath: socketPath) }) {
+            queryParts.append("tabId=\(tid)")
+        }
+        let filter = args.stringOption(["--filter", "-f"]) ?? args.positionals.first
+        if let f = filter, !f.isEmpty {
+            queryParts.append("statusFilter=\(f)")
+        }
+        if args.boolFlag(["--clear", "-c"]) {
+            queryParts.append("clear=true")
+        }
+        let q = queryParts.isEmpty ? "" : "?" + queryParts.joined(separator: "&")
+        let resp = request(method: "GET", path: "/network\(q)", socketPath: socketPath, port: port)
+        guard resp.statusCode == 200, let json = resp.jsonObject else {
+            let errMsg = (resp.jsonObject?["error"] as? String) ?? resp.bodyString
+            emitError("nomad network: \(errMsg)")
+            exit(1)
+        }
+        if args.boolFlag(["--json", "-j"]) {
+            emitOutput(resp.bodyString)
+            exit(0)
+        }
+        guard let entries = json["entries"] as? [[String: Any]], !entries.isEmpty else {
+            emitOutput("No network entries")
+            exit(0)
+        }
+        for e in entries {
+            let method = e["method"] as? String ?? "GET"
+            let url = e["url"] as? String ?? ""
+            let status = e["status"] as? Int ?? 0
+            let duration = e["durationMs"] as? Double ?? 0
+            let isError = (e["isError"] as? Bool) ?? (status >= 400 || status == 0)
+            let mark = isError ? "❌" : "✓"
+            emitOutput("\(mark) [\(status)] \(method) \(url) (\(String(format: "%.1f", duration))ms)")
+        }
+        exit(0)
+    }
+
+    private static func handleDownloads(args: ParsedArgs, port: UInt16?, socketPath: String?) {
+        let sub = args.positionals.first?.lowercased()
+        if sub == "wait" || args.boolFlag(["--wait", "-w"]) {
+            let timeout = args.stringOption(["--timeout", "-t"]).flatMap(Int.init) ?? 10000
+            let bodyObj = ["timeout": timeout]
+            let bodyData = try? JSONSerialization.data(withJSONObject: bodyObj)
+            let waitTimeoutSecs = max(5, (timeout / 1000) + 5)
+            let resp = request(method: "POST", path: "/downloads/wait", body: bodyData, timeoutSeconds: waitTimeoutSecs, socketPath: socketPath, port: port)
+            guard resp.statusCode == 200, let json = resp.jsonObject else {
+                let errMsg = (resp.jsonObject?["error"] as? String) ?? resp.bodyString
+                emitError("nomad downloads: \(errMsg)")
+                exit(1)
+            }
+            if let path = json["path"] as? String {
+                emitOutput("Downloaded: \(path)")
+            } else {
+                emitOutput("Download finished")
+            }
+            exit(0)
+        }
+
+        if sub == "delete" || sub == "remove" || sub == "rm" || args.boolFlag(["--delete", "-d"]) {
+            let target = (args.positionals.count > 1 ? args.positionals[1] : nil) ?? args.stringOption(["--delete", "-d"])
+            guard let filename = target, !filename.isEmpty else {
+                emitError("nomad downloads delete: filename required (e.g. 'nomad downloads delete file.csv')")
+                exit(1)
+            }
+            let bodyObj = ["filename": filename]
+            let bodyData = try? JSONSerialization.data(withJSONObject: bodyObj)
+            let resp = request(method: "DELETE", path: "/downloads", body: bodyData, socketPath: socketPath, port: port)
+            guard resp.statusCode == 200 else {
+                let errMsg = (resp.jsonObject?["error"] as? String) ?? resp.bodyString
+                emitError("nomad downloads delete: \(errMsg)")
+                exit(1)
+            }
+            emitOutput("Deleted download: \(filename)")
+            exit(0)
+        }
+
+        if sub == "last" {
+            let resp = request(method: "GET", path: "/downloads/last", socketPath: socketPath, port: port)
+            guard resp.statusCode == 200, let json = resp.jsonObject else {
+                emitOutput("No downloads found")
+                exit(0)
+            }
+            if args.boolFlag(["--json", "-j"]) {
+                emitOutput(resp.bodyString)
+                exit(0)
+            }
+            let filename = json["filename"] as? String ?? ""
+            let path = json["path"] as? String ?? ""
+            let size = json["size"] as? Int ?? 0
+            emitOutput("Last download: \(filename) (\(size) bytes) at \(path)")
+            exit(0)
+        }
+
+        // Default: list downloads
+        let resp = request(method: "GET", path: "/downloads", socketPath: socketPath, port: port)
+        guard resp.statusCode == 200, let json = resp.jsonObject else {
+            let errMsg = (resp.jsonObject?["error"] as? String) ?? resp.bodyString
+            emitError("nomad downloads: \(errMsg)")
+            exit(1)
+        }
+        if args.boolFlag(["--json", "-j"]) {
+            emitOutput(resp.bodyString)
+            exit(0)
+        }
+        guard let items = json["downloads"] as? [[String: Any]], !items.isEmpty else {
+            emitOutput("No downloads found")
+            exit(0)
+        }
+        for item in items {
+            let filename = item["filename"] as? String ?? ""
+            let size = item["size"] as? Int ?? 0
+            let path = item["path"] as? String ?? ""
+            emitOutput("- \(filename) (\(size) bytes) -> \(path)")
+        }
         exit(0)
     }
 }

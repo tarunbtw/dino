@@ -81,6 +81,57 @@ final class NomadAgentServer: ObservableObject {
         )
     }()
 
+    // MARK: - Security Model, Policy, Allowlist & Audit
+    struct SecurityAuditEntry: Codable {
+        let timestamp: Double
+        let type: String
+        let message: String
+        let origin: String?
+        let isBlocked: Bool
+    }
+
+    struct PendingApprovalItem: Codable {
+        let id: String
+        let type: String
+        let target: String
+        let timestamp: Double
+    }
+
+    @Published var policyMode: String = "permissive" // "permissive", "strict", "ask"
+    @Published var allowedDomains: [String] = []
+    @Published var securityAuditLog: [SecurityAuditEntry] = []
+    @Published var pendingApprovals: [PendingApprovalItem] = []
+
+    func recordSecurityAudit(type: String, message: String, origin: String? = nil, isBlocked: Bool = false) {
+        let entry = SecurityAuditEntry(
+            timestamp: Date().timeIntervalSince1970 * 1000.0,
+            type: type,
+            message: message,
+            origin: origin,
+            isBlocked: isBlocked
+        )
+        securityAuditLog.append(entry)
+        if securityAuditLog.count > 1000 {
+            securityAuditLog.removeFirst(100)
+        }
+    }
+
+    func isDomainAllowed(_ domain: String) -> Bool {
+        guard !allowedDomains.isEmpty else { return true }
+        let lDomain = domain.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        for allowed in allowedDomains {
+            let lAllowed = allowed.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            if lAllowed == lDomain { return true }
+            if lAllowed.hasPrefix("*.") {
+                let suffix = String(lAllowed.dropFirst(2))
+                if lDomain == suffix || lDomain.hasSuffix("." + suffix) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
     private init() {}
 
     /// Loads an existing agent token from ~/.nomad/agent-token or generates a new cryptographically secure token.
@@ -362,25 +413,13 @@ final class NomadAgentServer: ObservableObject {
             if isPublicHealthCheck {
                 // If it's a socket modification request, process it below
                 if !((method == "POST" || method == "DELETE") && (cleanPath == "/socket" || cleanPath == "/daemon")) {
-                    let socketPath = NomadUnixSocketBridge.defaultSocketPath
-                    let socketExists = FileManager.default.fileExists(atPath: socketPath)
                     let publicStatusObj: [String: Any] = [
+                        "success": true,
                         "nomad": "active",
                         "status": "healthy",
                         "version": Updater.currentVersion,
                         "build": Updater.currentBuild,
-                        "port": self.port,
-                        "authRequired": true,
-                        "isHeadless": NomadHeadlessManager.isHeadless,
-                        "mode": NomadHeadlessManager.isHeadless ? "headless_daemon" : "gui",
-                        "tabCount": self.store?.tabs.count ?? 0,
-                        "tabsCount": self.store?.tabs.count ?? 0,
-                        "unixSocket": [
-                            "path": socketPath,
-                            "active": NomadUnixSocketBridge.shared.isListening,
-                            "exists": socketExists,
-                            "error": (NomadUnixSocketBridge.shared.lastError as Any?) ?? NSNull()
-                        ]
+                        "authRequired": true
                     ]
                     sendJSON(connection: connection, object: publicStatusObj, origin: origin)
                     return
@@ -532,24 +571,25 @@ final class NomadAgentServer: ObservableObject {
             let liveURL = (self.store?.activeTab?.webView.url?.absoluteString ?? self.store?.activeTab?.url?.absoluteString) ?? ""
             let isVerbose = (queryItem("verbose") == "true" || queryItem("verbose") == "1")
             var statusObj: [String: Any] = [
+                "success": true,
                 "nomad": "active",
                 "status": "healthy",
                 "version": Updater.currentVersion,
+                "build": Updater.currentBuild,
                 "mode": NomadHeadlessManager.isHeadless ? "headless_daemon" : "gui",
+                "isHeadless": NomadHeadlessManager.isHeadless,
                 "port": self.port,
                 "tabCount": self.store?.tabs.count ?? 0,
+                "tabsCount": self.store?.tabs.count ?? 0,
                 "activeTabId": self.store?.activeTabId?.uuidString ?? "",
                 "activeURL": liveURL,
                 "activeTitle": liveTitle,
-                "hasPendingDialog": self.store?.activeTab?.pendingDialog != nil
+                "hasPendingDialog": self.store?.activeTab?.pendingDialog != nil,
+                "unixSocket": unixSocketInfo,
+                "capabilities": capabilities
             ]
-            if isVerbose || queryItem("capabilities") == "true" {
-                statusObj["build"] = Updater.currentBuild
-                statusObj["isHeadless"] = NomadHeadlessManager.isHeadless
-                statusObj["unixSocket"] = unixSocketInfo
-                statusObj["tabsCount"] = self.store?.tabs.count ?? 0
+            if isVerbose {
                 statusObj["lastDialog"] = (self.store?.activeTab?.lastDialog as Any?) ?? NSNull()
-                statusObj["capabilities"] = capabilities
             }
             sendJSON(connection: connection, object: statusObj, origin: origin)
             return
@@ -593,6 +633,125 @@ final class NomadAgentServer: ObservableObject {
                 "capabilities": capabilities
             ], origin: origin)
             return
+        }
+
+        if cleanPath == "/policy" || cleanPath == "/allowlist" {
+            if method == "GET" {
+                sendJSON(connection: connection, object: [
+                    "success": true,
+                    "mode": self.policyMode,
+                    "allowedDomains": self.allowedDomains,
+                    "pendingApprovalsCount": self.pendingApprovals.count
+                ], origin: origin)
+                return
+            } else if method == "POST" {
+                if let bodyData = bodyData,
+                   let json = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any] {
+                    if let m = json["mode"] as? String {
+                        let cleanM = m.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+                        if ["permissive", "strict", "ask"].contains(cleanM) {
+                            self.policyMode = cleanM
+                        }
+                    }
+                    if let domains = json["allowedDomains"] as? [String] {
+                        self.allowedDomains = domains.map { $0.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) }
+                    } else if let addDomain = (json["addDomain"] as? String) ?? (json["domain"] as? String) {
+                        let d = addDomain.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !d.isEmpty && !self.allowedDomains.contains(d) {
+                            self.allowedDomains.append(d)
+                        }
+                    }
+                }
+                self.recordSecurityAudit(type: "policy_update", message: "Policy mode '\(self.policyMode)', allowedDomains: \(self.allowedDomains)")
+                sendJSON(connection: connection, object: [
+                    "success": true,
+                    "mode": self.policyMode,
+                    "allowedDomains": self.allowedDomains
+                ], origin: origin)
+                return
+            } else if method == "DELETE" {
+                self.allowedDomains.removeAll()
+                self.policyMode = "permissive"
+                self.recordSecurityAudit(type: "policy_reset", message: "Policy reset to permissive")
+                sendJSON(connection: connection, object: [
+                    "success": true,
+                    "cleared": true,
+                    "mode": self.policyMode
+                ], origin: origin)
+                return
+            }
+        }
+
+        if cleanPath == "/permissions" && method == "GET" {
+            sendJSON(connection: connection, object: [
+                "success": true,
+                "policyMode": self.policyMode,
+                "allowedDomains": self.allowedDomains,
+                "permissions": [
+                    "network": true,
+                    "nativeInput": true,
+                    "fileUpload": true,
+                    "downloads": true,
+                    "storage": true,
+                    "extensions": true
+                ]
+            ], origin: origin)
+            return
+        }
+
+        if cleanPath == "/approval" {
+            if method == "GET" {
+                let list = self.pendingApprovals.map { [
+                    "id": $0.id,
+                    "type": $0.type,
+                    "target": $0.target,
+                    "timestamp": $0.timestamp
+                ] }
+                sendJSON(connection: connection, object: [
+                    "success": true,
+                    "pending": list,
+                    "count": list.count
+                ], origin: origin)
+                return
+            } else if method == "POST" {
+                guard let bodyData = bodyData,
+                      let json = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any],
+                      let id = json["id"] as? String else {
+                    sendResponse(connection: connection, status: "400 Bad Request", body: "{\"error\":\"Missing 'id' in approval decision\",\"code\":\"MISSING_ID\",\"success\":false}", origin: origin)
+                    return
+                }
+                let decision = (json["decision"] as? String)?.lowercased() ?? "deny"
+                self.pendingApprovals.removeAll { $0.id == id }
+                self.recordSecurityAudit(type: "approval_decision", message: "Approval '\(id)' -> \(decision)")
+                sendJSON(connection: connection, object: [
+                    "success": true,
+                    "id": id,
+                    "decision": decision
+                ], origin: origin)
+                return
+            }
+        }
+
+        if cleanPath == "/audit" {
+            if method == "GET" {
+                let list = self.securityAuditLog.map { [
+                    "timestamp": $0.timestamp,
+                    "type": $0.type,
+                    "message": $0.message,
+                    "origin": ($0.origin as Any?) ?? NSNull(),
+                    "isBlocked": $0.isBlocked
+                ] }
+                sendJSON(connection: connection, object: [
+                    "success": true,
+                    "entries": list,
+                    "count": list.count
+                ], origin: origin)
+                return
+            } else if method == "DELETE" {
+                self.securityAuditLog.removeAll()
+                sendJSON(connection: connection, object: ["success": true, "cleared": true], origin: origin)
+                return
+            }
         }
 
         if method == "GET" && (cleanPath == "/daemon" || cleanPath == "/headless") {
@@ -648,7 +807,7 @@ final class NomadAgentServer: ObservableObject {
             return
         }
 
-        if handleTabsRoute(method: method, cleanPath: cleanPath, bodyData: bodyData, connection: connection, origin: origin) {
+        if handleTabsRoute(method: method, cleanPath: cleanPath, bodyData: bodyData, queryItem: queryItem, connection: connection, origin: origin) {
             return
         }
         if await handleNavigationRoute(method: method, cleanPath: cleanPath, bodyData: bodyData, queryItem: queryItem, connection: connection, origin: origin) {

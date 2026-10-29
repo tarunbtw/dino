@@ -28,6 +28,14 @@ extension Tab: WKNavigationDelegate {
                 }
             }
 
+            // Domain allowlist policy enforcement
+            if let host = targetURL.host, !host.isEmpty, !NomadAgentServer.shared.isDomainAllowed(host) {
+                NomadAgentServer.shared.recordSecurityAudit(type: "navigation_blocked", message: "Navigation to unlisted domain '\(host)' blocked by policy", isBlocked: true)
+                appendConsoleEntry(level: .warn, message: "[Security Policy] Blocked navigation to '\(host)' not in domain allowlist")
+                decisionHandler(.cancel, preferences)
+                return
+            }
+
             let scheme = targetURL.scheme?.lowercased() ?? ""
             if scheme == "file" {
                 // Allow file:// if explicitly initiated by app/agent via load(url:), or already browsing local files
@@ -263,6 +271,7 @@ extension Tab: WKNavigationDelegate {
 
         self.allowNextFileNavigation = false
         self.isLoading = false
+        self.title = "Error: \(error.localizedDescription)"
         self.lastNavigationFinishTime = Date()
         self.lastNavigationError = error.localizedDescription
         self.lastFailedNavigationSeq = self.navigationSeq
@@ -290,6 +299,7 @@ extension Tab: WKNavigationDelegate {
         }
         self.allowNextFileNavigation = false
         self.isLoading = false
+        self.title = "Error: \(error.localizedDescription)"
         self.lastNavigationFinishTime = Date()
         self.lastNavigationError = error.localizedDescription
         self.lastFailedNavigationSeq = self.navigationSeq
