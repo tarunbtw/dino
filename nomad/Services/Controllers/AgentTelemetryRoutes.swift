@@ -487,31 +487,37 @@ extension NomadAgentServer {
         case ("POST", "/network/mock"):
             guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin) else { return true }
             guard let bodyData = bodyData,
-                  let mockObj = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any],
-                  let mockUrl = mockObj["url"] as? String, !mockUrl.isEmpty else {
+                  var mockObj = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any] else {
+                sendResponse(connection: connection, status: "400 Bad Request", body: "{\"error\":\"Missing or invalid JSON body in /network/mock\",\"code\":\"INVALID_PAYLOAD\",\"success\":false}", origin: origin)
+                return true
+            }
+            let mockUrl = (mockObj["url"] as? String) ?? (mockObj["pattern"] as? String) ?? ""
+            guard !mockUrl.isEmpty else {
                 sendResponse(connection: connection, status: "400 Bad Request", body: "{\"error\":\"Missing required 'url' in /network/mock\",\"code\":\"MISSING_URL\",\"success\":false}", origin: origin)
                 return true
             }
-            let serialized = String(data: bodyData, encoding: .utf8) ?? "{}"
-            let js = "window.__nomad_mock_routes = (window.__nomad_mock_routes || []).concat([\(serialized)]);"
-            activeTab.webView.evaluateJavaScript(js, in: nil, in: .page, completionHandler: nil)
-            activeTab.webView.evaluateJavaScript(js, in: nil, in: .defaultClient, completionHandler: nil)
+            mockObj["url"] = mockUrl
+            let method = (mockObj["method"] as? String)?.uppercased()
+            activeTab.mockRoutes.removeAll(where: {
+                ($0["url"] as? String) == mockUrl &&
+                (($0["method"] as? String)?.uppercased() == method) &&
+                !($0["block"] as? Bool ?? false)
+            })
+            activeTab.mockRoutes.append(mockObj)
+            activeTab.syncMockRoutes()
             sendJSON(connection: connection, object: ["success": true, "mockedUrl": mockUrl], origin: origin)
             return true
 
         case ("GET", "/network/mock"):
             guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin) else { return true }
-            let res = try? await activeTab.webView.evaluateJavaScript("JSON.stringify(window.__nomad_mock_routes || [])")
-            let jsonStr = (res as? String) ?? "[]"
-            let data = Data(jsonStr.utf8)
-            let array = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] ?? []
-            sendJSON(connection: connection, object: ["success": true, "mocks": array], origin: origin)
+            let mocks = activeTab.mockRoutes.filter { !($0["block"] as? Bool ?? false) }
+            sendJSON(connection: connection, object: ["success": true, "mocks": mocks], origin: origin)
             return true
 
         case ("DELETE", "/network/mock"):
             guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin) else { return true }
-            activeTab.webView.evaluateJavaScript("window.__nomad_mock_routes = [];", in: nil, in: .page, completionHandler: nil)
-            activeTab.webView.evaluateJavaScript("window.__nomad_mock_routes = [];", in: nil, in: .defaultClient, completionHandler: nil)
+            activeTab.mockRoutes.removeAll(where: { !($0["block"] as? Bool ?? false) })
+            activeTab.syncMockRoutes()
             sendJSON(connection: connection, object: ["success": true, "cleared": true], origin: origin)
             return true
 
@@ -537,14 +543,17 @@ extension NomadAgentServer {
                 }
             }
             for r in rules {
-                if let u = r["url"] as? String, !activeTab.blockedURLPatterns.contains(u) {
-                    activeTab.blockedURLPatterns.append(u)
+                if let u = r["url"] as? String {
+                    if !activeTab.blockedURLPatterns.contains(u) {
+                        activeTab.blockedURLPatterns.append(u)
+                    }
+                    activeTab.mockRoutes.removeAll(where: {
+                        ($0["url"] as? String) == u && ($0["block"] as? Bool ?? false)
+                    })
+                    activeTab.mockRoutes.append(r)
                 }
             }
-            let rulesJson = (try? JSONSerialization.data(withJSONObject: rules)).flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
-            let js = "window.__nomad_mock_routes = (window.__nomad_mock_routes || []).concat(\(rulesJson));"
-            activeTab.webView.evaluateJavaScript(js, in: nil, in: .page, completionHandler: nil)
-            activeTab.webView.evaluateJavaScript(js, in: nil, in: .defaultClient, completionHandler: nil)
+            activeTab.syncMockRoutes()
             sendJSON(connection: connection, object: ["success": true, "blocked": true, "count": activeTab.blockedURLPatterns.count, "url": blockUrl, "patterns": activeTab.blockedURLPatterns], origin: origin)
             return true
 
@@ -557,9 +566,8 @@ extension NomadAgentServer {
         case ("DELETE", "/network/block"):
             guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin) else { return true }
             activeTab.blockedURLPatterns.removeAll()
-            let cleanJs = "window.__nomad_mock_routes = (window.__nomad_mock_routes || []).filter(m => !m || !m.block);"
-            activeTab.webView.evaluateJavaScript(cleanJs, in: nil, in: .page, completionHandler: nil)
-            activeTab.webView.evaluateJavaScript(cleanJs, in: nil, in: .defaultClient, completionHandler: nil)
+            activeTab.mockRoutes.removeAll(where: { ($0["block"] as? Bool ?? false) })
+            activeTab.syncMockRoutes()
             sendJSON(connection: connection, object: ["success": true, "cleared": true], origin: origin)
             return true
 

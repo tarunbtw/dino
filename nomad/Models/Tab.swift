@@ -178,6 +178,20 @@ final class Tab: NSObject, Identifiable, ObservableObject {
     var allowNextFileNavigation: Bool = false
     var currentNavigation: WKNavigation? = nil
     var blockedURLPatterns: [String] = []
+    var mockRoutes: [[String: Any]] = []
+
+    func syncMockRoutes() {
+        guard !mockRoutes.isEmpty,
+              let data = try? JSONSerialization.data(withJSONObject: mockRoutes),
+              let json = String(data: data, encoding: .utf8) else {
+            webView.evaluateJavaScript("window.__nomad_mock_routes = [];", in: nil, in: .page, completionHandler: nil)
+            webView.evaluateJavaScript("window.__nomad_mock_routes = [];", in: nil, in: .defaultClient, completionHandler: nil)
+            return
+        }
+        let js = "window.__nomad_mock_routes = \(json);"
+        webView.evaluateJavaScript(js, in: nil, in: .page, completionHandler: nil)
+        webView.evaluateJavaScript(js, in: nil, in: .defaultClient, completionHandler: nil)
+    }
     private var navigationSeqMap: [ObjectIdentifier: Int] = [:]
 
     func recordNavigation(_ navigation: WKNavigation?, for seq: Int) {

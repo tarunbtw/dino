@@ -137,20 +137,56 @@ enum WebKitPool {
 
             function matchesUrl(pattern, targetUrl, exact) {
                 if (!pattern || !targetUrl) return false;
-                if (exact || pattern === targetUrl) return pattern === targetUrl;
                 if (pattern === '*' || pattern === '**') return true;
-                if (pattern.indexOf('*') !== -1) {
+                if (exact) {
+                    if (pattern === targetUrl) return true;
                     try {
-                        const escaped = pattern.replace(/[.+?^${}()|[\\]\\]/g, '\\$&')
-                                               .replace(/\\*\\*/g, '.*')
-                                               .replace(/\\*/g, '.*');
-                        const rx = new RegExp('^' + escaped + '$', 'i');
-                        if (rx.test(targetUrl)) return true;
-                        const looseRx = new RegExp(escaped, 'i');
-                        return looseRx.test(targetUrl);
+                        var tu = new URL(targetUrl, window.location.href);
+                        var pu = new URL(pattern, window.location.href);
+                        return tu.href === pu.href;
+                    } catch(e) { return false; }
+                }
+                if (pattern === targetUrl || targetUrl.indexOf(pattern) !== -1) return true;
+
+                var tuHref = targetUrl;
+                var tuPath = '';
+                var tuSearch = '';
+                try {
+                    var parsed = new URL(targetUrl, window.location.href);
+                    tuHref = parsed.href;
+                    tuPath = parsed.pathname;
+                    tuSearch = parsed.search || '';
+                    if (tuPath === pattern || (tuPath + tuSearch) === pattern) return true;
+                } catch(e) {}
+
+                if (pattern.indexOf('*') !== -1) {
+                    var reStr = '^';
+                    for (var i = 0; i < pattern.length; i++) {
+                        var c = pattern.charAt(i);
+                        if (c === '*') {
+                            if (pattern.charAt(i + 1) === '*') i++;
+                            reStr += '.*';
+                        } else if ('.+?^${}()|[]\\\\'.indexOf(c) !== -1) {
+                            reStr += '\\\\' + c;
+                        } else {
+                            reStr += c;
+                        }
+                    }
+                    reStr += '$';
+                    try {
+                        var rx = new RegExp(reStr, 'i');
+                        if (rx.test(targetUrl) || rx.test(tuHref)) return true;
+                        if (tuPath && rx.test(tuPath)) return true;
+                        if (tuPath && rx.test(tuPath + tuSearch)) return true;
+                        if (rx.test(targetUrl.split('?')[0])) return true;
+                        if (pattern.indexOf('://') === -1) {
+                            var looseRx = new RegExp(reStr.replace(/^\\^/, ''), 'i');
+                            if (looseRx.test(targetUrl) || (tuPath && looseRx.test(tuPath))) return true;
+                        }
                     } catch(e) {}
                 }
-                return targetUrl.includes(pattern);
+
+                return false;
             }
 
             // Hook window.fetch

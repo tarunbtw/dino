@@ -143,6 +143,7 @@ extension Tab: WKNavigationDelegate {
         self.committedNavigationSeq = navSeq
         self.lastNavigationError = nil
         self.lastNavigationFinishTime = Date()
+        self.syncMockRoutes()
         if let start = self.lastNavigationStartTime {
             let elapsed = Int(Date().timeIntervalSince(start) * 1000.0)
             if let idx = self.networkEntries.lastIndex(where: { $0.type == "document" }) {
@@ -221,6 +222,7 @@ extension Tab: WKNavigationDelegate {
         guard navSeq >= self.navigationSeq else { return }
         self.committedNavigationSeq = navSeq
         self.lastNavigationError = nil
+        self.syncMockRoutes()
     }
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
