@@ -1,8 +1,8 @@
 {
-  "version": "0.13",
+  "version": "0.14",
   "build": 1,
-  "url": "https://github.com/tarunbtw/nomad/releases/download/v0.13/Nomad-0.13.zip",
-  "sha256": "244fe991e98612b585b9f50bb402cc64c364e6cc26909e01745708d30d8606da",
-  "notes": "Nomad 0.13 release.",
+  "url": "https://github.com/tarunbtw/nomad/releases/download/v0.14/Nomad-0.14.zip",
+  "sha256": "a29fd7578595e510e06feeabe8b668d77b94c2b97e7f1c68dd07caa0179e12fc",
+  "notes": "Nomad 0.14 release.",
   "minimumSystemVersion": "13.0"
 }
