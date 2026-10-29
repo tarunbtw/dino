@@ -94,6 +94,20 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
     private var retainedDownloads: [ObjectIdentifier: WKDownload] = [:]
     private var progressObservers: [ObjectIdentifier: [NSKeyValueObservation]] = [:]
 
+    /// Tracks if WebKit's network process encountered a TCC restriction writing to ~/Downloads in this session.
+    private var hasTCCRestrictionOnDownloads: Bool = false
+
+    var standardDownloadsDirectory: URL {
+        FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first?.resolvingSymlinksInPath()
+            ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Downloads")
+    }
+
+    var fallbackDirectory: URL {
+        let fallback = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".nomad/downloads")
+        try? FileManager.default.createDirectory(at: fallback, withIntermediateDirectories: true)
+        return fallback
+    }
+
     /// Waiters awaiting download completion for agent automation.
     private var waiters: [UUID: (DownloadItem) -> Bool] = [:]
 
@@ -119,29 +133,13 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
             return u
         }
 
-        // Headless daemon: Always use ~/.nomad/downloads to guarantee zero TCC prompts and 100% write reliability
-        // (com.apple.WebKit.Networking.xpc is blocked from ~/Downloads by TCC in headless/daemon environments)
-        if NomadHeadlessManager.isHeadless {
-            let headlessFolder = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".nomad/downloads")
-            try? FileManager.default.createDirectory(at: headlessFolder, withIntermediateDirectories: true)
-            return headlessFolder
+        // If WebKit has already proven TCC-restricted on ~/Downloads in this session, use fallback
+        if hasTCCRestrictionOnDownloads {
+            return fallbackDirectory
         }
 
-        let folder = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
-            ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Downloads")
-        let resolved = folder.resolvingSymlinksInPath()
-
-        // Probe write permission to ~/Downloads (TCC may restrict access in automated/CLI/daemon sessions)
-        let testFile = resolved.appendingPathComponent(".nomad_tcc_probe_\(ProcessInfo.processInfo.processIdentifier)")
-        if (try? "probe".write(to: testFile, atomically: true, encoding: .utf8)) != nil {
-            try? FileManager.default.removeItem(at: testFile)
-            return resolved
-        }
-
-        // TCC restricted ~/Downloads -> fall back to ~/.nomad/downloads
-        let fallback = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".nomad/downloads")
-        try? FileManager.default.createDirectory(at: fallback, withIntermediateDirectories: true)
-        return fallback
+        // Both GUI and Headless default to standard ~/Downloads
+        return standardDownloadsDirectory
     }
 
     var displayPath: String {
@@ -219,12 +217,20 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
             item.state = .completed
             item.completedAt = Date()
             if let dest = item.destinationURL {
-                if let attrs = try? FileManager.default.attributesOfItem(atPath: dest.path),
+                var finalDest = dest
+                if self.hasTCCRestrictionOnDownloads || dest.path.contains(".nomad/downloads") {
+                    let targetURL = self.standardDownloadsDirectory.appendingPathComponent(item.suggestedFilename)
+                    if (try? FileManager.default.copyItem(at: dest, to: targetURL)) != nil {
+                        item.destinationURL = targetURL
+                        finalDest = targetURL
+                    }
+                }
+                if let attrs = try? FileManager.default.attributesOfItem(atPath: finalDest.path),
                    let fileSize = attrs[.size] as? Int64 {
                     item.receivedBytes = fileSize
                     if item.totalBytes <= 0 { item.totalBytes = fileSize }
                 }
-                item.sha256 = Self.computeSHA256(for: dest)
+                item.sha256 = Self.computeSHA256(for: finalDest)
             }
             notifyWaiters(item)
         }
@@ -233,6 +239,29 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
     func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
         let key = ObjectIdentifier(download)
         let item = downloadItems[key]
+
+        let isPermissionError = (error as NSError).code == 513 ||
+                                (error as NSError).code == 13 ||
+                                error.localizedDescription.lowercased().contains("cannot create file") ||
+                                error.localizedDescription.lowercased().contains("permission")
+
+        if isPermissionError && !hasTCCRestrictionOnDownloads,
+           let resumeData = resumeData,
+           let originatingWebView = download.webView {
+            self.hasTCCRestrictionOnDownloads = true
+            retainedDownloads.removeValue(forKey: key)
+            downloadItems.removeValue(forKey: key)
+            progressObservers.removeValue(forKey: key)
+
+            originatingWebView.resumeDownload(fromResumeData: resumeData) { [weak self] resumedDownload in
+                guard let self = self, let item = item else { return }
+                self.register(resumedDownload, from: item.originalURL, suggestedFilename: item.suggestedFilename)
+                let newKey = ObjectIdentifier(resumedDownload)
+                self.downloadItems[newKey] = item
+            }
+            return
+        }
+
         defer {
             retainedDownloads.removeValue(forKey: key)
             downloadItems.removeValue(forKey: key)

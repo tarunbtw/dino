@@ -2065,6 +2065,8 @@
                         el.dispatchEvent(new elWinH.MouseEvent('mouseenter', eH));
                         el.dispatchEvent(new elWinH.MouseEvent('mousemove', pH));
 
+                        if (nomad.updateVirtualCursor) nomad.updateVirtualCursor(cxH, cyH);
+
                         // Emulate CSS :hover styles so submenus and tooltips render and are discoverable in snapshots
                         try {
                             elDocH.querySelectorAll('[data-nomad-hover]').forEach(function(prev) { prev.removeAttribute('data-nomad-hover'); });
@@ -2590,6 +2592,30 @@
                         }
                         blurred[b].removeAttribute('data-nomad-blur');
                     }
+                } catch(e) {}
+            },
+
+            // In-app Virtual Cursor for Agent Actions (stays strictly inside Nomad canvas)
+            updateVirtualCursor: function(x, y) {
+                try {
+                    if (x === undefined || y === undefined) return;
+                    var cursor = document.getElementById('__nomad_virtual_cursor');
+                    if (!cursor) {
+                        cursor = document.createElement('div');
+                        cursor.id = '__nomad_virtual_cursor';
+                        cursor.style.cssText = 'position:fixed;width:12px;height:12px;border-radius:50%;background:rgba(0,122,255,0.85);border:2px solid #ffffff;box-shadow:0 0 6px rgba(0,0,0,0.45);pointer-events:none;z-index:2147483647;transform:translate(-50%,-50%);transition:transform 0.08s ease-out,opacity 0.2s;opacity:0.95;';
+                        (document.body || document.documentElement).appendChild(cursor);
+                    }
+                    cursor.style.left = Math.round(x) + 'px';
+                    cursor.style.top = Math.round(y) + 'px';
+                    cursor.style.display = 'block';
+                } catch(e) {}
+            },
+
+            hideVirtualCursor: function() {
+                try {
+                    var cur = document.getElementById('__nomad_virtual_cursor');
+                    if (cur) cur.style.display = 'none';
                 } catch(e) {}
             },
 

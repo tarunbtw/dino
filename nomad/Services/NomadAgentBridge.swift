@@ -899,24 +899,12 @@ extension Tab {
             }
             let winPoint = webView.convert(pt, to: nil)
             let screenPoint = webView.window?.convertPoint(toScreen: winPoint) ?? winPoint
-            let primaryScreenH = NSScreen.screens.first?.frame.height ?? 1080
-            let cgPos = CGPoint(x: screenPoint.x, y: primaryScreenH - screenPoint.y)
 
             if let win = webView.window {
                 win.acceptsMouseMovedEvents = true
             }
 
-            // 1. Move hardware system cursor to target location (GUI mode only)
-            if !NomadHeadlessManager.isHeadless {
-                CGWarpMouseCursorPosition(cgPos)
-
-                // 2. Post CoreGraphics mouseMoved event to application event stream
-                if let cgMove = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: cgPos, mouseButton: .center) {
-                    cgMove.postToPid(ProcessInfo.processInfo.processIdentifier)
-                }
-            }
-
-            // 3. Dispatch AppKit NSEvent directly to WKContentView and NSWindow
+            // In-app virtual cursor: dispatch AppKit NSEvent directly to WKWebView and NSWindow without warping the user's OS mouse
             if let moveEvent = NSEvent.mouseEvent(
                 with: .mouseMoved,
                 location: winPoint,
@@ -963,6 +951,10 @@ extension Tab {
                         el.dispatchEvent(new elWin.MouseEvent('mouseover', evOpts));
                         el.dispatchEvent(new elWin.MouseEvent('mouseenter', enterOpts));
                         el.dispatchEvent(new elWin.MouseEvent('mousemove', evOpts));
+
+                        if (window.__nomad && window.__nomad.updateVirtualCursor) {
+                            window.__nomad.updateVirtualCursor(cx, cy);
+                        }
 
                         // CSS :hover state emulation for dropdown menus and tooltips
                         try {

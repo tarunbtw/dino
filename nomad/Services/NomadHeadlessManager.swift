@@ -12,6 +12,8 @@ import Combine
 private final class HeadlessHostWindow: NSWindow {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
+    override var isKeyWindow: Bool { true }
+    override var isMainWindow: Bool { true }
 }
 
 /// Manages headless daemon execution for Nomad.
@@ -102,7 +104,21 @@ final class NomadHeadlessManager: ObservableObject {
         print("[nomad] Headless runtime initialized (1280x800)")
     }
 
-    /// Attaches the webView to the offscreen window so layout and screenshots work identically to GUI mode.
+    /// Attaches any tab's webView to the offscreen host window so windowNumber and WebKit rendering are active.
+    func attachTabWebView(_ webView: BrowserWebView) {
+        guard let window = offscreenWindow else { return }
+        if webView.window != window {
+            webView.frame = NSRect(x: 0, y: 0, width: 1280, height: 800)
+            webView.autoresizingMask = [.width, .height]
+            if window.contentView == nil {
+                window.contentView = webView
+            } else {
+                window.contentView?.addSubview(webView)
+            }
+        }
+    }
+
+    /// Attaches the active webView as the primary offscreen content view.
     private func attachWebView(_ webView: BrowserWebView) {
         guard let window = offscreenWindow else { return }
         if window.contentView != webView {

@@ -18,24 +18,27 @@ Nomad is an ultra-lightweight, native macOS WebKit browser engine featuring an e
 
 | Tool | Purpose | Token Cost |
 | :--- | :--- | :--- |
-| `nomad_status` | Check engine status, open tabs, active page, and supported capabilities | ~50 tokens |
-| `nomad_tabs` | List all open tabs (id, title, url, active status) | ~100 tokens |
+| `nomad_status` | Check engine status, open tabs, active page, and supported capabilities (gated capabilities for minimal token footprint) | ~40 tokens |
+| `nomad_tabs` | List all open tabs (id, title, url, active status; supports 1-based index or UUID) | ~100 tokens |
 | `nomad_new_tab` | Open a new tab (optional `url`, `isIncognito`, `select`) | ~50 tokens |
-| `nomad_switch_tab` | Switch focused active tab by `id` | ~30 tokens |
-| `nomad_close_tab` | Close tab by `id` | ~30 tokens |
+| `nomad_switch_tab` | Switch focused active tab by `id` or index | ~30 tokens |
+| `nomad_close_tab` | Close tab by `id` or index | ~30 tokens |
 | `nomad_navigate` | Navigate active tab to URL, or go back, forward, reload (`action: 'back'|'forward'|'reload'|'url'`, optional `allowLocalFiles: true` for `file://` URLs) | ~50 tokens |
-| `nomad_wait` | Wait for page settlement (`mode: 'auto'` default: automatically checks navigation, inflight requests, selector, and DOM stability), or specific mode (`stability`, `selector`, `networkidle`, `url`, `timeout`) | ~40 tokens |
+| `nomad_wait` | Wait for page settlement (`mode: 'auto'` default: checks navigation, inflight requests, selector, and DOM stability), or specific mode (`stability`, `selector`, `networkidle`, `url`, `timeout`, `text`) | ~40 tokens |
+| `nomad_find` | Fast element lookup matching role, text query, or selector across entire document tree | ~15 tokens |
 | `nomad_cookies` | Inspect, inject, or clear session cookies for authentication and state (`action: 'get'|'set'|'clear'`, optional `allDomains: true`). Acts on active tab's store (profile vs ephemeral incognito). | ~80 tokens |
-| `nomad_snapshot` | **Primary perception:** Dense semantic markdown of interactive & text elements (`li`, `p`, `td`, `th`), deterministic IDs, cross-origin iframe piercing (`f1:e1`), redaction, pagination, and JSON mode | ~400–2,000 tokens |
-| `nomad_action` | Atomic interactions (`click`, `right_click`, `context_menu`, `hover`, `type`, `clear`, `press`, `selectOption`, `scroll`, `drag` with `toElementId`, `highlight`, `upload`) with optional `native: true` (`isTrusted: true`) | ~40 tokens |
+| `nomad_storage` | Inspect, inject, or clear `localStorage`, `sessionStorage`, and WKHTTPCookieStore state (`action: 'get'|'set'|'clear'`) with automatic credential token redaction | ~80 tokens |
+| `nomad_snapshot` | **Primary perception:** Dense semantic markdown of interactive & text elements (`li`, `p`, `td`, `th`), deterministic IDs, cross-origin iframe piercing (`f1:e1`), prompt-injection boundaries, redaction, pagination, and JSON mode | ~400–2,000 tokens |
+| `nomad_action` | Atomic interactions (`click`, `dblclick`, `right_click`, `context_menu`, `hover`, `type`, `clear`, `press`, `selectOption`, `scroll`, `drag`, `highlight`, `upload`) with optional `native: true` (`isTrusted: true`) | ~40 tokens |
 | `nomad_upload` | Programmatic file upload to `<input type="file">`, label, or dropzone without modal system dialogs (`paths: string[]`) | ~40 tokens |
-| `nomad_downloads` | List recent file downloads, showing destination paths in `~/Downloads` (or `~/.nomad/downloads` in headless daemon mode), file sizes, and states | ~80 tokens |
+| `nomad_downloads` | List recent file downloads, showing destination paths in `~/Downloads` (with auto-fallback to `~/.nomad/downloads` on macOS TCC permission restrictions), file sizes, and states | ~80 tokens |
 | `nomad_wait_for_download` | Await active or impending file download to complete; returns local disk path, size, and SHA-256 hash | ~60 tokens |
-| `nomad_screenshot` | GPU snapshot; set `labeled: true` for vision badges, or `elementId` / `clip` for cropped region capture | Base64 image |
-| `nomad_evaluate` | Run expression-oriented JavaScript in page or isolated context (`world: 'page' | 'isolated'`); returns value or descriptive error | Minimal |
+| `nomad_screenshot` | GPU snapshot; set `labeled: true` for vision badges (max 75 with anti-collision), or `elementId` / `clip` for cropped region capture | Base64 image |
+| `nomad_evaluate` | Run expression-oriented JavaScript in page or isolated context (`world: 'isolated'` default, or `'page'`); returns value or descriptive error | Minimal |
 | `nomad_dialog` | Inspect or configure JavaScript dialog handling (`policy: 'accept' \| 'dismiss' \| 'wait'`, `action: 'accept' \| 'dismiss'`, optional prompt response text; default safe policy `'dismiss'`) | ~40 tokens |
 | `nomad_console` | Inspect recent page console logs (`log`, `warn`, `error`) or clear log buffer | ~100 tokens |
 | `nomad_network` | Inspect recent HTTP requests (fetch/XHR), status codes, latencies, and errors | ~150 tokens |
+| `nomad_extensions` | List installed WebExtensions (`action: 'list'|'enable'|'disable'`) | ~50 tokens |
 
 ---
 
@@ -80,10 +83,15 @@ nomad_snapshot({ "mode": "json" })
 
 > [!WARNING]
 > **JSON Mode Token Cost Guard:**
-> Full JSON AST mode serializes coordinates, tags, roles, attributes, and bounds for every element (~110 tokens/element vs ~20 in text mode). On a 1,000-element page, JSON mode consumes ~100k+ tokens. To prevent runaway context exhaustion, `mode: "json"` defaults to a 250-element limit and includes self-documenting metadata (`isClamped: true`, `unclampedTotal: <count>`, and an actionable `notice`). To intentionally bypass this clamp, pass `"unrestricted": true` (or `"force": true`). For normal agent loops, always use the default `mode: "text"`.
+> Full JSON AST mode serializes coordinates, tags, roles, attributes, and bounds for every element (~110 tokens/element vs ~20 in text mode). On a 1,000-element page, JSON mode consumes ~100k+ tokens. To prevent runaway context exhaustion, `mode: "json"` defaults to a 250-element limit and includes self-documenting metadata (`isClamped: true`, `unclampedTotal: <count>`, and an actionable `notice`).
+> - Pass `"unrestricted": true` (or `"force": true`) to bypass the clamp and return the complete AST (`limit: -1`).
+> - Passing `"limit": -1` explicitly returns all elements without array truncation.
+> - In `mode: "json"`, the text `summary` is omitted by default, saving ~22% of payload tokens. Pass `"includeSummary": true` if you require both the markdown summary and the JSON element tree.
+> - For normal agent perception loops, prefer the default `mode: "text"`.
 
 > [!NOTE]
 > **URL Display & Filter Totals in Header:** Snapshot headers echo the current page URL for context grounding. `totalElements` (and `filteredTotal`) reflects the count of elements matching any active filters (`role`, `text`, `viewportOnly`), while `unfilteredTotal` returns the raw element count on the page.
+> Page accessibility text inside markdown snapshots is securely wrapped within prompt-injection boundary tags: `<!-- BEGIN UNTRUSTED WEB CONTENT (origin: ...) --> ... <!-- END UNTRUSTED WEB CONTENT -->`.
 
 ### 3. Precision Action Dispatch
 Interact with elements directly by reference:
@@ -103,15 +111,16 @@ nomad_action({
 ```
 
 Supported action types:
-- `click`: Triggers synthetic PointerDown, PointerUp, and Click events at the element's center. Occlusion-aware: if an overlay or modal backdrop covers the element, the click hits the topmost covering element unless `force: true` is passed.
+- `click`: Triggers synthetic PointerDown, PointerUp, and Click events at the element's center. Occlusion-aware: returns `isObscured`, `occludedBy`, and `centerCoordinates` in response payloads. If an overlay covers the element, the click hits the topmost covering element unless `force: true` is passed.
+- `dblclick` / `double_click`: Dispatches double-click DOM sequence (`detail: 1`, `detail: 2`, and `dblclick`) and native `mouseEventClickState = 2`.
 - `right_click` / `context_menu`: Dispatches native/synthetic right-click mouse events and `contextmenu` event to reveal custom and native context menus. Nodes supporting right-click menus are flagged with `(context-menu)` in `nomad_snapshot`.
-- `hover`: Dispatches pointerover/pointerenter/mousemove sequence to open dropdown menus or tooltips.
+- `hover`: Dispatches pointerover/pointerenter/mousemove sequence to open dropdown menus, submenus, or tooltips. Emulates CSS `:hover` states dynamically via `[data-nomad-hover]` so newly revealed menus are captured in subsequent DOM snapshots. Operates identically across GUI and headless daemon modes. Displays an in-app canvas virtual cursor (`#__nomad_virtual_cursor`) without hijacking the user's macOS hardware mouse pointer.
 - `type`: Focuses element and sets value via prototype setter (React 16+ and contentEditable compatible). Dispatches `input` events per keystroke. If text is empty/omitted and `submit: true` is passed, existing field content is preserved. To commit changes, pass `submit: true` (presses Enter), `blur: true`, or `change: true`.
 - `clear`: Wipes input/textarea/contentEditable value and triggers change events.
-- `press`: Simulates key press or modifier chord (e.g. `key: "Enter"`, `key: "Meta+A"`, `key: "Escape"`). Validates key names against standard named keys (`Enter`, `Tab`, `Escape`, `Backspace`, `Delete`, `ArrowUp/Down/Left/Right`, `Space`, function keys `F1`–`F12`, and modifier chords); rejects unknown key names.
+- `press`: Simulates key press or modifier chord (e.g. `key: "Enter"`, `key: "Meta+A"`, `key: "Escape"`). Validates key names against standard named keys (`Enter`, `Tab`, `Escape`, `Backspace`, `Delete`, `ArrowUp/Down/Left/Right`, `Space`, function keys `F1`–`F12`, and modifier chords); rejects unknown key names. Supports keyboard stepping on `<input type="range">` and `<input type="number">`: `ArrowRight`/`ArrowUp` steps up (`stepUp()`) and `ArrowLeft`/`ArrowDown` steps down (`stepDown()`) with `input` and `change` event dispatch.
 - `selectOption`: Chooses native HTML `<select>` dropdown option by `optionValue` or `optionText`. For custom ARIA/div dropdowns (e.g. Radix, HeadlessUI, React-Select), click the dropdown trigger element, wait/snapshot, and click the option element.
 - `scroll`: Scrolls the viewport by `scrollDeltaY` pixels (e.g. `300` to scroll down, `-300` to scroll up) or `scrollDeltaX`.
-- `drag`: Dispatches standard HTML5 drag-and-drop sequence (`dragstart`, `dragenter`, `dragover`, `drop`, `dragend`). Supports element-to-element drag directly via `toElementId` (e.g. `{ "type": "drag", "elementId": "e3", "toElementId": "e8" }` or `toTarget`), or explicit destination pixel coordinates (`toX`, `toY`).
+- `drag`: Dispatches standard HTML5 drag-and-drop sequence (`dragstart`, `dragenter`, `dragover`, `drop`, `dragend`) AND interpolated pointer event sequence (`pointerdown`, 5 moves, `pointerup`). Operates seamlessly on modern pointer-driven sortables (SortableJS, React DnD), custom sliders, and HTML5 canvas. Supports element-to-element drag directly via `toElementId` (e.g. `{ "type": "drag", "elementId": "e3", "toElementId": "e8" }` or `toTarget`), or explicit destination pixel coordinates (`toX`, `toY`).
 - `highlight`: Briefly flashes a high-contrast visual outline over the element for visual confirmation.
 - `upload`: Programmatically injects local files into `<input type="file">`, associated `<label>`, or dropzone containers without triggering blocking macOS `NSOpenPanel` sheets (`paths: string[]`). Automatically validates file existence on disk before dispatch.
 - **Native Hardware Input (`native: true` | `isTrusted: true`)**: Pass `"native": true` (or use `native_click`, `native_right_click`, `native_type`, `native_press`, `native_drag`) on any action to bypass synthetic JS dispatch and route through macOS AppKit and CoreGraphics HID queues directly into WebKit's window event pipeline. Produces DOM events with `event.isTrusted === true`, which is required for Canvas-based web apps (Figma, Google Docs), WebGL 3D scenes, Monaco/VSCode web editors, and anti-bot verification sliders.
@@ -126,7 +135,8 @@ Supported action types:
 
 > [!TIP]
 > **Download Interception & Local Handoff:**
-> When an agent interaction triggers a file download (clicking an export button, PDF download, or CSV report), Nomad intercepts the `WKDownload` stream, saves the file to `~/Downloads` (or `~/.nomad/downloads` in headless daemon mode, or custom `NOMAD_DOWNLOADS_PATH`) without blocking system dialogs, and records full file metadata.
+> When an agent interaction triggers a file download (clicking an export button, PDF download, or CSV report), Nomad intercepts the `WKDownload` stream, saves the file to `~/Downloads` without blocking system dialogs, and records full file metadata.
+> - **Unified Location & TCC Auto-Fallback:** Both GUI and headless daemon modes save directly to standard `~/Downloads`. If macOS TCC restricts WebKit's networking process (`com.apple.WebKit.Networking.xpc`) from creating files in `~/Downloads` (Cocoa error 513 / POSIX error 13), Nomad automatically catches the error, resumes the download stream in `~/.nomad/downloads`, promotes completed files to `~/Downloads` when writable by the main process, and memoizes the fallback.
 > - Call `nomad_wait_for_download({ "timeoutMs": 15000 })` to await the completion of an active or impending download.
 > - Returns `{ "success": true, "download": { "filename": "report.csv", "path": "/Users/.../Downloads/report.csv", "size": 1048576, "sha256": "e3b0c442..." } }`.
 > - Call `nomad_downloads({ "limit": 20 })` to inspect recent completed or in-progress downloads.
@@ -191,32 +201,36 @@ For environments driving Nomad directly without MCP (e.g. `curl`, Python, Node.j
 
 | Method | Endpoint | Description / Parameters |
 | :--- | :--- | :--- |
-| `GET` | `/status` | Engine health, capabilities, tab counts (`tabsCount`, `tabCount`), active URL (`activeURL`, `activeUrl`) |
+| `GET` | `/status` | Engine health, tab counts, active tab/URL. Token-optimized: `capabilities` dictionary is gated behind `?capabilities=true` or `?verbose=true` (~40 tokens default vs ~590 tokens verbose) |
+| `GET` | `/capabilities` | Dedicated inspection of engine features, supported action types, and capabilities |
 | `GET` | `/tabs` | List open tabs (`id`, `title`, `url`, `active`, `isActive`, `isLoading`, `isIncognito`, `tabsCount`, `tabCount`) |
 | `POST` | `/tabs/new` | Body: `{ "url"?: string, "select"?: bool, "isIncognito"?: bool }` |
-| `POST` | `/tabs/switch` | Body: `{ "id": string }` |
-| `POST` | `/tabs/close` | Body: `{ "id": string }` |
+| `POST` | `/tabs/switch` | Body: `{ "id": string }` (supports 1-based index, 0-based index, UUID, or UUID prefix) |
+| `POST` | `/tabs/close` | Body: `{ "id": string }` (supports tab index or UUID) |
 | `POST` | `/navigate` | Body: `{ "url"?: string, "action"?: "url"|"back"|"forward"|"reload", "allowLocalFiles"?: bool }` (for `file://` URLs, pass `allowLocalFiles: true`; concurrent navigations automatically cancel superseded loads) |
 | `POST` | `/navigate/back` | Navigate back in browser history |
 | `POST` | `/navigate/forward`| Navigate forward in browser history |
-| `GET` / `POST` | `/snapshot` \| `/tree` | Query / Body: `limit`, `offset`, `viewportOnly=true`, `includeText=true`, `target="#modal"|"e5"`, `depth=2`, `track=true`, `role="link"|"textbox"|"button"|"heading"`, `text="..."`, `mode="text"|"json"`, `tabId` (invalid mode rejects with 400 `INVALID_MODE`) |
-| `POST` | `/action` | Body: `{ "type": "click"|"hover"|"type"|"clear"|"press"|"selectOption"|"scroll"|"drag"|"highlight"|"upload"|"native_click"|"native_type"`, `"elementId"?: string`, `"selector"?: string`, `"native"?: bool` (sets `isTrusted: true`), `"paths"?: string[]`, ... } (under `dialogPolicy: "wait"`, actions triggering modal dialogs return immediately with `hasPendingDialog: true` and `code: "PENDING_DIALOG"`) |
+| `GET` / `POST` | `/snapshot` \| `/tree` | Query / Body: `limit`, `offset`, `viewportOnly=true`, `includeText=true`, `target="#modal"|"e5"`, `depth=2`, `track=true`, `role="link"|"textbox"|"button"|"heading"`, `text="..."`, `mode="text"|"json"`, `unrestricted=true`, `includeSummary=true`, `tabId` (default cap 250 in JSON mode; summary omitted by default in JSON) |
+| `POST` | `/find` | Body: `{ "text"?: string, "role"?: string, "selector"?: string, "tabId"?: string }` (full-tree element search in ~15 tokens) |
+| `POST` | `/action` | Body: `{ "type": "click"|"dblclick"|"hover"|"type"|"clear"|"press"|"selectOption"|"scroll"|"drag"|"highlight"|"upload"|"native_click"|"native_type"`, `"elementId"?: string`, `"selector"?: string`, `"native"?: bool` (sets `isTrusted: true`), `"paths"?: string[]`, ... } (returns `isObscured`, `occludedBy`, `centerCoordinates`; under `dialogPolicy: "wait"`, returns immediately with `hasPendingDialog: true` and `code: "PENDING_DIALOG"`) |
 | `POST` | `/upload` | Body: `{ "elementId": string, "paths": string[], "tabId"?: string }` (programmatic file upload without modal GUI sheets) |
-| `GET` | `/downloads` | Query: `limit=20`, returns list of recent file downloads (`filename`, `path`, `size`, `state`, `sha256`) |
+| `GET` | `/downloads` | Query: `limit=20`, returns list of recent file downloads (`filename`, `path`, `size`, `state`, `sha256`) in `~/Downloads` (or fallback `~/.nomad/downloads`) |
 | `GET` | `/downloads/last` | Returns metadata of the most recent download |
 | `POST` / `GET` | `/downloads/wait` | Body / Query: `{ "timeoutMs"?: int, "since"?: string|number }`, awaits download completion returning destination path and SHA-256 hash |
 | `DELETE` | `/downloads` | Query / Body: `filename=agent_dl.txt` or `path=...` (deletes downloaded file from disk and clears download history) |
-| `POST` | `/wait` | Body: `{ "mode": "stability"|"selector"|"url"|"timeout"|"networkidle"|"navigation", "selector"?: string, "urlPattern"?: string` (supports regex or plain substring), `"quietMs"?: int, "timeoutMs"?: int }` |
+| `POST` | `/wait` | Body: `{ "mode": "stability"|"selector"|"url"|"timeout"|"networkidle"|"navigation"|"text", "selector"?: string, "text"?: string, "urlPattern"?: string` (supports regex or plain substring), `"quietMs"?: int, "timeoutMs"?: int }` |
 | `GET` | `/cookies` | Query: `domain` (filter by target domain), `allDomains=true`, `tabId` |
 | `POST` | `/cookies` | Body: `{ "action": "set"|"get"|"clear", "domain"?: string, "name"?: string, "value"?: string, "cookies"?: [...], "allDomains"?: bool }` |
 | `DELETE` | `/cookies` | Query / Body: `domain` (clears cookies for domain), `allDomains=true` (clears all profile cookies) |
+| `GET` / `POST` / `DELETE` | `/storage` | Inspect, inject, or clear `localStorage`, `sessionStorage`, and cookies with auto-redaction (`action: 'get'|'set'|'clear'`) |
 | `POST` | `/evaluate` | Body: `{ "script": string }` (alias: `expression`), `world`: `"isolated"` (default, CSP-proof) \| `"page"`; returns structured uppercase `code: "SYNTAX_ERROR"|"EVAL_CSP"|"TYPE_ERROR"|"REFERENCE_ERROR"|"EVAL_ERROR"` on failure; unblocks immediately on dialog |
-| `GET` / `POST` | `/dialog` | Body / Query: `{ "policy"?: "accept"|"dismiss"|"wait", "action"?: "accept"|"dismiss", "response"?: string }` (default safe policy is `"dismiss"`; `"wait"` returns `hasPendingDialog: true` immediately so clients can synchronously inspect and respond without hanging) |
+| `GET` / `POST` | `/dialog` | Body / Query: `{ "policy"?: "accept"|"dismiss"|"wait", "action"?: "accept"|"dismiss", "response"?: string }` (default safe policy is `"dismiss"`; `"wait"` returns `hasPendingDialog: true` immediately; safe dismiss is restored upon completion) |
 | `GET` | `/console` | Query: `level=all|log|warn|error`, `clear=true`, `tabId` |
 | `GET` | `/network` | Query: `statusFilter=all|errors|success`, `clear=true`, `tabId` |
 | `GET` | `/events` | Real-time Server-Sent Events (SSE) telemetry stream pushing navigation, console, network, and dialog events without polling |
-| `POST` / `GET` / `DELETE` | `/network/mock` | In-flight request mocking: intercept fetch / XHR requests with custom mock status, headers, and responses |
-| `POST` / `GET` / `DELETE` | `/network/block` | In-flight request blocking: block specific URLs or patterns (`urls: [...]`, `url: "..."`); blocked requests reject with network error |
+| `POST` / `GET` / `DELETE` | `/network/mock` | In-flight request mocking: intercept fetch / XHR requests with custom status, headers, and body. Supports `"pattern"` with globs (`*`, `**`), exact URLs, and relative paths; matches authored and resolved URLs; persists across navigations |
+| `POST` / `GET` / `DELETE` | `/network/block` | In-flight request blocking: block specific URLs or patterns (`urls: [...]`, `url: "..."`, `pattern: "..."`); blocked requests reject with network error; persists across navigations |
+| `GET` / `POST` / `DELETE` | `/policy` \| `/allowlist` | Inspect or configure agent security policy (`permissive`, `strict`, `ask`) and domain allowlist |
 | `GET` / `POST` / `DELETE` | `/cache/routes` | Learned route cache: inspect and store reliable selector mappings for recurring flows |
 | `GET` / `POST` / `DELETE` | `/trace` \| `/trajectory` | Export (`GET`), record custom step (`POST`), or clear (`DELETE`) chronological trajectory journal with action logs, console outputs, and network entries |
 | `POST` | `/tabs/tier` | Set tab lifecycle virtualization tier (`id: string, tier: "hot"|"warm"|"cold"`) for memory governance |
@@ -273,22 +287,27 @@ When driving Nomad from the terminal, shell scripts, or an AI agent without MCP 
 | `curl -s http://127.0.0.1:9222/snapshot` | **`nomad snap`** | Outputs compact semantic markdown tree (default: `--limit 50`, `-v`/`--viewport`, `--track`, `--role <r>`, `--text <t>`, `-u`) |
 | `curl -s http://127.0.0.1:9222/snapshot?mode=json` | **`nomad snap --json`** | Outputs raw JSON AST (`-u`/`--unrestricted` to bypass 250 clamp) |
 | `curl -s -X POST http://.../navigate -d '{"url":"..."}'` | **`nomad open <url>`** | Navigates active tab to URL (`--wait [mode]`, `nomad nav`, `nomad navigate`) |
-| `curl -s -X POST http://.../action -d '{"type":"click","elementId":"e5"}'` | **`nomad click <ref>`** | Clicks element by ref (`--wait [mode]`, `--native`, `--right` / `-r`) |
+| `curl -s -X POST http://.../action -d '{"type":"click","elementId":"e5"}'` | **`nomad click <ref>`** | Clicks element by ref (`--wait [mode]`, `--native`, `--right` / `-r`; flag-order flexible) |
+| `curl -s -X POST http://.../action -d '{"type":"dblclick","elementId":"e5"}'` | **`nomad dblclick <ref>`** | Double-clicks element by ref (alias: `nomad click <ref> --double`) |
 | `curl -s -X POST http://.../action -d '{"type":"type","elementId":"e2","text":"..."}'` | **`nomad type <ref> <text>`** | Types into input field (`--submit`, `-p`/`--press <key>`, `--clear`, `--native`) |
-| `curl -s -X POST http://.../action -d '{"type":"press","key":"Enter"}'` | **`nomad press <key>`** | Presses key chord (e.g. `Enter`, `Escape`, `Meta+A`) |
-| `curl -s -X POST http://.../action -d '{"type":"drag","elementId":"e3","toElementId":"e8"}'` | **`nomad drag <from> <to>`** | Drags element to destination element (`--native`) |
-| `curl -s -X POST http://.../action -d '{"type":"hover","elementId":"e5"}'` | **`nomad hover <ref>`** | Hovers over element (`--native`) |
+| `curl -s -X POST http://.../action -d '{"type":"press","key":"Enter"}'` | **`nomad press <key>`** | Presses key chord (e.g. `Enter`, `Escape`, `Meta+A`) or steps range controls |
+| `curl -s -X POST http://.../action -d '{"type":"drag","elementId":"e3","toElementId":"e8"}'` | **`nomad drag <from> <to>`** | Drags element to destination element (`--native`, supports pointer sortables & canvas) |
+| `curl -s -X POST http://.../action -d '{"type":"hover","elementId":"e5"}'` | **`nomad hover <ref>`** | Hovers over element (`--native`, activates `:hover` and reveals submenus) |
 | `curl -s -X POST http://.../action -d '{"type":"selectOption","elementId":"e4","optionValue":"US"}'` | **`nomad select <ref> <val>`** | Selects dropdown option by value or text |
 | `curl -s -X POST http://.../action -d '{"type":"scroll","direction":"down","amount":300}'` | **`nomad scroll [dir] [px]`** | Scrolls active viewport (default: `down 300`) |
 | `curl -s -X POST http://.../wait` | **`nomad wait [timeout_ms]`** | Waits for auto-stability, element, or content (`--text`, `--state`, `--selector`, `--url`, `--mode`) |
-| `curl -s -X POST http://.../find -d '{"text":"..."}'` | **`nomad find <query>`** | Fast element lookup in ~15 tokens (`--role`, `--text`, `--selector`, `--ref-only`) |
+| `curl -s -X POST http://.../find -d '{"text":"..."}'` | **`nomad find <query>`** | Fast element lookup in ~15 tokens across full document tree (`--role`, `--text`, `--selector`, `--ref-only`) |
+| `curl -s -X POST http://.../storage` | **`nomad storage [get\|set\|clear]`** | Inspects, injects, or clears localStorage, sessionStorage, and cookies |
+| `curl -s http://127.0.0.1:9222/console` | **`nomad console [level]`** | Streams or dumps console log entries (`all`, `log`, `warn`, `error`, `--clear`) |
+| `curl -s http://127.0.0.1:9222/network` | **`nomad network [filter]`** | Inspects HTTP requests (`all`, `errors`, `success`, `--clear`) |
+| `curl -s http://127.0.0.1:9222/downloads` | **`nomad downloads [wait\|list\|delete]`** | Manages file downloads, lists completion states and SHA-256 hashes |
 | `curl -s -X POST http://.../dialog` | **`nomad dialog [accept\|dismiss\|wait]`** | Controls modal dialog handling policy and sends prompt responses |
 | `curl -s http://127.0.0.1:9222/extensions` | **`nomad ext`** | Lists installed WebExtensions (`enable <id>`, `disable <id>`) |
 | `curl -s http://127.0.0.1:9222/tabs` | **`nomad tabs`** | Lists open tabs in clean tabular format |
 | `curl -s -X POST http://.../tabs/new` | **`nomad tab new [url]`** | Opens a new tab |
-| `curl -s -X POST http://.../tabs/switch` | **`nomad tab switch <id\|idx>`** | Switches tab by 1-based index or UUID |
+| `curl -s -X POST http://.../tabs/switch` | **`nomad tab switch <id\|idx>`** | Switches tab by 1-based index, 0-based index, or UUID prefix |
 | `curl -s -X POST http://.../tabs/close` | **`nomad tab close [id\|idx]`** | Closes tab by index or UUID (default: active tab) |
-| `curl -s -X POST http://.../evaluate` | **`nomad eval <js_code>`** | Evaluates JavaScript and prints raw value to stdout |
+| `curl -s -X POST http://.../evaluate` | **`nomad eval <js_code>`** | Evaluates JavaScript in isolated world by default (`--world isolated|page`) |
 | `curl -s http://127.0.0.1:9222/screenshot` | **`nomad shot [file.png]`** | Saves screenshot (`-l`/`--labeled`, `-e <ref>`, `-` for stdout pipe) |
 | `curl -s -X POST http://.../upload` | **`nomad upload <ref> <files>`** | Stages and uploads files to file input |
 | `curl -s -X POST http://.../navigate -d '{"action":"back"}'` | **`nomad back`**, **`nomad forward`**, **`nomad reload`** | History and page reload navigation |
@@ -350,3 +369,13 @@ Nomad includes a 100% native Swift Model Context Protocol (MCP) server directly 
 > - **Direct App Bundle:** Or point directly to `"/Applications/Nomad.app/Contents/MacOS/nomad"`.
 > - **Xcode Debug Build:** When developing in Xcode, point to your DerivedData build:
 >   `"command": "/Users/.../Library/Developer/Xcode/DerivedData/nomad-*/Build/Products/Debug/nomad.app/Contents/MacOS/nomad"`
+
+### Native MCP Resources & Prompts
+
+- **MCP Resources:**
+  - `nomad://tabs`: Live JSON summary of open tabs and active states.
+  - `nomad://console`: Stream of recent page console errors and logs.
+  - `nomad://network`: Stream of recent HTTP requests, statuses, and latencies.
+  - `nomad://status`: Engine health and operational statistics.
+- **MCP Prompts:**
+  - `nomad_browser_task`: Pre-configured guided agentic workflow prompt for autonomous browsing tasks.

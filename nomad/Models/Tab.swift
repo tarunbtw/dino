@@ -293,6 +293,10 @@ final class Tab: NSObject, Identifiable, ObservableObject {
         ucc.add(WeakScriptMessageHandler(delegate: self), name: "nomadFrameBridge")
 
         setupObservers()
+
+        if NomadHeadlessManager.isHeadless {
+            NomadHeadlessManager.shared.attachTabWebView(webView)
+        }
         
         if let initialURL = initialURL {
             if lazy {
@@ -477,6 +481,10 @@ final class Tab: NSObject, Identifiable, ObservableObject {
         newWebView.uiDelegate = self
         self.webView = newWebView
         setupObservers()
+
+        if NomadHeadlessManager.isHeadless {
+            NomadHeadlessManager.shared.attachTabWebView(webView)
+        }
     }
 
     func goBack() {
