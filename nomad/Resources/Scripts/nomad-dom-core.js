@@ -220,17 +220,27 @@
             var startX = (fromX !== undefined && fromX !== null) ? Number(fromX) : Math.round(srcRect.left + srcRect.width / 2);
             var startY = (fromY !== undefined && fromY !== null) ? Number(fromY) : Math.round(srcRect.top + srcRect.height / 2);
 
-            var dt = new DataTransfer();
-            try { dt.effectAllowed = 'all'; } catch(e) {}
+            var elDoc = el.ownerDocument || document;
+            var elWin = elDoc.defaultView || window;
 
-            var dragStartEvt = new DragEvent('dragstart', {
+            // 1. Dispatch pointerdown and mousedown on source element (for Pointer-driven sortables / canvas / sliders)
+            var ptrDownOpts = {
                 bubbles: true,
                 cancelable: true,
+                view: elWin,
                 clientX: startX,
                 clientY: startY,
-                dataTransfer: dt
-            });
-            el.dispatchEvent(dragStartEvt);
+                screenX: startX,
+                screenY: startY,
+                button: 0,
+                buttons: 1,
+                pointerId: 1,
+                pointerType: 'mouse',
+                isPrimary: true,
+                pressure: 0.5
+            };
+            try { el.dispatchEvent(new elWin.PointerEvent('pointerdown', ptrDownOpts)); } catch(e) {}
+            try { el.dispatchEvent(new elWin.MouseEvent('mousedown', ptrDownOpts)); } catch(e) {}
 
             if (!destEl) {
                 destEl = document.elementFromPoint(destX, destY);
@@ -250,41 +260,111 @@
                 return { success: false, code: 'NO_DROP_TARGET', message: 'No drop target element found at destination coordinates (' + destX + ', ' + destY + ')', elementId: targetId };
             }
 
-            var dragEnterEvt = new DragEvent('dragenter', {
-                bubbles: true,
-                cancelable: true,
-                clientX: destX,
-                clientY: destY,
-                dataTransfer: dt
-            });
-            destEl.dispatchEvent(dragEnterEvt);
+            // 2. Dispatch interpolated pointermove and mousemove events (SortableJS, canvas stroke, sliders)
+            var steps = 5;
+            for (var s = 1; s <= steps; s++) {
+                var factor = s / steps;
+                var currX = Math.round(startX + (destX - startX) * factor);
+                var currY = Math.round(startY + (destY - startY) * factor);
+                var moveEl = document.elementFromPoint(currX, currY) || destEl || el;
+                var moveDoc = moveEl.ownerDocument || document;
+                var moveWin = moveDoc.defaultView || window;
+                var mOpts = {
+                    bubbles: true,
+                    cancelable: true,
+                    view: moveWin,
+                    clientX: currX,
+                    clientY: currY,
+                    screenX: currX,
+                    screenY: currY,
+                    button: 0,
+                    buttons: 1,
+                    pointerId: 1,
+                    pointerType: 'mouse',
+                    isPrimary: true,
+                    pressure: 0.5
+                };
+                try { moveEl.dispatchEvent(new moveWin.PointerEvent('pointermove', mOpts)); } catch(e) {}
+                try { moveEl.dispatchEvent(new moveWin.MouseEvent('mousemove', mOpts)); } catch(e) {}
+            }
 
-            var dragOverEvt = new DragEvent('dragover', {
-                bubbles: true,
-                cancelable: true,
-                clientX: destX,
-                clientY: destY,
-                dataTransfer: dt
-            });
-            destEl.dispatchEvent(dragOverEvt);
+            // 3. Dispatch HTML5 Drag and Drop event pipeline (DataTransfer)
+            var dt = new DataTransfer();
+            try { dt.effectAllowed = 'all'; } catch(e) {}
 
-            var dropEvt = new DragEvent('drop', {
-                bubbles: true,
-                cancelable: true,
-                clientX: destX,
-                clientY: destY,
-                dataTransfer: dt
-            });
-            destEl.dispatchEvent(dropEvt);
+            try {
+                var dragStartEvt = new DragEvent('dragstart', {
+                    bubbles: true,
+                    cancelable: true,
+                    clientX: startX,
+                    clientY: startY,
+                    dataTransfer: dt
+                });
+                el.dispatchEvent(dragStartEvt);
+            } catch(e) {}
 
-            var dragEndEvt = new DragEvent('dragend', {
+            try {
+                var dragEnterEvt = new DragEvent('dragenter', {
+                    bubbles: true,
+                    cancelable: true,
+                    clientX: destX,
+                    clientY: destY,
+                    dataTransfer: dt
+                });
+                destEl.dispatchEvent(dragEnterEvt);
+            } catch(e) {}
+
+            try {
+                var dragOverEvt = new DragEvent('dragover', {
+                    bubbles: true,
+                    cancelable: true,
+                    clientX: destX,
+                    clientY: destY,
+                    dataTransfer: dt
+                });
+                destEl.dispatchEvent(dragOverEvt);
+            } catch(e) {}
+
+            try {
+                var dropEvt = new DragEvent('drop', {
+                    bubbles: true,
+                    cancelable: true,
+                    clientX: destX,
+                    clientY: destY,
+                    dataTransfer: dt
+                });
+                destEl.dispatchEvent(dropEvt);
+            } catch(e) {}
+
+            try {
+                var dragEndEvt = new DragEvent('dragend', {
+                    bubbles: true,
+                    cancelable: true,
+                    clientX: destX,
+                    clientY: destY,
+                    dataTransfer: dt
+                });
+                el.dispatchEvent(dragEndEvt);
+            } catch(e) {}
+
+            // 4. Dispatch pointerup, mouseup, click at destination
+            var ptrUpOpts = {
                 bubbles: true,
                 cancelable: true,
+                view: elWin,
                 clientX: destX,
                 clientY: destY,
-                dataTransfer: dt
-            });
-            el.dispatchEvent(dragEndEvt);
+                screenX: destX,
+                screenY: destY,
+                button: 0,
+                buttons: 0,
+                pointerId: 1,
+                pointerType: 'mouse',
+                isPrimary: true,
+                pressure: 0
+            };
+            try { destEl.dispatchEvent(new elWin.PointerEvent('pointerup', ptrUpOpts)); } catch(e) {}
+            try { destEl.dispatchEvent(new elWin.MouseEvent('mouseup', ptrUpOpts)); } catch(e) {}
 
             var destLabel = (typeof optDest === 'string' && optDest) ? ("'" + optDest + "' (" + destX + ", " + destY + ")") : ('(' + destX + ', ' + destY + ')');
             return { success: true, code: 'SUCCESS', message: 'Dragged ' + (targetId || 'element') + ' to ' + destLabel, elementId: targetId };
@@ -1973,10 +2053,50 @@
                         el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
                         var elDocH = el.ownerDocument || document;
                         var elWinH = elDocH.defaultView || window;
-                        el.dispatchEvent(new elWinH.PointerEvent('pointerover', { bubbles: true, cancelable: true, view: elWinH }));
-                        el.dispatchEvent(new elWinH.PointerEvent('pointerenter', { bubbles: false, cancelable: false, view: elWinH }));
-                        el.dispatchEvent(new elWinH.MouseEvent('mouseover', { bubbles: true, cancelable: true, view: elWinH }));
-                        el.dispatchEvent(new elWinH.MouseEvent('mousemove', { bubbles: true, cancelable: true, view: elWinH }));
+                        var rH = el.getBoundingClientRect ? el.getBoundingClientRect() : { left: 0, top: 0, width: 0, height: 0 };
+                        var cxH = Math.round(rH.left + rH.width / 2);
+                        var cyH = Math.round(rH.top + rH.height / 2);
+                        var pH = { bubbles: true, cancelable: true, view: elWinH, clientX: cxH, clientY: cyH, screenX: cxH, screenY: cyH, pointerId: 1, pointerType: 'mouse', isPrimary: true };
+                        var eH = { bubbles: false, cancelable: false, view: elWinH, clientX: cxH, clientY: cyH, screenX: cxH, screenY: cyH, pointerId: 1, pointerType: 'mouse', isPrimary: true };
+                        el.dispatchEvent(new elWinH.PointerEvent('pointerover', pH));
+                        el.dispatchEvent(new elWinH.PointerEvent('pointerenter', eH));
+                        el.dispatchEvent(new elWinH.PointerEvent('pointermove', pH));
+                        el.dispatchEvent(new elWinH.MouseEvent('mouseover', pH));
+                        el.dispatchEvent(new elWinH.MouseEvent('mouseenter', eH));
+                        el.dispatchEvent(new elWinH.MouseEvent('mousemove', pH));
+
+                        // Emulate CSS :hover styles so submenus and tooltips render and are discoverable in snapshots
+                        try {
+                            elDocH.querySelectorAll('[data-nomad-hover]').forEach(function(prev) { prev.removeAttribute('data-nomad-hover'); });
+                            el.setAttribute('data-nomad-hover', 'true');
+                            var sheetH = elDocH.getElementById('nomad-hover-emulation');
+                            if (!sheetH) {
+                                sheetH = elDocH.createElement('style');
+                                sheetH.id = 'nomad-hover-emulation';
+                                (elDocH.head || elDocH.documentElement).appendChild(sheetH);
+                            }
+                            var newRulesH = [];
+                            for (var sH = 0; sH < elDocH.styleSheets.length; sH++) {
+                                try {
+                                    var rList = elDocH.styleSheets[sH].cssRules;
+                                    if (!rList) continue;
+                                    for (var rI = 0; rI < rList.length; rI++) {
+                                        var selH = rList[rI].selectorText;
+                                        if (selH && selH.indexOf(':hover') !== -1) {
+                                            var baseSelH = selH.replace(/:hover/g, '');
+                                            try {
+                                                if (el.matches(baseSelH) || (el.querySelector && el.querySelector(baseSelH))) {
+                                                    var emulatedH = selH.replace(/:hover/g, '[data-nomad-hover="true"]');
+                                                    newRulesH.push(emulatedH + ' { ' + rList[rI].style.cssText + ' }');
+                                                }
+                                            } catch(err) {}
+                                        }
+                                    }
+                                } catch(err) {}
+                            }
+                            sheetH.textContent = newRulesH.join('\n');
+                        } catch(cssErr) {}
+
                         return { success: true, message: 'Hovered over ' + targetId, elementId: targetId };
 
                     case 'clear':
@@ -2203,6 +2323,33 @@
                                         docCe.execCommand('delete', false, null);
                                     } catch(e) {}
                                 }
+                            }
+                        }
+
+                        // Native form control stepping for <input type="range"> and <input type="number">
+                        if (targetNode.tagName === 'INPUT' && (targetNode.type === 'range' || targetNode.type === 'number')) {
+                            if (normMain === 'arrowright' || normMain === 'arrowup' || normMain === 'right' || normMain === 'up') {
+                                if (typeof targetNode.stepUp === 'function') {
+                                    try { targetNode.stepUp(); } catch(e) {}
+                                } else {
+                                    var step = Number(targetNode.step) || 1;
+                                    var max = targetNode.max !== '' ? Number(targetNode.max) : Infinity;
+                                    var cur = Number(targetNode.value) || 0;
+                                    targetNode.value = String(Math.min(max, cur + step));
+                                }
+                                targetNode.dispatchEvent(new Event('input', { bubbles: true }));
+                                targetNode.dispatchEvent(new Event('change', { bubbles: true }));
+                            } else if (normMain === 'arrowleft' || normMain === 'arrowdown' || normMain === 'left' || normMain === 'down') {
+                                if (typeof targetNode.stepDown === 'function') {
+                                    try { targetNode.stepDown(); } catch(e) {}
+                                } else {
+                                    var step = Number(targetNode.step) || 1;
+                                    var min = targetNode.min !== '' ? Number(targetNode.min) : -Infinity;
+                                    var cur = Number(targetNode.value) || 0;
+                                    targetNode.value = String(Math.max(min, cur - step));
+                                }
+                                targetNode.dispatchEvent(new Event('input', { bubbles: true }));
+                                targetNode.dispatchEvent(new Event('change', { bubbles: true }));
                             }
                         }
 

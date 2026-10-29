@@ -23,8 +23,11 @@ final class BrowserWebView: WKWebView {
         let leaf = window?.contentView?.hitTest(winPoint)
         if let leaf = leaf, leaf !== self {
             leaf.mouseMoved(with: event)
-        } else if let sub = subviews.first(where: { NSStringFromClass(type(of: $0)).contains("WKContentView") }) {
-            sub.mouseMoved(with: event)
+            return
+        }
+        let sel = NSSelectorFromString("_simulateMouseMove:")
+        if responds(to: sel) {
+            perform(sel, with: event)
         } else {
             super.mouseMoved(with: event)
         }

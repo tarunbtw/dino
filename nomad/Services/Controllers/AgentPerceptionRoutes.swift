@@ -31,6 +31,7 @@ extension NomadAgentServer {
             var depth = queryItem("depth").flatMap(Int.init)
             var track = queryBool("track")
             var isUnrestricted = queryBool("unrestricted") || queryBool("force")
+            var includeSummary = queryBool("summary") || queryBool("includeSummary")
             if let bodyData = bodyData,
                let json = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any] {
                 if let l = json["limit"] as? Int { userLimit = l }
@@ -45,6 +46,7 @@ extension NomadAgentServer {
                 if let trk = json["track"] as? Bool { track = trk }
                 if let u = json["unrestricted"] as? Bool { isUnrestricted = u }
                 if let f = json["force"] as? Bool { isUnrestricted = isUnrestricted || f }
+                if let s = json["includeSummary"] as? Bool ?? json["summary"] as? Bool { includeSummary = s }
             }
             if let m = mode, !m.isEmpty {
                 guard ["text", "summary", "json", "full"].contains(m) else {
@@ -104,8 +106,11 @@ extension NomadAgentServer {
                     if isClamped {
                         fullSnapshot.notice = notice
                     }
+                    if !includeSummary {
+                        fullSnapshot.summary = nil
+                    }
                     // Compute accurate full token estimate including the elements array
-                    let rawData = try JSONEncoder().encode(snapshot)
+                    let rawData = try JSONEncoder().encode(fullSnapshot)
                     let fullTokens = max(1, Int(ceil(Double(rawData.count) / 4.0)))
                     fullSnapshot.tokenEstimate = fullTokens
                     if let w = snapshotWarning {
@@ -117,12 +122,13 @@ extension NomadAgentServer {
                     sendRaw(connection: connection, contentType: "application/json; charset=utf-8", data: data, origin: origin)
                 } else {
                     // Default perception mode (mode == nil, "text", or "summary"): compact semantic markdown
-                    let textTokens = max(1, Int(ceil(Double(snapshot.summary.utf8.count) / 4.0)))
+                    let summaryText = snapshot.summary ?? ""
+                    let textTokens = max(1, Int(ceil(Double(summaryText.utf8.count) / 4.0)))
                     var resp: [String: Any] = [
                         "success": true,
                         "title": snapshot.title,
                         "url": snapshot.url,
-                        "summary": snapshot.summary,
+                        "summary": summaryText,
                         "tokenEstimate": textTokens
                     ]
                     if let te = snapshot.totalElements { resp["totalElements"] = te }

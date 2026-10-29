@@ -570,6 +570,7 @@ final class NomadAgentServer: ObservableObject {
             let liveTitle = (self.store?.activeTab?.webView.title?.isEmpty == false ? self.store?.activeTab?.webView.title : self.store?.activeTab?.title) ?? ""
             let liveURL = (self.store?.activeTab?.webView.url?.absoluteString ?? self.store?.activeTab?.url?.absoluteString) ?? ""
             let isVerbose = (queryItem("verbose") == "true" || queryItem("verbose") == "1")
+            let wantsCapabilities = isVerbose || (queryItem("capabilities") == "true" || queryItem("capabilities") == "1")
             var statusObj: [String: Any] = [
                 "success": true,
                 "nomad": "active",
@@ -585,9 +586,11 @@ final class NomadAgentServer: ObservableObject {
                 "activeURL": liveURL,
                 "activeTitle": liveTitle,
                 "hasPendingDialog": self.store?.activeTab?.pendingDialog != nil,
-                "unixSocket": unixSocketInfo,
-                "capabilities": capabilities
+                "unixSocket": unixSocketInfo
             ]
+            if wantsCapabilities {
+                statusObj["capabilities"] = capabilities
+            }
             if isVerbose {
                 statusObj["lastDialog"] = (self.store?.activeTab?.lastDialog as Any?) ?? NSNull()
             }

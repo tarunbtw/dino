@@ -23,7 +23,7 @@ struct NomadSnapshot: Codable {
     var tracked: [String: Int]?
     let elements: [NomadElement]
     /// Pre-formatted dense semantic tree for LLM prompt ingestion (~300 tokens).
-    let summary: String
+    var summary: String?
     var tokenEstimate: Int?
     var warning: String?
     var isClamped: Bool?
@@ -931,9 +931,13 @@ extension Tab {
                 let targetView = webView.window?.contentView?.hitTest(winPoint) ?? webView
                 targetView.mouseMoved(with: moveEvent)
                 webView.window?.sendEvent(moveEvent)
+                let sel = NSSelectorFromString("_simulateMouseMove:")
+                if webView.responds(to: sel) {
+                    webView.perform(sel, with: moveEvent)
+                }
             }
 
-            // 4. Also dispatch synthetic pointer & mouse events to target or element at point in JS
+            // 4. Also dispatch synthetic pointer & mouse events and apply :hover CSS state emulation
             let escapedTarget = (action.target ?? "").replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
             let jsDispatch = """
             (function() {
@@ -951,13 +955,46 @@ extension Tab {
                         var rect = el.getBoundingClientRect();
                         var cx = Math.round(rect.left + rect.width / 2) || \(Int(pt.x));
                         var cy = Math.round(rect.top + rect.height / 2) || \(Int(pt.y));
-                        var evOpts = { bubbles: true, cancelable: true, view: elWin, clientX: cx, clientY: cy, screenX: \(Int(screenPoint.x)), screenY: \(Int(screenPoint.y)) };
-                        var enterOpts = { bubbles: false, cancelable: false, view: elWin, clientX: cx, clientY: cy, screenX: \(Int(screenPoint.x)), screenY: \(Int(screenPoint.y)) };
+                        var evOpts = { bubbles: true, cancelable: true, view: elWin, clientX: cx, clientY: cy, screenX: \(Int(screenPoint.x)), screenY: \(Int(screenPoint.y)), pointerId: 1, pointerType: 'mouse', isPrimary: true };
+                        var enterOpts = { bubbles: false, cancelable: false, view: elWin, clientX: cx, clientY: cy, screenX: \(Int(screenPoint.x)), screenY: \(Int(screenPoint.y)), pointerId: 1, pointerType: 'mouse', isPrimary: true };
                         el.dispatchEvent(new elWin.PointerEvent('pointerover', evOpts));
                         el.dispatchEvent(new elWin.PointerEvent('pointerenter', enterOpts));
+                        el.dispatchEvent(new elWin.PointerEvent('pointermove', evOpts));
                         el.dispatchEvent(new elWin.MouseEvent('mouseover', evOpts));
                         el.dispatchEvent(new elWin.MouseEvent('mouseenter', enterOpts));
                         el.dispatchEvent(new elWin.MouseEvent('mousemove', evOpts));
+
+                        // CSS :hover state emulation for dropdown menus and tooltips
+                        try {
+                            elDoc.querySelectorAll('[data-nomad-hover]').forEach(function(prev) { prev.removeAttribute('data-nomad-hover'); });
+                            el.setAttribute('data-nomad-hover', 'true');
+                            var sheet = elDoc.getElementById('nomad-hover-emulation');
+                            if (!sheet) {
+                                sheet = elDoc.createElement('style');
+                                sheet.id = 'nomad-hover-emulation';
+                                (elDoc.head || elDoc.documentElement).appendChild(sheet);
+                            }
+                            var newRules = [];
+                            for (var s = 0; s < elDoc.styleSheets.length; s++) {
+                                try {
+                                    var rules = elDoc.styleSheets[s].cssRules;
+                                    if (!rules) continue;
+                                    for (var r = 0; r < rules.length; r++) {
+                                        var sel = rules[r].selectorText;
+                                        if (sel && sel.indexOf(':hover') !== -1) {
+                                            var baseSel = sel.replace(/:hover/g, '');
+                                            try {
+                                                if (el.matches(baseSel) || (el.querySelector && el.querySelector(baseSel))) {
+                                                    var emulatedSel = sel.replace(/:hover/g, '[data-nomad-hover="true"]');
+                                                    newRules.push(emulatedSel + ' { ' + rules[r].style.cssText + ' }');
+                                                }
+                                            } catch(err) {}
+                                        }
+                                    }
+                                } catch(err) {}
+                            }
+                            sheet.textContent = newRules.join('\\n');
+                        } catch(cssErr) {}
                     }
                 } catch(e) {}
             })()
@@ -1147,6 +1184,21 @@ extension Tab {
             let rawChord = (action.key ?? action.text ?? "Enter").trimmingCharacters(in: .whitespacesAndNewlines)
             let (keyCode, charStr, modFlags) = Self.parseKeyChord(rawChord, explicitModifiers: action.modifiers)
 
+            if hasTarget, let target = action.target {
+                let escapedTarget = target.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+                let focusScript = """
+                (function() {
+                    var el = (window.__nomad && window.__nomad.elements && window.__nomad.elements["\(escapedTarget)"]) || (window.__nomad && window.__nomad.findInTree && window.__nomad.findInTree(document, "\(escapedTarget)")) || document.querySelector("[data-nomad-id='\(escapedTarget)']") || document.querySelector("\(escapedTarget)");
+                    if (el) {
+                        try { el.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch(e) {}
+                        try { el.focus(); } catch(e) {}
+                    }
+                })()
+                """
+                _ = try? await webView.evaluateJavaScript(focusScript)
+                try? await Task.sleep(nanoseconds: 15_000_000)
+            }
+
             // Direct native editing command triggers for Select All
             if modFlags.contains(.command) && (charStr.lowercased() == "a") {
                 NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: webView)
@@ -1158,6 +1210,24 @@ extension Tab {
             try? await Task.sleep(nanoseconds: 25_000_000)
             if let keyUp = NSEvent.keyEvent(with: .keyUp, location: .zero, modifierFlags: modFlags, timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: windowNumber, context: nil, characters: charStr, charactersIgnoringModifiers: charStr, isARepeat: false, keyCode: keyCode) {
                 webView.keyUp(with: keyUp)
+            }
+
+            if hasTarget, let target = action.target {
+                let escapedTarget = target.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+                let stepScript = """
+                (function() {
+                    var el = (window.__nomad && window.__nomad.elements && window.__nomad.elements["\(escapedTarget)"]) || (window.__nomad && window.__nomad.findInTree && window.__nomad.findInTree(document, "\(escapedTarget)")) || document.querySelector("[data-nomad-id='\(escapedTarget)']") || document.querySelector("\(escapedTarget)");
+                    if (el && el.tagName === 'INPUT' && (el.type === 'range' || el.type === 'number')) {
+                        var k = "\(rawChord)".toLowerCase();
+                        if (k.indexOf('right') !== -1 || k.indexOf('up') !== -1) {
+                            try { el.stepUp(); el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); } catch(e) {}
+                        } else if (k.indexOf('left') !== -1 || k.indexOf('down') !== -1) {
+                            try { el.stepDown(); el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); } catch(e) {}
+                        }
+                    }
+                })()
+                """
+                _ = try? await webView.evaluateJavaScript(stepScript)
             }
             return NomadActionResult(success: true, message: "Native keypress '\(rawChord)' dispatched with isTrusted: true", elementId: action.target, code: "SUCCESS", native: true, isTrusted: true)
 

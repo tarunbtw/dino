@@ -9,6 +9,11 @@ import AppKit
 import WebKit
 import Combine
 
+private final class HeadlessHostWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+}
+
 /// Manages headless daemon execution for Nomad.
 /// Eliminates the Dock icon and application menu (.accessory activation policy)
 /// while hosting WKWebView in an off-screen buffered window so CoreAnimation,
@@ -51,7 +56,7 @@ final class NomadHeadlessManager: ObservableObject {
         // Create an off-screen borderless window with buffered backing store
         // so WebKit's full rendering pipeline and CoreAnimation compositing remain active.
         let windowRect = NSRect(x: -20000, y: -20000, width: 1280, height: 800)
-        let window = NSWindow(
+        let window = HeadlessHostWindow(
             contentRect: windowRect,
             styleMask: [.borderless],
             backing: .buffered,
@@ -68,8 +73,8 @@ final class NomadHeadlessManager: ObservableObject {
         window.hidesOnDeactivate = false
         window.sharingType = .none
         window.animationBehavior = .none
-        // Order out so it remains invisible to the user while keeping backing store alive
-        window.orderOut(nil)
+        window.orderBack(nil)
+        window.makeKey()
         self.offscreenWindow = window
 
         // Initialize dedicated headless BrowserStore

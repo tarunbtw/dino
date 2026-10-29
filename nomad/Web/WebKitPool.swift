@@ -141,12 +141,16 @@ enum WebKitPool {
                 if (exact) {
                     if (pattern === targetUrl) return true;
                     try {
-                        var tu = new URL(targetUrl, window.location.href);
-                        var pu = new URL(pattern, window.location.href);
-                        return tu.href === pu.href;
+                        var tu = new URL(targetUrl, window.location.href).href;
+                        var pu = new URL(pattern, window.location.href).href;
+                        return tu === pu;
                     } catch(e) { return false; }
                 }
                 if (pattern === targetUrl || targetUrl.indexOf(pattern) !== -1) return true;
+                try {
+                    var puResolved = new URL(pattern, window.location.href).href;
+                    if (targetUrl === puResolved || targetUrl.indexOf(puResolved) !== -1) return true;
+                } catch(e) {}
 
                 var tuHref = targetUrl;
                 var tuPath = '';
@@ -209,13 +213,17 @@ enum WebKitPool {
                             method = String(args[1].method).toUpperCase();
                         }
                     } catch(e) {}
+                    let resolvedUrl = url;
+                    try {
+                        resolvedUrl = new URL(url, window.location.href).href;
+                    } catch(e) {}
 
                     try {
                         if (window.__nomad_mock_routes && window.__nomad_mock_routes.length) {
                             const matched = window.__nomad_mock_routes.find(m => {
                                 if (!m || !m.url) return false;
                                 if (m.method && m.method.toUpperCase() !== method) return false;
-                                return matchesUrl(m.url, url, m.exact);
+                                return matchesUrl(m.url, resolvedUrl, m.exact) || matchesUrl(m.url, url, m.exact);
                             });
                             if (matched) {
                                 if (matched.block) {
@@ -287,6 +295,11 @@ enum WebKitPool {
             XMLHttpRequest.prototype.open = function(method, url, ...rest) {
                 this.__nomad_method = (method || 'GET').toUpperCase();
                 this.__nomad_url = url;
+                try {
+                    this.__nomad_resolved_url = new URL(url, window.location.href).href;
+                } catch(e) {
+                    this.__nomad_resolved_url = url;
+                }
                 return origOpen.apply(this, [method, url, ...rest]);
             };
             XMLHttpRequest.prototype.send = function(...args) {
@@ -297,11 +310,12 @@ enum WebKitPool {
 
                 if (window.__nomad_mock_routes && window.__nomad_mock_routes.length) {
                     const reqUrl = this.__nomad_url || '';
+                    const reqResolvedUrl = this.__nomad_resolved_url || reqUrl;
                     const reqMethod = this.__nomad_method || 'GET';
                     const matched = window.__nomad_mock_routes.find(m => {
                         if (!m || !m.url) return false;
                         if (m.method && m.method.toUpperCase() !== reqMethod) return false;
-                        return matchesUrl(m.url, reqUrl, m.exact);
+                        return matchesUrl(m.url, reqResolvedUrl, m.exact) || matchesUrl(m.url, reqUrl, m.exact);
                     });
                     if (matched) {
                         if (matched.block) {
