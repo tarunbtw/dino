@@ -20,7 +20,7 @@ extension NomadAgentServer {
         switch (method, cleanPath) {
         case ("GET", "/snapshot"), ("GET", "/tree"), ("POST", "/snapshot"), ("POST", "/tree"):
             guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin) else { return true }
-            var limit = queryItem("limit").flatMap(Int.init) ?? 100
+            var userLimit: Int? = queryItem("limit").flatMap(Int.init)
             var offset = queryItem("offset").flatMap(Int.init) ?? 0
             var viewportOnly = queryBool("viewportOnly")
             var includeText = (queryItem("includeText") != "false" && queryItem("includeText") != "0")
@@ -33,7 +33,7 @@ extension NomadAgentServer {
             var isUnrestricted = queryBool("unrestricted") || queryBool("force")
             if let bodyData = bodyData,
                let json = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any] {
-                if let l = json["limit"] as? Int { limit = l }
+                if let l = json["limit"] as? Int { userLimit = l }
                 if let o = json["offset"] as? Int { offset = o }
                 if let v = json["viewportOnly"] as? Bool { viewportOnly = v }
                 if let it = json["includeText"] as? Bool { includeText = it }
@@ -53,15 +53,29 @@ extension NomadAgentServer {
                 }
             }
 
+            let isJsonMode = (mode == "json" || mode == "full")
+            var limit: Int
             var snapshotWarning: String? = nil
             var isClamped = false
             var notice: String? = nil
-            if (mode == "json" || mode == "full") && !isUnrestricted && limit > 250 {
-                let originalLimit = limit
-                limit = 250
-                isClamped = true
-                snapshotWarning = "JSON mode limit was clamped from \(originalLimit) to 250 elements to prevent excessive token consumption (~110 tokens/element). Pass 'unrestricted=true' to bypass, or use default mode='text' (~20 tokens/element) for ~100x lower cost."
-                notice = "Output clamped to 250 elements to prevent context blowup (~110 tokens/element). Pass 'unrestricted=true' to fetch all, use limit/offset pagination, or switch to default mode: 'text' (~20 tokens/element) to ingest the full page in ~1,200 tokens."
+
+            if let specified = userLimit {
+                if isJsonMode && !isUnrestricted && specified > 250 {
+                    limit = 250
+                    isClamped = true
+                    snapshotWarning = "JSON mode limit was clamped from \(specified) to 250 elements to prevent excessive token consumption (~110 tokens/element). Pass 'unrestricted=true' to bypass, or use default mode='text' (~20 tokens/element) for ~100x lower cost."
+                    notice = "Output clamped to 250 elements to prevent context blowup (~110 tokens/element). Pass 'unrestricted=true' to fetch all, use limit/offset pagination, or switch to default mode: 'text' (~20 tokens/element) to ingest the full page in ~1,200 tokens."
+                } else {
+                    limit = specified
+                }
+            } else {
+                if isUnrestricted {
+                    limit = -1
+                } else if isJsonMode {
+                    limit = 250
+                } else {
+                    limit = 100
+                }
             }
 
             do {
@@ -76,10 +90,17 @@ extension NomadAgentServer {
                     depth: depth,
                     track: track
                 )
-                if mode == "json" || mode == "full" {
+                if isJsonMode {
                     var fullSnapshot = snapshot
+                    let totalAvailable = snapshot.filteredTotal ?? snapshot.totalElements ?? snapshot.elements.count
+                    if !isUnrestricted && totalAvailable > snapshot.elements.count {
+                        isClamped = true
+                        if notice == nil {
+                            notice = "Output clamped to \(snapshot.elements.count) elements to prevent context blowup (~110 tokens/element). Pass 'unrestricted=true' to fetch all, use limit/offset pagination, or switch to default mode: 'text' (~20 tokens/element) to ingest the full page in ~1,200 tokens."
+                        }
+                    }
                     fullSnapshot.isClamped = isClamped
-                    fullSnapshot.unclampedTotal = snapshot.filteredTotal ?? snapshot.totalElements ?? snapshot.elements.count
+                    fullSnapshot.unclampedTotal = totalAvailable
                     if isClamped {
                         fullSnapshot.notice = notice
                     }
@@ -140,12 +161,17 @@ extension NomadAgentServer {
             let findScript = """
             (() => {
                 if (!window.__nomad) return null;
-                var snap = window.__nomad.getSemanticTree();
-                var elements = (snap && snap.elements) ? snap.elements : [];
                 var role = \(escapedRole);
                 var text = \(escapedText);
                 var selector = \(escapedSel);
                 var vpOnly = \(vpOnly ? "true" : "false");
+                var snap = window.__nomad.getSemanticTree({
+                    limit: -1,
+                    role: role,
+                    text: text,
+                    viewportOnly: vpOnly
+                });
+                var elements = (snap && snap.elements) ? snap.elements : [];
 
                 for (var i = 0; i < elements.length; i++) {
                     var el = elements[i];
@@ -236,9 +262,6 @@ extension NomadAgentServer {
                     return true
                 }
                 actionToResolve = cleanAction
-                if rawPolicy == nil {
-                    activeTab.dialogPolicy = cleanAction
-                }
             }
 
             // 3. Update prompt response text if provided
@@ -250,6 +273,10 @@ extension NomadAgentServer {
             let effectiveAction = actionToResolve ?? (activeTab.dialogPolicy == "wait" ? nil : activeTab.dialogPolicy)
             if let resolveAct = effectiveAction, activeTab.pendingDialog != nil {
                 activeTab.resolvePendingDialog(action: resolveAct, responseText: activeTab.dialogPromptResponse)
+                // If the previous policy was "wait", one waiting dialog has been addressed; restore safe default "dismiss" unless caller explicitly supplied policy
+                if rawPolicy == nil && activeTab.dialogPolicy == "wait" {
+                    activeTab.dialogPolicy = "dismiss"
+                }
             }
 
             var respObj: [String: Any] = [

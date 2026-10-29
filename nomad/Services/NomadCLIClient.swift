@@ -112,9 +112,54 @@ enum NomadCLIClient {
         "downloads": ["--wait", "-w", "--timeout", "-t", "--delete", "-d", "--clear", "--json", "-j"]
     ]
 
-    private static func parseArguments(_ args: [String]) -> ParsedArgs {
+    private static func valueOptionKeys(for command: String) -> Set<String> {
+        let cmd = command.lowercased()
+        switch cmd {
+        case "click", "dblclick", "double-click":
+            return ["--tab", "--wait", "-w", "--port", "--socket"]
+        case "snap", "snapshot":
+            return ["--tab", "--target", "-t", "--role", "-r", "--text", "--depth", "--limit", "--offset", "--port", "--socket"]
+        case "find":
+            return ["--tab", "--role", "-r", "--text", "--selector", "-s", "--port", "--socket"]
+        case "open", "nav", "navigate":
+            return ["--tab", "--wait", "-w", "--port", "--socket"]
+        case "back", "forward", "reload":
+            return ["--tab", "--wait", "-w", "--port", "--socket"]
+        case "type":
+            return ["--press", "-p", "--tab", "--wait", "-w", "--port", "--socket"]
+        case "press":
+            return ["--tab", "--modifiers", "--wait", "-w", "--port", "--socket"]
+        case "drag":
+            return ["--to-target", "--to-selector", "--to-x", "--to-y", "--tab", "--wait", "-w", "--port", "--socket"]
+        case "select":
+            return ["--text", "--value", "--tab", "--wait", "-w", "--port", "--socket"]
+        case "scroll":
+            return ["--pixels", "--tab", "--port", "--socket"]
+        case "wait":
+            return ["--mode", "-m", "--duration", "--timeout", "--selector", "-s", "--target", "-t", "--url", "--text", "--state", "--tab", "--port", "--socket"]
+        case "dialog":
+            return ["--policy", "--response", "--tab", "--port", "--socket"]
+        case "eval", "evaluate":
+            return ["--world", "--tab", "--port", "--socket"]
+        case "shot", "screenshot":
+            return ["--clip", "-c", "--element", "-e", "--output", "-o", "--tab", "--port", "--socket"]
+        case "console":
+            return ["--tab", "--level", "-l", "--port", "--socket"]
+        case "network":
+            return ["--tab", "--filter", "-f", "--port", "--socket"]
+        case "downloads", "download":
+            return ["--timeout", "-t", "--delete", "-d", "--wait", "-w", "--port", "--socket"]
+        case "storage":
+            return ["--tab", "--port", "--socket"]
+        default:
+            return valueOptionKeys
+        }
+    }
+
+    private static func parseArguments(_ args: [String], command: String = "") -> ParsedArgs {
         var parsed = ParsedArgs()
         var i = 0
+        let activeValueKeys = valueOptionKeys(for: command)
 
         while i < args.count {
             let token = args[i]
@@ -128,7 +173,7 @@ enum NomadCLIClient {
                     continue
                 }
 
-                if valueOptionKeys.contains(token) {
+                if activeValueKeys.contains(token) {
                     if i + 1 < args.count && !args[i + 1].hasPrefix("-") {
                         parsed.options[token] = args[i + 1]
                         i += 2
@@ -384,7 +429,7 @@ enum NomadCLIClient {
 
     @discardableResult
     static func execute(command: String, rawArgs: [String], port: UInt16?, socketPath: String?) -> Bool {
-        let args = parseArguments(rawArgs)
+        let args = parseArguments(rawArgs, command: command)
         let activePort = args.stringOption(["--port"]).flatMap(UInt16.init) ?? port
         let activeSocket = args.stringOption(["--socket"]) ?? socketPath
 
@@ -709,7 +754,7 @@ enum NomadCLIClient {
               <expression>             JavaScript expression to evaluate
 
             Options:
-              --world <page|isolated>  Execution world: page (default) or isolated
+              --world <isolated|page>  Execution world: isolated (default) or page
               --tab <id|idx>           Target specific tab by index or ID (default: active tab)
             """)
 

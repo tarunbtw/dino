@@ -135,6 +135,24 @@ enum WebKitPool {
                 } catch(e) {}
             }
 
+            function matchesUrl(pattern, targetUrl, exact) {
+                if (!pattern || !targetUrl) return false;
+                if (exact || pattern === targetUrl) return pattern === targetUrl;
+                if (pattern === '*' || pattern === '**') return true;
+                if (pattern.indexOf('*') !== -1) {
+                    try {
+                        const escaped = pattern.replace(/[.+?^${}()|[\\]\\]/g, '\\$&')
+                                               .replace(/\\*\\*/g, '.*')
+                                               .replace(/\\*/g, '.*');
+                        const rx = new RegExp('^' + escaped + '$', 'i');
+                        if (rx.test(targetUrl)) return true;
+                        const looseRx = new RegExp(escaped, 'i');
+                        return looseRx.test(targetUrl);
+                    } catch(e) {}
+                }
+                return targetUrl.includes(pattern);
+            }
+
             // Hook window.fetch
             const origFetch = window.fetch;
             if (origFetch) {
@@ -161,7 +179,7 @@ enum WebKitPool {
                             const matched = window.__nomad_mock_routes.find(m => {
                                 if (!m || !m.url) return false;
                                 if (m.method && m.method.toUpperCase() !== method) return false;
-                                return m.exact ? (url === m.url) : url.includes(m.url);
+                                return matchesUrl(m.url, url, m.exact);
                             });
                             if (matched) {
                                 if (matched.block) {
@@ -247,7 +265,7 @@ enum WebKitPool {
                     const matched = window.__nomad_mock_routes.find(m => {
                         if (!m || !m.url) return false;
                         if (m.method && m.method.toUpperCase() !== reqMethod) return false;
-                        return m.exact ? (reqUrl === m.url) : reqUrl.includes(m.url);
+                        return matchesUrl(m.url, reqUrl, m.exact);
                     });
                     if (matched) {
                         if (matched.block) {

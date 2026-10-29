@@ -137,11 +137,15 @@ extension NomadAgentServer {
             if let bodyData = bodyData {
                 json = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any]
             }
-            let targetTab = extractTargetTabId(json: json).flatMap { self.resolveTab(id: $0) } ?? store.activeTab
-            guard let tab = targetTab,
-                  let tierStr = (json?["tier"] as? String) ?? queryItem?("tier"),
+            let targetTabId = extractTargetTabId(json: json)
+            let targetTab = targetTabId.flatMap { self.resolveTab(id: $0) } ?? store.activeTab
+            guard let tab = targetTab else {
+                sendResponse(connection: connection, status: "404 Not Found", body: "{\"error\":\"Tab not found: \(targetTabId ?? "unknown")\",\"code\":\"TAB_NOT_FOUND\",\"success\":false}", origin: origin)
+                return true
+            }
+            guard let tierStr = (json?["tier"] as? String) ?? queryItem?("tier"),
                   let newTier = TabTier(rawValue: tierStr.lowercased()) else {
-                sendResponse(connection: connection, status: "400 Bad Request", body: "{\"error\":\"Missing or invalid 'id' or 'tier' (expected 'hot', 'warm', or 'cold')\",\"code\":\"INVALID_PAYLOAD\",\"success\":false}", origin: origin)
+                sendResponse(connection: connection, status: "400 Bad Request", body: "{\"error\":\"Missing or invalid 'tier' (expected 'hot', 'warm', or 'cold')\",\"code\":\"INVALID_PAYLOAD\",\"success\":false}", origin: origin)
                 return true
             }
             tab.tier = newTier

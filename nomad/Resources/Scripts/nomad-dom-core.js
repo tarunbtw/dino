@@ -1312,7 +1312,7 @@
                 }
 
                 var totalCount = summaryCandidates.length;
-                var pagedItems = summaryCandidates.slice(offset, offset + limit);
+                var pagedItems = (limit < 0) ? (offset > 0 ? summaryCandidates.slice(offset) : summaryCandidates) : summaryCandidates.slice(offset, offset + limit);
 
                 var pageUrl = window.location.href || '';
                 var displayUrl = pageUrl;

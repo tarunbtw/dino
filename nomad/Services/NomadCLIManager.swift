@@ -116,11 +116,12 @@ enum NomadCLIManager {
         // 3. Intercept browser automation driver subcommands (snap, click, type, etc.)
         let driverCommands: Set<String> = [
             "snap", "snapshot", "open", "nav", "navigate",
-            "back", "forward", "reload", "click", "type",
+            "back", "forward", "reload", "click", "dblclick", "double-click", "type",
             "press", "drag", "hover", "select", "scroll",
             "wait", "tabs", "tab", "eval", "evaluate",
             "shot", "screenshot", "upload", "find", "dialog",
-            "ext", "extensions"
+            "ext", "extensions", "storage", "console", "network",
+            "downloads", "download"
         ]
 
         var driverCmdIndex: Int? = nil
