@@ -344,6 +344,7 @@ enum NomadCLIManager {
 
         Browser Automation Commands (Token-Optimized Driver):
           snap [options]      Capture compact semantic markdown snapshot
+          find [options]      Fast element lookup returning target ref (~15 tokens)
           open <url>          Navigate active tab to URL
           click <ref>         Click element by reference (e.g. e5)
           type <ref> <text>   Type text into input field (e.g. e2)
@@ -352,7 +353,9 @@ enum NomadCLIManager {
           hover <ref>         Hover over element
           select <ref> <val>  Select dropdown option by value or text
           scroll [dir] [px]   Scroll active page (default: down 300)
-          wait [ms]           Wait for page stability, selector, or timeout
+          wait [ms]           Wait for page stability, selector, text, or state
+          dialog [action]     Inspect, accept, dismiss, or configure dialog handling
+          ext [subcommand]    Inspect and manage installed WebExtensions
           tabs                List open tabs in clean tabular format
           tab new [url]       Open a new tab
           tab switch <id|idx> Switch active tab by index (1-based) or ID
@@ -369,10 +372,12 @@ enum NomadCLIManager {
           --submit            Press Enter after typing (for type)
           --clear             Clear input field before typing (for type)
           --json, -j          Output raw JSON AST (for snap)
-          -v, --viewport      Capture viewport elements only (for snap)
+          -v, --viewport      Capture viewport elements only (for snap/find)
           -t, --target <ref>  Target subtree or element ID (for snap)
-          -r, --role <role>   Filter elements by ARIA role (for snap)
-          --mode <mode>       Wait mode: auto, stability, selector, networkidle
+          -r, --role <role>   Filter elements by ARIA role (for snap/find)
+          --text <query>      Filter by text (for snap/find/wait)
+          --state <state>     Filter by state (for wait: visible, enabled, checked)
+          --mode <mode>       Wait mode: auto, selector, text, state, networkidle
           --tab <id|idx>      Target specific tab by index or ID
           -l, --labeled       Render element ID badges on screenshot (for shot)
           --port <port>       Agent HTTP port (default: 9222)

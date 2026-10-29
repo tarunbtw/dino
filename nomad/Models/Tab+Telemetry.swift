@@ -100,8 +100,26 @@ extension Tab: WKScriptMessageHandler {
             if let sel = dict["selector"] as? String {
                 ZapperStore.shared.addSelector(sel, for: currentHost)
             }
-        } else if name == "nomadFrameBridge" {
-            // Frame registration and lifecycle message from sub-frame execution context
+        } else if name == "nomadFrameBridge", let dict = body as? [String: Any] {
+            if let els = dict["elements"] as? [[String: Any]], !els.isEmpty {
+                let fid = (dict["frameId"] as? String) ?? "f1"
+                let urlStr = (dict["url"] as? String) ?? ""
+                let titleStr = (dict["title"] as? String) ?? ""
+                if let data = try? JSONSerialization.data(withJSONObject: els),
+                   let elsJSON = String(data: data, encoding: .utf8) {
+                    let updateScript = """
+                    if (!window.__nomad_frames) window.__nomad_frames = {};
+                    window.__nomad_frames['\(fid)'] = {
+                        frameId: '\(fid)',
+                        url: '\(urlStr)',
+                        title: '\(titleStr)',
+                        elements: \(elsJSON),
+                        updatedAt: Date.now()
+                    };
+                    """
+                    self.webView.evaluateJavaScript(updateScript, completionHandler: nil)
+                }
+            }
         }
     }
 

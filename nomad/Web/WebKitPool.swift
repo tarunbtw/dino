@@ -440,7 +440,8 @@ enum WebKitPool {
                                     frameId: fid,
                                     url: window.location.href,
                                     title: document.title || '',
-                                    elementCount: elements.length
+                                    elementCount: elements.length,
+                                    elements: elements
                                 });
                             } catch(e) {}
                         }
@@ -488,7 +489,10 @@ enum WebKitPool {
                                     innerInput.click();
                                 }
                             }
-                            reportToTop(window.__nomad_frame_id);
+                            var isLink = (targetEl.tagName === 'A' || Boolean(targetEl.closest && targetEl.closest('a')));
+                            if (!isLink) {
+                                reportToTop(window.__nomad_frame_id);
+                            }
                         } else if (act === 'type') {
                             try { targetEl.focus(); } catch(err) {}
                             targetEl.value = actionObj.text || '';

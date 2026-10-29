@@ -38,6 +38,13 @@ final class Updater: ObservableObject {
             )
             return ProcessInfo.processInfo.isOperatingSystemAtLeast(least)
         }
+
+        var isNewerThanCurrent: Bool {
+            let comp = version.compare(Updater.currentVersion, options: .numeric)
+            if comp == .orderedDescending { return true }
+            if comp == .orderedSame && build > Updater.currentBuild { return true }
+            return false
+        }
     }
 
     /// Current progression state of the updater.
@@ -219,7 +226,7 @@ final class Updater: ObservableObject {
             self.lastChecked = Date()
             UserDefaults.standard.set(Date(), forKey: Self.lastCheckedKey)
 
-            guard let found = found, found.build > Self.currentBuild, found.runsHere else {
+            guard let found = found, found.isNewerThanCurrent, found.runsHere else {
                 if case .ready = self.stage {} else { self.stage = .none }
                 done(nil)
                 return
@@ -500,8 +507,15 @@ private enum Swap {
             throw Refused.wrongApp(expected: currentId, got: incomingId)
         }
 
+        let incomingVersion = (info["CFBundleShortVersionString"] as? String) ?? ""
         let incomingBuild = Int(info["CFBundleVersion"] as? String ?? "") ?? 0
-        guard incomingBuild > Updater.currentBuild else {
+        let isNewer: Bool = {
+            let comp = incomingVersion.compare(Updater.currentVersion, options: .numeric)
+            if comp == .orderedDescending { return true }
+            if comp == .orderedSame && incomingBuild > Updater.currentBuild { return true }
+            return false
+        }()
+        guard isNewer else {
             throw Refused.notNewer(installed: Updater.currentBuild, incoming: incomingBuild)
         }
 

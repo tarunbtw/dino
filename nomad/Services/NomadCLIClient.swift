@@ -652,8 +652,10 @@ enum NomadCLIClient {
               [timeoutMs]              Timeout in milliseconds (default: 5000)
 
             Options:
-              --mode <mode>            Wait mode: auto, stability, selector, networkidle, domcontentloaded, load
+              --mode <mode>            Wait mode: auto, selector, text, state, networkidle, stability
               -s, --selector <sel>     CSS selector to wait for (when --mode selector)
+              --text <query>           Wait for text substring to appear in element or document
+              --state <state>          Wait for element state: visible, hidden, enabled, disabled, checked, focused
               --url <pattern>          URL substring to wait for (when --mode url)
               --tab <id|idx>           Target specific tab by index or ID (default: active tab)
             """)
@@ -713,6 +715,52 @@ enum NomadCLIClient {
 
             Options:
               --tab <id|idx>           Target specific tab by index or ID (default: active tab)
+            """)
+
+        case "find":
+            emitOutput("""
+            Usage: nomad find [options]
+
+            Fast element lookup returning target ref in minimal tokens (~15 tokens).
+
+            Options:
+              -r, --role <role>        Filter by accessibility role (e.g. button, link, textbox)
+              --text <query>           Filter by visible text or value substring
+              -s, --selector <sel>     Filter by CSS selector
+              --ref-only               Print bare element ref only (e.g. 'e1')
+              -v, --viewport           Limit search to visible viewport
+              --tab <id|idx>           Target specific tab by index or ID (default: active tab)
+            """)
+
+        case "dialog":
+            emitOutput("""
+            Usage: nomad dialog [action|policy] [options]
+
+            Inspect, accept, dismiss, or configure policy for JavaScript dialogs (alert/confirm/prompt).
+
+            Subcommands / Arguments:
+              (no args)                Inspect current dialog policy, pending dialogs, and last dialog
+              accept                   Accept currently pending or future dialogs
+              dismiss                  Dismiss currently pending or future dialogs
+              wait                     Set policy to 'wait' so dialogs remain open until explicitly resolved
+
+            Options:
+              --policy <policy>        Set dialog handling policy: accept, dismiss, wait
+              --response <text>        Prompt text response string (for window.prompt)
+              --tab <id|idx>           Target specific tab by index or ID (default: active tab)
+            """)
+
+        case "ext", "extensions":
+            emitOutput("""
+            Usage: nomad ext [subcommand] [args]
+
+            Inspect and manage installed WebExtensions.
+
+            Subcommands:
+              (no args)                List installed extensions and their status
+              toggle <id>              Toggle enabled state of an extension
+              enable <id>              Enable an installed extension
+              disable <id>             Disable an installed extension
             """)
 
         default:
@@ -838,7 +886,8 @@ enum NomadCLIClient {
 
         var url = rawURL
         if !url.contains("://") && !url.hasPrefix("about:") && !url.hasPrefix("file:") {
-            url = "https://" + url
+            let parsed = URLParser.parse(rawURL)
+            url = parsed.absoluteString
         }
 
         var bodyObj: [String: Any] = ["url": url]
@@ -1381,9 +1430,11 @@ enum NomadCLIClient {
         if sub == "new" {
             var targetURL: String? = nil
             if args.positionals.count > 1 {
-                targetURL = args.positionals[1]
-                if let u = targetURL, !u.contains("://") && !u.hasPrefix("about:") {
-                    targetURL = "https://" + u
+                let raw = args.positionals[1]
+                if !raw.contains("://") && !raw.hasPrefix("about:") && !raw.hasPrefix("file:") {
+                    targetURL = URLParser.parse(raw).absoluteString
+                } else {
+                    targetURL = raw
                 }
             }
 

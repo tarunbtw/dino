@@ -95,7 +95,7 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
     private var progressObservers: [ObjectIdentifier: [NSKeyValueObservation]] = [:]
 
     /// Waiters awaiting download completion for agent automation.
-    private var waiters: [UUID: (DownloadItem) -> Void] = [:]
+    private var waiters: [UUID: (DownloadItem) -> Bool] = [:]
 
     var activeDownloads: [DownloadItem] {
         downloads.filter { $0.state == .downloading }
@@ -248,11 +248,14 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
     }
 
     private func notifyWaiters(_ item: DownloadItem) {
-        let currentWaiters = Array(self.waiters.values)
-        self.waiters.removeAll()
-        for waiter in currentWaiters {
-            waiter(item)
+        var remaining: [UUID: (DownloadItem) -> Bool] = [:]
+        for (id, waiter) in self.waiters {
+            let handled = waiter(item)
+            if !handled {
+                remaining[id] = waiter
+            }
         }
+        self.waiters = remaining
     }
 
     // MARK: - Agent Download Interception & Handoff
@@ -385,13 +388,14 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
             self.waiters[waiterId] = { item in
                 if let targetName = filename, !targetName.isEmpty,
                    item.suggestedFilename != targetName && item.destinationURL?.lastPathComponent != targetName {
-                    return
+                    return false
                 }
                 if item.state == .completed {
                     safeResume(formatResponse(item, true, nil))
                 } else {
                     safeResume(formatResponse(item, false, item.errorMessage ?? "Download failed"))
                 }
+                return true
             }
 
             Task {

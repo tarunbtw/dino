@@ -356,23 +356,26 @@ extension NomadAgentServer {
                     rules.append(["url": u, "block": true])
                 }
             }
+            for r in rules {
+                if let u = r["url"] as? String, !activeTab.blockedURLPatterns.contains(u) {
+                    activeTab.blockedURLPatterns.append(u)
+                }
+            }
             let rulesJson = (try? JSONSerialization.data(withJSONObject: rules)).flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
             let js = "window.__nomad_mock_routes = (window.__nomad_mock_routes || []).concat(\(rulesJson));"
             _ = try? await activeTab.webView.evaluateJavaScript(js)
-            sendJSON(connection: connection, object: ["success": true, "blocked": true, "count": rules.count, "url": blockUrl], origin: origin)
+            sendJSON(connection: connection, object: ["success": true, "blocked": true, "count": activeTab.blockedURLPatterns.count, "url": blockUrl, "patterns": activeTab.blockedURLPatterns], origin: origin)
             return true
 
         case ("GET", "/network/block"):
             guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin) else { return true }
-            let res = try? await activeTab.webView.evaluateJavaScript("JSON.stringify((window.__nomad_mock_routes || []).filter(m => m && m.block))")
-            let jsonStr = (res as? String) ?? "[]"
-            let data = Data(jsonStr.utf8)
-            let array = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] ?? []
-            sendJSON(connection: connection, object: ["success": true, "blockedRules": array, "count": array.count], origin: origin)
+            let rules = activeTab.blockedURLPatterns.map { ["url": $0, "block": true] }
+            sendJSON(connection: connection, object: ["success": true, "blockedRules": rules, "count": rules.count], origin: origin)
             return true
 
         case ("DELETE", "/network/block"):
             guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin) else { return true }
+            activeTab.blockedURLPatterns.removeAll()
             _ = try? await activeTab.webView.evaluateJavaScript("window.__nomad_mock_routes = (window.__nomad_mock_routes || []).filter(m => !m || !m.block);")
             sendJSON(connection: connection, object: ["success": true, "cleared": true], origin: origin)
             return true

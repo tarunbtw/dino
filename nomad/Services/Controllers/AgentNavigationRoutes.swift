@@ -16,18 +16,18 @@ extension NomadAgentServer {
             if !tab.canGoBack {
                 sendJSON(connection: connection, object: ["success": false, "action": "back", "code": "CANNOT_GO_BACK", "error": "Cannot go back: navigation history is empty"], origin: origin)
             } else {
-                store?.goBack()
+                tab.goBack()
                 sendJSON(connection: connection, object: ["success": true, "action": "back"], origin: origin)
             }
         case "forward":
             if !tab.canGoForward {
                 sendJSON(connection: connection, object: ["success": false, "action": "forward", "code": "CANNOT_GO_FORWARD", "error": "Cannot go forward: navigation history is empty"], origin: origin)
             } else {
-                store?.goForward()
+                tab.goForward()
                 sendJSON(connection: connection, object: ["success": true, "action": "forward"], origin: origin)
             }
         case "reload":
-            store?.reload()
+            tab.reload()
             sendJSON(connection: connection, object: ["success": true, "action": "reload"], origin: origin)
         default:
             break
@@ -122,19 +122,16 @@ extension NomadAgentServer {
             }
             return true
 
-        case ("POST", "/navigate/back"):
-            guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin) else { return true }
-            handleNavAction("back", tab: activeTab, connection: connection, origin: origin)
-            return true
-
-        case ("POST", "/navigate/forward"):
-            guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin) else { return true }
-            handleNavAction("forward", tab: activeTab, connection: connection, origin: origin)
-            return true
-
-        case ("POST", "/navigate/reload"):
-            guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin) else { return true }
-            handleNavAction("reload", tab: activeTab, connection: connection, origin: origin)
+        case ("POST", "/navigate/back"), ("POST", "/navigate/forward"), ("POST", "/navigate/reload"):
+            var tid = queryItem("tabId")
+            if let bodyData = bodyData,
+               let json = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any],
+               let bTid = json["tabId"] as? String {
+                tid = bTid
+            }
+            guard let activeTab = requireTab(id: tid, connection: connection, origin: origin) else { return true }
+            let navAction = cleanPath.components(separatedBy: "/").last ?? "reload"
+            handleNavAction(navAction, tab: activeTab, connection: connection, origin: origin)
             return true
 
         case ("POST", "/wait"):
@@ -276,20 +273,36 @@ extension NomadAgentServer {
                 let startTime = Date()
                 let maxDuration = Double(timeoutMs) / 1000.0
 
-                let escapedSelector: String
-                if let data = try? JSONEncoder().encode(selector), let str = String(data: data, encoding: .utf8) {
-                    escapedSelector = str
-                } else {
-                    escapedSelector = "\"\(selector)\""
-                }
+                let escapedSelector: String = (try? String(data: JSONEncoder().encode(selector), encoding: .utf8)) ?? "\"\(selector)\""
+                let escapedText: String = textPattern.isEmpty ? "null" : ((try? String(data: JSONEncoder().encode(textPattern), encoding: .utf8)) ?? "\"\(textPattern)\"")
+                let escapedState: String = stateExpected.isEmpty ? "null" : ((try? String(data: JSONEncoder().encode(stateExpected), encoding: .utf8)) ?? "\"\(stateExpected)\"")
 
                 let checkScript = """
                 (() => {
                     var sel = \(escapedSelector);
+                    var targetText = \(escapedText);
+                    var expectedState = \(escapedState);
+                    function checkElementMatch(el) {
+                        if (!el) return false;
+                        if (targetText) {
+                            var txt = (el.innerText || el.textContent || el.value || '').toLowerCase();
+                            if (txt.indexOf(targetText.toLowerCase()) === -1) return false;
+                        }
+                        if (expectedState) {
+                            var style = window.getComputedStyle(el);
+                            var isVis = (style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0');
+                            if (expectedState === 'visible' && !isVis) return false;
+                            if (expectedState === 'hidden' && isVis) return false;
+                            if (expectedState === 'enabled' && (el.disabled || el.hasAttribute('disabled'))) return false;
+                            if (expectedState === 'disabled' && (!el.disabled && !el.hasAttribute('disabled'))) return false;
+                        }
+                        return true;
+                    }
                     function match(node, s) {
                         if (!node) return false;
                         try {
-                            if (node.querySelector(s) || node.querySelector('[data-nomad-id="' + s + '"]')) return true;
+                            var el = (node.matches && node.matches(s)) ? node : (node.querySelector(s) || node.querySelector('[data-nomad-id="' + s + '"]'));
+                            if (el && checkElementMatch(el)) return true;
                         } catch(e) {}
                         return false;
                     }

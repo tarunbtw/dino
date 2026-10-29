@@ -233,7 +233,7 @@
             el.dispatchEvent(dragStartEvt);
 
             if (!destEl) {
-                destEl = document.elementFromPoint(destX, destY) || el;
+                destEl = document.elementFromPoint(destX, destY);
                 if (destEl && destEl.tagName === 'IFRAME') {
                     try {
                         var fDoc = destEl.contentDocument || (destEl.contentWindow ? destEl.contentWindow.document : null);
@@ -244,6 +244,10 @@
                         }
                     } catch(e) {}
                 }
+            }
+
+            if (!destEl) {
+                return { success: false, code: 'NO_DROP_TARGET', message: 'No drop target element found at destination coordinates (' + destX + ', ' + destY + ')', elementId: targetId };
             }
 
             var dragEnterEvt = new DragEvent('dragenter', {
@@ -308,6 +312,16 @@
                     if (!matchedId && iframes.length === 1) {
                         matchedId = iframes[0].getAttribute('data-nomad-frame') || 'f1';
                         iframes[0].setAttribute('data-nomad-frame', matchedId);
+                    }
+                    if (!matchedId && e.data.url) {
+                        for (var j = 0; j < iframes.length; j++) {
+                            var src = iframes[j].getAttribute('src') || '';
+                            if (src && (e.data.url.indexOf(src) !== -1 || src.indexOf(e.data.url) !== -1)) {
+                                matchedId = iframes[j].getAttribute('data-nomad-frame') || ('f' + (j + 1));
+                                iframes[j].setAttribute('data-nomad-frame', matchedId);
+                                break;
+                            }
+                        }
                     }
                     if (matchedId) {
                         window.__nomad_frames[matchedId] = {
@@ -735,6 +749,9 @@
                 // Recursive collector penetrating open Shadow DOM roots and same-origin / srcdoc iframes
                 function collectNodes(root, list) {
                     if (!root) return;
+                    if (root.shadowRoot) {
+                        collectNodes(root.shadowRoot, list);
+                    }
                     var selector = 'a, button, input, textarea, select, details, summary, h1, h2, h3, h4, h5, h6, img, li, p, td, th, pre, code, blockquote, canvas, [draggable], [ondragstart], [ondrop], [id*="hit"], [id*="drag"], [id*="drop"], [class*="drag"], [class*="drop"], [class*="dropzone"], [role="button"], [role="link"], [role="checkbox"], [role="radio"], [role="combobox"], [role="menuitem"], [role="tab"], [role="switch"], [role="option"], [role="heading"], [role="listitem"], [role="status"], [role="alert"], [role="cell"], [tabindex]:not([tabindex="-1"]), [contenteditable="true"], [oncontextmenu], [data-contextmenu], [data-context-menu], [contextmenu], [aria-haspopup="menu"], iframe';
                     try {
                         var found = root.querySelectorAll(selector);
@@ -939,13 +956,16 @@
                     if (parseFloat(style.opacity) < 0.05 && !isInputToggle) continue;
                     if (style.pointerEvents === 'none' && !isInputToggle) continue;
 
-                    var text = getAccessibleLabel(el).replace(/\\s+/g, ' ').substring(0, 80);
-                    if (isSensitiveValue(text)) {
-                        text = '[REDACTED]';
-                    }
                     var tag = el.tagName.toLowerCase();
                     var role = getImplicitAriaRole(el);
                     var type = el.getAttribute('type') || null;
+                    var isTextNode = (tag === 'li' || tag === 'p' || tag === 'td' || tag === 'th' || tag === 'blockquote' || tag === 'pre' || tag === 'code' || tag === 'article' || role === 'listitem' || role === 'status' || role === 'alert' || role === 'cell' || role === 'text' || role === 'paragraph' || isMeaningfulTextLeaf(el));
+                    var maxLabelLen = isTextNode ? 600 : 120;
+
+                    var text = getAccessibleLabel(el).replace(/\\s+/g, ' ').substring(0, maxLabelLen);
+                    if (isSensitiveValue(text)) {
+                        text = '[REDACTED]';
+                    }
 
                     var isSensitive = isSensitiveField(el) || isSensitiveValue(el.value);
                     var val = null;
@@ -1121,7 +1141,7 @@
                     ifr.setAttribute('data-nomad-frame', frameId);
 
                     try {
-                        ifr.contentWindow.postMessage({ type: '__nomad_frame_request_scan' }, '*');
+                        ifr.contentWindow.postMessage({ type: '__nomad_frame_request_scan', frameId: frameId }, '*');
                     } catch(err) {}
 
                     var frameData = window.__nomad_frames && window.__nomad_frames[frameId];

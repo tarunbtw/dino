@@ -17,8 +17,17 @@ extension Tab: WKNavigationDelegate {
             return
         }
 
-        // Security scheme validation
+        // Security scheme & network block validation
         if let targetURL = navigationAction.request.url {
+            let urlString = targetURL.absoluteString
+            for pattern in self.blockedURLPatterns {
+                if urlString.contains(pattern) || (pattern.contains("*") && matchesGlob(urlString, pattern: pattern)) {
+                    appendConsoleEntry(level: .warn, message: "[Network Block] Cancelled navigation matching '\(pattern)': \(urlString)")
+                    decisionHandler(.cancel, preferences)
+                    return
+                }
+            }
+
             let scheme = targetURL.scheme?.lowercased() ?? ""
             if scheme == "file" {
                 // Allow file:// if explicitly initiated by app/agent via load(url:), or already browsing local files
@@ -297,4 +306,8 @@ extension Tab: WKNavigationDelegate {
         webView.reload()
     }
 
+    private func matchesGlob(_ string: String, pattern: String) -> Bool {
+        let regexPattern = "^" + NSRegularExpression.escapedPattern(for: pattern).replacingOccurrences(of: "\\*", with: ".*") + "$"
+        return (try? NSRegularExpression(pattern: regexPattern, options: .caseInsensitive))?.firstMatch(in: string, range: NSRange(string.startIndex..., in: string)) != nil
+    }
 }

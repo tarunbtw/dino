@@ -236,6 +236,9 @@ extension NomadAgentServer {
                     return true
                 }
                 actionToResolve = cleanAction
+                if rawPolicy == nil {
+                    activeTab.dialogPolicy = cleanAction
+                }
             }
 
             // 3. Update prompt response text if provided

@@ -177,6 +177,7 @@ final class Tab: NSObject, Identifiable, ObservableObject {
     @Published var lastActionTime: Date? = nil
     var allowNextFileNavigation: Bool = false
     var currentNavigation: WKNavigation? = nil
+    var blockedURLPatterns: [String] = []
     private var navigationSeqMap: [ObjectIdentifier: Int] = [:]
 
     func recordNavigation(_ navigation: WKNavigation?, for seq: Int) {

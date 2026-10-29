@@ -148,10 +148,22 @@ rm -rf "$STAGING_DIR"
 rm -rf "$PROJECT_ROOT/build"
 rm -rf ~/Library/Developer/Xcode/DerivedData/nomad-*
 
-# 9. Update Checksums in Casks
+# 9. Update Checksums in Casks & Sync appcast.json
 echo "==> Updating checksum in packaging/homebrew/nomad.rb and tap..."
 sed -i '' -E "s/sha256 \"[a-f0-9]{64}\"/sha256 \"${SHA256}\"/g" packaging/homebrew/nomad.rb
 sed -i '' -E "s/sha256 \"[a-f0-9]{64}\"/sha256 \"${SHA256}\"/g" "$TAP_DIR/Casks/nomad.rb"
+
+echo "==> Updating appcast.json for auto-updater..."
+cat <<EOF > "$PROJECT_ROOT/appcast.json"
+{
+  "version": "${NEW_VERSION}",
+  "build": 1,
+  "url": "https://github.com/tarunbtw/nomad/releases/download/v${NEW_VERSION}/Nomad-${NEW_VERSION}.zip",
+  "sha256": "${SHA256}",
+  "notes": "Nomad ${NEW_VERSION} release.",
+  "minimumSystemVersion": "13.0"
+}
+EOF
 
 # 10. Commit & Tag in Nomad repository
 echo "==> Committing release changes in nomad repository..."

@@ -80,6 +80,8 @@ enum URLParser {
         // Discard strings with spaces or containing @
         guard !string.contains(" "), !string.contains("@") else { return false }
 
+        if string.isLocalOrPrivateHost { return true }
+
         let cleanHost = URL(string: "http://\(string)")?.host ?? string
 
         if cleanHost.isLocalOrPrivateHost { return true }
@@ -97,16 +99,20 @@ extension String {
     /// Detects local development environments and private networks (localhost, 127.0.0.1, 192.168.x, etc.)
     var isLocalOrPrivateHost: Bool {
         let lower = self.lowercased()
+        let hasPort = lower.contains(":")
         let hostPart = lower.components(separatedBy: ":").first ?? lower
         if hostPart == "localhost" || hostPart == "127.0.0.1" || hostPart == "::1" || hostPart == "0.0.0.0" { return true }
         if hostPart.hasSuffix(".local") || hostPart.hasSuffix(".localhost") || hostPart.hasSuffix(".internal") || hostPart.hasSuffix(".lan") || hostPart.hasSuffix(".home") || hostPart.hasSuffix(".arpa") { return true }
-        if !hostPart.contains(".") { return true }
         if hostPart.hasPrefix("192.168.") || hostPart.hasPrefix("10.") || hostPart.hasPrefix("127.") { return true }
         if hostPart.hasPrefix("172.") {
             let parts = hostPart.split(separator: ".")
             if parts.count >= 2, let second = Int(parts[1]), (16...31).contains(second) {
                 return true
             }
+        }
+        // If an explicit port is given on a single-word hostname (e.g. router:8080), treat as local host
+        if hasPort && !hostPart.isEmpty && hostPart.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-") }) {
+            return true
         }
         return false
     }

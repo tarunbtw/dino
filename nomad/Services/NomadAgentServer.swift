@@ -357,7 +357,7 @@ final class NomadAgentServer: ObservableObject {
         }
 
         // Unauthenticated access is strictly limited to minimal health check probe without sensitive page data
-        let isPublicHealthCheck = (method == "GET" && (path == "/" || path == "/status" || cleanPath == "/" || cleanPath == "/status" || cleanPath == "/health" || cleanPath == "/version" || cleanPath == "/daemon" || cleanPath == "/headless" || cleanPath == "/socket")) || ((method == "POST" || method == "DELETE") && (cleanPath == "/socket" || cleanPath == "/daemon"))
+        let isPublicHealthCheck = (method == "GET" && (path == "/" || path == "/status" || cleanPath == "/" || cleanPath == "/status" || cleanPath == "/health" || cleanPath == "/version" || cleanPath == "/capabilities" || cleanPath == "/daemon" || cleanPath == "/headless" || cleanPath == "/socket")) || ((method == "POST" || method == "DELETE") && (cleanPath == "/socket" || cleanPath == "/daemon"))
         if !isAuthenticated {
             if isPublicHealthCheck {
                 // If it's a socket modification request, process it below
@@ -543,7 +543,7 @@ final class NomadAgentServer: ObservableObject {
                 "activeTitle": liveTitle,
                 "hasPendingDialog": self.store?.activeTab?.pendingDialog != nil
             ]
-            if isVerbose {
+            if isVerbose || queryItem("capabilities") == "true" {
                 statusObj["build"] = Updater.currentBuild
                 statusObj["isHeadless"] = NomadHeadlessManager.isHeadless
                 statusObj["unixSocket"] = unixSocketInfo
@@ -552,6 +552,46 @@ final class NomadAgentServer: ObservableObject {
                 statusObj["capabilities"] = capabilities
             }
             sendJSON(connection: connection, object: statusObj, origin: origin)
+            return
+        }
+
+        if method == "GET" && cleanPath == "/capabilities" {
+            let socketPath = NomadUnixSocketBridge.defaultSocketPath
+            let socketExists = FileManager.default.fileExists(atPath: socketPath)
+            let unixSocketInfo: [String: Any] = [
+                "path": socketPath,
+                "active": NomadUnixSocketBridge.shared.isListening,
+                "exists": socketExists,
+                "error": (NomadUnixSocketBridge.shared.lastError as Any?) ?? NSNull()
+            ]
+            let capabilities: [String: Any] = [
+                "transports": ["http", "unix_socket", "sse_events"],
+                "socketPath": socketPath,
+                "unixSocket": unixSocketInfo,
+                "waitModes": ["auto", "selector", "text", "state", "networkidle", "stability", "timeout", "navigation", "url"],
+                "actions": ["click", "hover", "type", "clear", "press", "selectOption", "scroll", "drag", "highlight", "upload", "native_click", "native_type", "native_press", "native_drag", "native_hover"],
+                "upload": ["files", "paths"],
+                "downloads": ["list", "last", "wait"],
+                "hardwareInput": ["isTrusted", "cgEvent", "appKit"],
+                "frames": ["crossOrigin", "piercing", "subframes"],
+                "screenshot": ["full", "labeled", "clip", "elementId"],
+                "evaluateWorlds": ["page", "isolated"],
+                "snapshotModes": ["text", "json"],
+                "cookies": ["get", "set", "clear"],
+                "console": ["log", "warn", "error"],
+                "network": ["fetch", "xhr", "status", "timing"],
+                "networkInterception": ["mock", "block"],
+                "tabVirtualization": ["hot", "warm", "cold"],
+                "agenticRuntime": ["route_cache", "trajectory_trace", "headless_daemon", "socket_rebind"],
+                "updater": ["status", "check", "version", "build"],
+                "dialogPolicies": ["accept", "dismiss", "wait"],
+                "extensions": ["list", "toggle", "enable", "disable"]
+            ]
+            sendJSON(connection: connection, object: [
+                "success": true,
+                "version": Updater.currentVersion,
+                "capabilities": capabilities
+            ], origin: origin)
             return
         }
 
@@ -630,8 +670,22 @@ final class NomadAgentServer: ObservableObject {
     func resolveTab(id: String?) -> Tab? {
         let tab: Tab?
         if let id = id, !id.isEmpty {
-            guard let uuid = UUID(uuidString: id) else { return nil }
-            tab = store?.tabs.first(where: { $0.id == uuid })
+            if let uuid = UUID(uuidString: id) {
+                tab = store?.tabs.first(where: { $0.id == uuid })
+            } else if let idx = Int(id), let tabs = store?.tabs, !tabs.isEmpty {
+                // Support 1-based (CLI) and 0-based (REST) index targeting
+                if idx >= 1 && idx <= tabs.count {
+                    tab = tabs[idx - 1]
+                } else if idx >= 0 && idx < tabs.count {
+                    tab = tabs[idx]
+                } else {
+                    tab = nil
+                }
+            } else if let tabs = store?.tabs {
+                tab = tabs.first(where: { $0.id.uuidString.lowercased().hasPrefix(id.lowercased()) })
+            } else {
+                tab = nil
+            }
         } else {
             tab = store?.activeTab
         }

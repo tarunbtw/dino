@@ -148,6 +148,16 @@ final class SettingsStore: ObservableObject {
         loadBookmarks()
         loadCustomBgImage()
         applyTheme()
+
+        DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name("AppleInterfaceThemeChangedNotification"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self = self, self.theme == "system" else { return }
+            self.applyTheme()
+            self.objectWillChange.send()
+        }
     }
 
     func applyTheme() {
@@ -169,6 +179,14 @@ final class SettingsStore: ObservableObject {
         switch theme {
         case "dark": return .dark
         case "light": return .light
+        case "system":
+            let isDark: Bool = {
+                if let style = UserDefaults.standard.persistentDomain(forName: UserDefaults.globalDomain)?["AppleInterfaceStyle"] as? String {
+                    return style.caseInsensitiveCompare("dark") == .orderedSame
+                }
+                return NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            }()
+            return isDark ? .dark : .light
         default: return nil
         }
     }
