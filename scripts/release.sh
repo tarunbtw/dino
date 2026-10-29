@@ -16,8 +16,37 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 PROJECT_ROOT="$(pwd)"
 TAP_DIR="/Users/tarun/projects/homebrew-tap"
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Versions/Current/Frameworks/LaunchServices.framework/Versions/Current/Support/lsregister"
 
 export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
+
+RELEASE_SUCCESS=false
+ZIP_PATH=""
+BUILT_APP=""
+
+rollback_on_failure() {
+  if [ "$RELEASE_SUCCESS" = "false" ]; then
+    echo "" >&2
+    echo "⚠️  Release aborted or failed. Rolling back local changes..." >&2
+    # Restore any modified version files in nomad repository
+    git checkout -- nomad.xcodeproj/project.pbxproj nomad/Services/NomadVersion.swift packaging/homebrew/nomad.rb appcast.json 2>/dev/null || true
+    # Restore tap repository cask
+    if [ -d "$TAP_DIR" ]; then
+      (cd "$TAP_DIR" && git checkout -- Casks/nomad.rb 2>/dev/null || true)
+    fi
+    # Clean staging, packaging, and build directories
+    rm -rf "$PROJECT_ROOT/dist/staging" "$PROJECT_ROOT/build"
+    if [ -n "$ZIP_PATH" ] && [ -f "$ZIP_PATH" ]; then
+      rm -f "$ZIP_PATH"
+    fi
+    if [ -n "$BUILT_APP" ] && [ -f "$LSREGISTER" ]; then
+      "$LSREGISTER" -u "$BUILT_APP" 2>/dev/null || true
+    fi
+    echo "==> Working trees cleanly restored to pre-release state." >&2
+  fi
+}
+
+trap rollback_on_failure EXIT
 
 # 1. Version Detection & Determination
 CURRENT_VERSION=$(grep 'version "' packaging/homebrew/nomad.rb | head -n1 | sed -E 's/.*version "([^"]+)".*/\1/')
@@ -46,6 +75,12 @@ fi
 
 if [ ! -f "$TAP_DIR/Casks/nomad.rb" ]; then
   echo "❌ Error: $TAP_DIR/Casks/nomad.rb not found" >&2
+  exit 1
+fi
+
+# Ensure nomad repo is clean
+if [ -n "$(git status --porcelain)" ]; then
+  echo "❌ Error: Nomad repository has uncommitted changes. Please commit or stash them first." >&2
   exit 1
 fi
 
@@ -202,6 +237,8 @@ git add Casks/nomad.rb
 git commit -m "nomad: bump to ${NEW_VERSION}"
 git push origin main
 cd "$PROJECT_ROOT"
+
+RELEASE_SUCCESS=true
 
 # 13. Final Summary
 echo ""

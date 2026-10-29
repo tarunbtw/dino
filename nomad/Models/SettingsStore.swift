@@ -154,9 +154,11 @@ final class SettingsStore: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            guard let self = self, self.theme == "system" else { return }
-            self.applyTheme()
-            self.objectWillChange.send()
+            MainActor.assumeIsolated {
+                guard let self = self, self.theme == "system" else { return }
+                self.applyTheme()
+                self.objectWillChange.send()
+            }
         }
     }
 
