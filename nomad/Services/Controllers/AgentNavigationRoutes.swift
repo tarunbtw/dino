@@ -75,6 +75,17 @@ extension NomadAgentServer {
                         return true
                     }
                 }
+                if let host = url.host, !host.isEmpty, !NomadAgentServer.shared.isDomainAllowed(host) {
+                    NomadAgentServer.shared.recordSecurityAudit(type: "navigation_blocked", message: "Navigation to domain '\(host)' blocked by policy (\(NomadAgentServer.shared.policyMode))", isBlocked: true)
+                    sendJSON(connection: connection, status: "403 Forbidden", object: [
+                        "success": false,
+                        "error": "Navigation to domain '\(host)' is blocked by Nomad security policy (\(NomadAgentServer.shared.policyMode)).",
+                        "code": "DOMAIN_NOT_ALLOWED",
+                        "domain": host,
+                        "policyMode": NomadAgentServer.shared.policyMode
+                    ], origin: origin)
+                    return true
+                }
                 let mySeq = activeTab.navigationSeq + 1
                 activeTab.load(url: url)
                 // Await navigation resolution (commitment or provisional failure) up to 5.0 seconds

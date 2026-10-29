@@ -117,7 +117,8 @@ final class NomadAgentServer: ObservableObject {
     }
 
     func isDomainAllowed(_ domain: String) -> Bool {
-        guard !allowedDomains.isEmpty else { return true }
+        if policyMode == "permissive" { return true }
+        guard !allowedDomains.isEmpty else { return false }
         let lDomain = domain.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         for allowed in allowedDomains {
             let lAllowed = allowed.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
@@ -656,7 +657,9 @@ final class NomadAgentServer: ObservableObject {
                             self.policyMode = cleanM
                         }
                     }
-                    if let domains = json["allowedDomains"] as? [String] {
+                    if let domains = (json["allowedDomains"] as? [String]) ??
+                                      (json["allowlist"] as? [String]) ??
+                                      (json["domains"] as? [String]) {
                         self.allowedDomains = domains.map { $0.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) }
                     } else if let addDomain = (json["addDomain"] as? String) ?? (json["domain"] as? String) {
                         let d = addDomain.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)

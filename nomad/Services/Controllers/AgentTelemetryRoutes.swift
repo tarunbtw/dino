@@ -314,6 +314,18 @@ extension NomadAgentServer {
             }
 
             var updated: [String] = []
+            if let key = json["key"] as? String, !key.isEmpty {
+                let val = (json["value"] as? String) ?? (json["val"] as? String) ?? ""
+                let target = ((json["type"] as? String) ?? (json["target"] as? String) ?? "localStorage").lowercased()
+                let isSession = (target == "sessionstorage" || target == "session")
+                let storeName = isSession ? "sessionStorage" : "localStorage"
+                let escapedKey = key.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+                let escapedVal = val.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+                let script = "\(storeName).setItem(\"\(escapedKey)\", \"\(escapedVal)\")"
+                _ = try? await activeTab.webView.evaluateJavaScript(script)
+                if !updated.contains(storeName) { updated.append(storeName) }
+            }
+
             if let lsUpdates = json["localStorage"] as? [String: Any],
                let lsData = try? JSONSerialization.data(withJSONObject: lsUpdates),
                let lsJSON = String(data: lsData, encoding: .utf8) {
@@ -376,10 +388,22 @@ extension NomadAgentServer {
             guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin) else { return true }
             var targetType = "all"
             if let t = queryItem("type") { targetType = t.lowercased() }
-            if let bodyData = bodyData,
-               let json = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any],
-               let t = json["type"] as? String {
+            let bodyJSON = bodyData.flatMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] }
+            if let t = bodyJSON?["type"] as? String {
                 targetType = t.lowercased()
+            }
+            if let k = (queryItem("key") ?? (bodyJSON?["key"] as? String)), !k.isEmpty {
+                let esc = k.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+                let script = """
+                (() => {
+                    var t = '\(targetType)';
+                    if (t === 'all' || t === 'local' || t === 'localstorage') { try { localStorage.removeItem("\(esc)"); } catch(e) {} }
+                    if (t === 'all' || t === 'session' || t === 'sessionstorage') { try { sessionStorage.removeItem("\(esc)"); } catch(e) {} }
+                })()
+                """
+                _ = try? await activeTab.webView.evaluateJavaScript(script)
+                sendJSON(connection: connection, object: ["success": true, "removed": k], origin: origin)
+                return true
             }
 
             let script = """

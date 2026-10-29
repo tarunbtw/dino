@@ -252,7 +252,10 @@ struct NomadActionResult: Codable {
     var message: String
     var elementId: String? = nil
     var obscured: Bool? = nil
+    var isObscured: Bool? = nil
     var interceptedBy: String? = nil
+    var occludedBy: String? = nil
+    var centerCoordinates: [String: Double]? = nil
     var healed: Bool? = nil
     var staleRef: Bool? = nil
     var code: String? = nil
@@ -265,12 +268,15 @@ struct NomadActionResult: Codable {
     var lastDialog: String? = nil
     var hasPendingDialog: Bool? = nil
 
-    init(success: Bool, message: String, elementId: String? = nil, obscured: Bool? = nil, interceptedBy: String? = nil, healed: Bool? = nil, staleRef: Bool? = nil, code: String? = nil, stack: String? = nil, error: String? = nil, files: [String]? = nil, count: Int? = nil, native: Bool? = nil, isTrusted: Bool? = nil, lastDialog: String? = nil, hasPendingDialog: Bool? = nil) {
+    init(success: Bool, message: String, elementId: String? = nil, obscured: Bool? = nil, isObscured: Bool? = nil, interceptedBy: String? = nil, occludedBy: String? = nil, centerCoordinates: [String: Double]? = nil, healed: Bool? = nil, staleRef: Bool? = nil, code: String? = nil, stack: String? = nil, error: String? = nil, files: [String]? = nil, count: Int? = nil, native: Bool? = nil, isTrusted: Bool? = nil, lastDialog: String? = nil, hasPendingDialog: Bool? = nil) {
         self.success = success
         self.message = message
         self.elementId = elementId
-        self.obscured = obscured
-        self.interceptedBy = interceptedBy
+        self.obscured = obscured ?? isObscured
+        self.isObscured = isObscured ?? obscured
+        self.interceptedBy = interceptedBy ?? occludedBy
+        self.occludedBy = occludedBy ?? interceptedBy
+        self.centerCoordinates = centerCoordinates
         self.healed = healed
         self.staleRef = staleRef
         self.code = code
@@ -284,13 +290,25 @@ struct NomadActionResult: Codable {
         self.hasPendingDialog = hasPendingDialog
     }
 
+    enum CodingKeys: String, CodingKey {
+        case success, message, elementId, obscured, isObscured, interceptedBy, occludedBy, centerCoordinates
+        case healed, staleRef, code, stack, error, files, count, native, isTrusted, lastDialog, hasPendingDialog
+    }
+
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(success, forKey: .success)
         try container.encode(message, forKey: .message)
         try container.encodeIfPresent(elementId, forKey: .elementId)
-        if obscured == true { try container.encode(true, forKey: .obscured) }
-        try container.encodeIfPresent(interceptedBy, forKey: .interceptedBy)
+        if obscured == true || isObscured == true {
+            try container.encode(true, forKey: .obscured)
+            try container.encode(true, forKey: .isObscured)
+        }
+        if let ib = interceptedBy ?? occludedBy {
+            try container.encode(ib, forKey: .interceptedBy)
+            try container.encode(ib, forKey: .occludedBy)
+        }
+        try container.encodeIfPresent(centerCoordinates, forKey: .centerCoordinates)
         if healed == true { try container.encode(true, forKey: .healed) }
         if staleRef == true { try container.encode(true, forKey: .staleRef) }
         try container.encodeIfPresent(code, forKey: .code)
@@ -439,9 +457,11 @@ extension Tab {
             )
         }
 
+        // Ensure Nomad core perception & action scripts are always injected before any action runs
+        await ensureNomadScriptInjected()
+
         // Native AppKit & CoreGraphics hardware input dispatch (isTrusted: true)
-        // Note: 'hover' requires native cursor positioning and mouse moved event to activate CSS :hover pseudo-class
-        let isNative = (action.native == true) || action.action.lowercased().hasPrefix("native_") || action.action.lowercased() == "hover"
+        let isNative = (action.native == true) || action.action.lowercased().hasPrefix("native_")
         if isNative {
             var nativeRes = try await performNativeAction(action)
             nativeRes.lastDialog = self.lastDialog
@@ -528,8 +548,30 @@ extension Tab {
                         }
                     }
                     if res.success {
-                        if res.obscured == true {
-                            let tag = res.interceptedBy.map { "<\($0)>" } ?? "overlay"
+                        if action.action.lowercased() == "hover" {
+                            if let coords = res.centerCoordinates, let cx = coords["x"], let cy = coords["y"] {
+                                let pt = CGPoint(x: cx, y: cy)
+                                let winPoint = self.webView.convert(pt, to: nil)
+                                if let moveEvent = NSEvent.mouseEvent(
+                                    with: .mouseMoved,
+                                    location: winPoint,
+                                    modifierFlags: [],
+                                    timestamp: ProcessInfo.processInfo.systemUptime,
+                                    windowNumber: self.webView.window?.windowNumber ?? 0,
+                                    context: nil,
+                                    eventNumber: 0,
+                                    clickCount: 0,
+                                    pressure: 0.0
+                                ) {
+                                    let sel = NSSelectorFromString("_simulateMouseMove:")
+                                    if self.webView.responds(to: sel) {
+                                        self.webView.perform(sel, with: moveEvent)
+                                    }
+                                }
+                            }
+                        }
+                        if res.obscured == true || res.isObscured == true {
+                            let tag = (res.interceptedBy ?? res.occludedBy).map { "<\($0)>" } ?? "overlay"
                             NomadRouteCache.shared.record(eventType: "action", message: "Action '\(action.action)' on \(action.target ?? "element") was obscured (intercepted by \(tag))", tabId: self.id.uuidString)
                         } else {
                             NomadRouteCache.shared.record(eventType: "action", message: "Action '\(action.action)' succeeded on \(action.target ?? "element")", tabId: self.id.uuidString)
@@ -688,23 +730,9 @@ extension Tab {
 
         let rawType = action.action.lowercased().replacingOccurrences(of: "native_", with: "")
 
-        // 2. Bring window and web view to front for active hardware input (GUI mode only)
-        if !NomadHeadlessManager.isHeadless {
-            NSApp.activate(ignoringOtherApps: true)
-            if let win = webView.window {
-                if !win.isKeyWindow {
-                    win.makeKeyAndOrderFront(nil)
-                }
-                if win.firstResponder != webView {
-                    win.makeFirstResponder(webView)
-                }
-            }
-        } else {
-            // Headless mode: Never activate application or order window front.
-            // Ensure webView is first responder in its own offscreen window hierarchy.
-            if let win = webView.window, win.firstResponder != webView {
-                win.makeFirstResponder(webView)
-            }
+        // 2. Ensure webView is first responder in its window without stealing OS workspace focus
+        if let win = webView.window, win.firstResponder != webView {
+            win.makeFirstResponder(webView)
         }
 
         let windowNumber = webView.window?.windowNumber ?? 0
@@ -763,6 +791,7 @@ extension Tab {
                 success: true,
                 message: "Native click dispatched at (\(Int(pt.x)), \(Int(pt.y))) with isTrusted: true",
                 elementId: action.target,
+                centerCoordinates: ["x": pt.x, "y": pt.y],
                 code: "SUCCESS",
                 native: true,
                 isTrusted: true,
@@ -827,6 +856,7 @@ extension Tab {
                 success: true,
                 message: "Native double click dispatched at (\(Int(pt.x)), \(Int(pt.y))) with isTrusted: true",
                 elementId: action.target,
+                centerCoordinates: ["x": pt.x, "y": pt.y],
                 code: "SUCCESS",
                 native: true,
                 isTrusted: true,
@@ -886,6 +916,7 @@ extension Tab {
                 success: true,
                 message: "Native context menu (right click) dispatched at (\(Int(pt.x)), \(Int(pt.y))) with isTrusted: true",
                 elementId: action.target,
+                centerCoordinates: ["x": pt.x, "y": pt.y],
                 code: "SUCCESS",
                 native: true,
                 isTrusted: true,
@@ -974,13 +1005,8 @@ extension Tab {
                                     for (var r = 0; r < rules.length; r++) {
                                         var sel = rules[r].selectorText;
                                         if (sel && sel.indexOf(':hover') !== -1) {
-                                            var baseSel = sel.replace(/:hover/g, '');
-                                            try {
-                                                if (el.matches(baseSel) || (el.querySelector && el.querySelector(baseSel))) {
-                                                    var emulatedSel = sel.replace(/:hover/g, '[data-nomad-hover="true"]');
-                                                    newRules.push(emulatedSel + ' { ' + rules[r].style.cssText + ' }');
-                                                }
-                                            } catch(err) {}
+                                            var emulatedSel = sel.replace(/:hover/g, '[data-nomad-hover="true"]');
+                                            newRules.push(emulatedSel + ' { ' + rules[r].style.cssText + ' }');
                                         }
                                     }
                                 } catch(err) {}
@@ -999,6 +1025,7 @@ extension Tab {
                 success: true,
                 message: "Hover dispatched at (\(Int(pt.x)), \(Int(pt.y))) with isTrusted: true",
                 elementId: action.target,
+                centerCoordinates: ["x": pt.x, "y": pt.y],
                 code: "SUCCESS",
                 native: true,
                 isTrusted: true,

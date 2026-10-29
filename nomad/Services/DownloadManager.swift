@@ -133,12 +133,14 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
             return u
         }
 
-        // If WebKit has already proven TCC-restricted on ~/Downloads in this session, use fallback
-        if hasTCCRestrictionOnDownloads {
+        // Headless daemon: WebKit's out-of-process networking daemon (com.apple.WebKit.Networking.xpc)
+        // is restricted from writing to ~/Downloads by macOS TCC in non-GUI / daemon sessions.
+        // Directing WebKit to ~/.nomad/downloads ensures 100% write reliability with zero prompts.
+        // Completed files are then automatically promoted (copied) to ~/Downloads in downloadDidFinish.
+        if NomadHeadlessManager.isHeadless || hasTCCRestrictionOnDownloads {
             return fallbackDirectory
         }
 
-        // Both GUI and Headless default to standard ~/Downloads
         return standardDownloadsDirectory
     }
 
@@ -218,8 +220,8 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
             item.completedAt = Date()
             if let dest = item.destinationURL {
                 var finalDest = dest
-                if self.hasTCCRestrictionOnDownloads || dest.path.contains(".nomad/downloads") {
-                    let targetURL = self.standardDownloadsDirectory.appendingPathComponent(item.suggestedFilename)
+                if dest.path.contains(".nomad/downloads") {
+                    let targetURL = self.uniqueDestinationURL(for: item.suggestedFilename, in: self.standardDownloadsDirectory)
                     if (try? FileManager.default.copyItem(at: dest, to: targetURL)) != nil {
                         item.destinationURL = targetURL
                         finalDest = targetURL
@@ -246,20 +248,28 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
                                 error.localizedDescription.lowercased().contains("permission")
 
         if isPermissionError && !hasTCCRestrictionOnDownloads,
-           let resumeData = resumeData,
            let originatingWebView = download.webView {
             self.hasTCCRestrictionOnDownloads = true
             retainedDownloads.removeValue(forKey: key)
             downloadItems.removeValue(forKey: key)
             progressObservers.removeValue(forKey: key)
 
-            originatingWebView.resumeDownload(fromResumeData: resumeData) { [weak self] resumedDownload in
-                guard let self = self, let item = item else { return }
-                self.register(resumedDownload, from: item.originalURL, suggestedFilename: item.suggestedFilename)
-                let newKey = ObjectIdentifier(resumedDownload)
-                self.downloadItems[newKey] = item
+            if let resumeData = resumeData {
+                originatingWebView.resumeDownload(fromResumeData: resumeData) { [weak self] resumedDownload in
+                    guard let self = self, let item = item else { return }
+                    self.register(resumedDownload, from: item.originalURL, suggestedFilename: item.suggestedFilename)
+                    let newKey = ObjectIdentifier(resumedDownload)
+                    self.downloadItems[newKey] = item
+                }
+                return
+            } else if let origURL = item?.originalURL {
+                Task { @MainActor [weak self] in
+                    guard let self = self else { return }
+                    let newDownload = await originatingWebView.startDownload(using: URLRequest(url: origURL))
+                    self.register(newDownload, from: origURL, suggestedFilename: item?.suggestedFilename ?? "download")
+                }
+                return
             }
-            return
         }
 
         defer {
@@ -548,9 +558,10 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
         return clean
     }
 
-    private func uniqueDestinationURL(for filename: String) -> URL {
+    private func uniqueDestinationURL(for filename: String, in directory: URL? = nil) -> URL {
+        let targetDir = directory ?? downloadsDirectory
         let safeName = sanitizeFilename(filename)
-        let base = downloadsDirectory.appendingPathComponent(safeName)
+        let base = targetDir.appendingPathComponent(safeName)
         if !FileManager.default.fileExists(atPath: base.path) {
             return base
         }
@@ -561,7 +572,7 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
         
         while true {
             let candidateName = ext.isEmpty ? "\(name) (\(counter))" : "\(name) (\(counter)).\(ext)"
-            let candidate = downloadsDirectory.appendingPathComponent(candidateName)
+            let candidate = targetDir.appendingPathComponent(candidateName)
             if !FileManager.default.fileExists(atPath: candidate.path) {
                 return candidate
             }

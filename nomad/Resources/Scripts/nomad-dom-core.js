@@ -1905,11 +1905,21 @@
                                     message: 'Clicked point of ' + (targetId || 'element') + ' (intercepted by <' + interceptorTag + '>)',
                                     elementId: targetId,
                                     obscured: true,
-                                    interceptedBy: interceptorTag
+                                    isObscured: true,
+                                    interceptedBy: interceptorTag,
+                                    occludedBy: interceptorTag,
+                                    centerCoordinates: { x: Math.round(cxC), y: Math.round(cyC) }
                                 };
                             }
 
-                            return { success: true, message: 'Clicked ' + (targetId || 'element'), elementId: targetId };
+                            return {
+                                success: true,
+                                message: 'Clicked ' + (targetId || 'element'),
+                                elementId: targetId,
+                                obscured: false,
+                                isObscured: false,
+                                centerCoordinates: { x: Math.round(cxC), y: Math.round(cyC) }
+                            };
                         } else if (actionObj.x !== undefined && actionObj.y !== undefined) {
                             var hit = document.elementFromPoint(actionObj.x, actionObj.y);
                             if (hit) {
@@ -1965,10 +1975,20 @@
                                     message: 'Double-clicked point of ' + (targetId || 'element') + ' (intercepted by <' + interceptorTagD + '>)',
                                     elementId: targetId,
                                     obscured: true,
-                                    interceptedBy: interceptorTagD
+                                    isObscured: true,
+                                    interceptedBy: interceptorTagD,
+                                    occludedBy: interceptorTagD,
+                                    centerCoordinates: { x: Math.round(cxD), y: Math.round(cyD) }
                                 };
                             }
-                            return { success: true, message: 'Double-clicked ' + (targetId || 'element'), elementId: targetId };
+                            return {
+                                success: true,
+                                message: 'Double-clicked ' + (targetId || 'element'),
+                                elementId: targetId,
+                                obscured: false,
+                                isObscured: false,
+                                centerCoordinates: { x: Math.round(cxD), y: Math.round(cyD) }
+                            };
                         } else if (actionObj.x !== undefined && actionObj.y !== undefined) {
                             var hitD = document.elementFromPoint(actionObj.x, actionObj.y);
                             if (hitD) {
@@ -2085,13 +2105,8 @@
                                     for (var rI = 0; rI < rList.length; rI++) {
                                         var selH = rList[rI].selectorText;
                                         if (selH && selH.indexOf(':hover') !== -1) {
-                                            var baseSelH = selH.replace(/:hover/g, '');
-                                            try {
-                                                if (el.matches(baseSelH) || (el.querySelector && el.querySelector(baseSelH))) {
-                                                    var emulatedH = selH.replace(/:hover/g, '[data-nomad-hover="true"]');
-                                                    newRulesH.push(emulatedH + ' { ' + rList[rI].style.cssText + ' }');
-                                                }
-                                            } catch(err) {}
+                                            var emulatedH = selH.replace(/:hover/g, '[data-nomad-hover="true"]');
+                                            newRulesH.push(emulatedH + ' { ' + rList[rI].style.cssText + ' }');
                                         }
                                     }
                                 } catch(err) {}
@@ -2099,7 +2114,12 @@
                             sheetH.textContent = newRulesH.join('\n');
                         } catch(cssErr) {}
 
-                        return { success: true, message: 'Hovered over ' + targetId, elementId: targetId };
+                        return {
+                            success: true,
+                            message: 'Hovered over ' + targetId,
+                            elementId: targetId,
+                            centerCoordinates: { x: cxH, y: cyH }
+                        };
 
                     case 'clear':
                         if (!el) return { success: false, code: 'MISSING_TARGET', message: 'No target element for clear action' };
@@ -2603,11 +2623,12 @@
                     if (!cursor) {
                         cursor = document.createElement('div');
                         cursor.id = '__nomad_virtual_cursor';
-                        cursor.style.cssText = 'position:fixed;width:12px;height:12px;border-radius:50%;background:rgba(0,122,255,0.85);border:2px solid #ffffff;box-shadow:0 0 6px rgba(0,0,0,0.45);pointer-events:none;z-index:2147483647;transform:translate(-50%,-50%);transition:transform 0.08s ease-out,opacity 0.2s;opacity:0.95;';
+                        cursor.style.cssText = 'position:fixed;width:24px;height:24px;pointer-events:none;z-index:2147483647;transition:left 0.08s ease-out,top 0.08s ease-out,opacity 0.2s;opacity:0.95;';
+                        cursor.innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" style="filter:drop-shadow(0 1px 3px rgba(0,0,0,0.6));"><path d="M2 2L18.5 13.5L11.5 15L9 21.5L2 2Z" fill="#ffffff" stroke="#111111" stroke-width="1.6" stroke-linejoin="round"/></svg>';
                         (document.body || document.documentElement).appendChild(cursor);
                     }
-                    cursor.style.left = Math.round(x) + 'px';
-                    cursor.style.top = Math.round(y) + 'px';
+                    cursor.style.left = (Math.round(x) - 2) + 'px';
+                    cursor.style.top = (Math.round(y) - 2) + 'px';
                     cursor.style.display = 'block';
                 } catch(e) {}
             },
