@@ -161,7 +161,12 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
         let key = ObjectIdentifier(download)
         retainedDownloads[key] = download
 
-        let cleanName = (suggestedFilename.isEmpty ? (url.lastPathComponent.isEmpty ? "download" : url.lastPathComponent) : suggestedFilename)
+        var initialName = suggestedFilename
+        if initialName.isEmpty || initialName.lowercased() == "unknown" {
+            let last = url.lastPathComponent
+            initialName = (!last.isEmpty && last != "/" && last.lowercased() != "unknown") ? last : "download"
+        }
+        let cleanName = sanitizeFilename(initialName)
         let item = DownloadItem(originalURL: url, suggestedFilename: cleanName, manager: self)
         downloadItems[key] = item
         downloads.insert(item, at: 0)
@@ -186,7 +191,17 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
 
     func download(_ download: WKDownload, decideDestinationUsing response: URLResponse, suggestedFilename: String, completionHandler: @escaping (URL?) -> Void) {
         let key = ObjectIdentifier(download)
-        let safeFilename = sanitizeFilename(suggestedFilename)
+        var chosenName = suggestedFilename
+        if chosenName.isEmpty || chosenName.lowercased() == "unknown" {
+            if let prior = downloadItems[key]?.suggestedFilename, !prior.isEmpty, prior.lowercased() != "unknown" {
+                chosenName = prior
+            } else if let urlName = response.url?.lastPathComponent, !urlName.isEmpty, urlName != "/", urlName.lowercased() != "unknown" {
+                chosenName = urlName
+            } else {
+                chosenName = "download"
+            }
+        }
+        let safeFilename = sanitizeFilename(chosenName)
         
         // Ensure ~/Downloads directory exists
         try? FileManager.default.createDirectory(at: downloadsDirectory, withIntermediateDirectories: true)
@@ -546,14 +561,14 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
     // MARK: - Destination Disambiguation & Sanitization
 
     private func sanitizeFilename(_ filename: String) -> String {
-        let raw = filename.isEmpty ? "download" : filename
+        let raw = (filename.isEmpty || filename.lowercased() == "unknown") ? "download" : filename
         var clean = (raw as NSString).lastPathComponent
             .replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: "\\", with: "_")
             .replacingOccurrences(of: "\0", with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        if clean.isEmpty || clean == "." || clean == ".." || clean.hasPrefix(".") {
-            clean = "download" + (clean.isEmpty ? "" : "_\(clean)")
+        if clean.isEmpty || clean == "." || clean == ".." || clean.hasPrefix(".") || clean.lowercased() == "unknown" {
+            clean = "download" + (clean.isEmpty || clean.lowercased() == "unknown" ? "" : "_\(clean)")
         }
         return clean
     }

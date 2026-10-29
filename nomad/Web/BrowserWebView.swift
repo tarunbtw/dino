@@ -19,12 +19,6 @@ final class BrowserWebView: WKWebView {
     }
 
     override func mouseMoved(with event: NSEvent) {
-        let winPoint = event.locationInWindow
-        let leaf = window?.contentView?.hitTest(winPoint)
-        if let leaf = leaf, leaf !== self {
-            leaf.mouseMoved(with: event)
-            return
-        }
         let sel = NSSelectorFromString("_simulateMouseMove:")
         if responds(to: sel) {
             perform(sel, with: event)

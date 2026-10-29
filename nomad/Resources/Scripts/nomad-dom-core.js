@@ -1653,6 +1653,7 @@
             // 2. Dispatches synthetic and realistic user actions
             performAction: function(actionObj) {
                 try {
+                    var nomad = this || (typeof window !== 'undefined' ? (window.__nomad || window.nomad) : {});
                     var action = (actionObj.action || actionObj.type || '').trim().toLowerCase();
                     var targetId = actionObj.target || actionObj.elementId || actionObj.selector;
                     var el = null;
@@ -2085,34 +2086,7 @@
                         el.dispatchEvent(new elWinH.MouseEvent('mouseenter', eH));
                         el.dispatchEvent(new elWinH.MouseEvent('mousemove', pH));
 
-                        if (nomad.updateVirtualCursor) nomad.updateVirtualCursor(cxH, cyH);
-
-                        // Emulate CSS :hover styles so submenus and tooltips render and are discoverable in snapshots
-                        try {
-                            elDocH.querySelectorAll('[data-nomad-hover]').forEach(function(prev) { prev.removeAttribute('data-nomad-hover'); });
-                            el.setAttribute('data-nomad-hover', 'true');
-                            var sheetH = elDocH.getElementById('nomad-hover-emulation');
-                            if (!sheetH) {
-                                sheetH = elDocH.createElement('style');
-                                sheetH.id = 'nomad-hover-emulation';
-                                (elDocH.head || elDocH.documentElement).appendChild(sheetH);
-                            }
-                            var newRulesH = [];
-                            for (var sH = 0; sH < elDocH.styleSheets.length; sH++) {
-                                try {
-                                    var rList = elDocH.styleSheets[sH].cssRules;
-                                    if (!rList) continue;
-                                    for (var rI = 0; rI < rList.length; rI++) {
-                                        var selH = rList[rI].selectorText;
-                                        if (selH && selH.indexOf(':hover') !== -1) {
-                                            var emulatedH = selH.replace(/:hover/g, '[data-nomad-hover="true"]');
-                                            newRulesH.push(emulatedH + ' { ' + rList[rI].style.cssText + ' }');
-                                        }
-                                    }
-                                } catch(err) {}
-                            }
-                            sheetH.textContent = newRulesH.join('\n');
-                        } catch(cssErr) {}
+                        this.emulateHover(el, cxH, cyH);
 
                         return {
                             success: true,
@@ -2640,6 +2614,103 @@
                 } catch(e) {}
             },
 
+            // Comprehensive CSS :hover & DOM tree emulation for submenus and tooltips
+            emulateHover: function(el, x, y) {
+                if (!el) return;
+                var elDoc = el.ownerDocument || document;
+
+                // 1. Clear previous hover markers
+                try {
+                    elDoc.querySelectorAll('[data-nomad-hover]').forEach(function(prev) {
+                        prev.removeAttribute('data-nomad-hover');
+                    });
+                } catch(e) {}
+
+                // 2. Set [data-nomad-hover="true"] on target and all ancestors up to documentElement
+                var curr = el;
+                while (curr && curr.nodeType === 1 && curr !== elDoc.documentElement) {
+                    try { curr.setAttribute('data-nomad-hover', 'true'); } catch(e) {}
+                    curr = curr.parentElement;
+                }
+
+                // 3. Transparently patch Element.prototype.matches for :hover
+                if (!Element.prototype.__nomad_orig_matches) {
+                    Element.prototype.__nomad_orig_matches = Element.prototype.matches;
+                    Element.prototype.matches = function(sel) {
+                        if (sel === ':hover' || sel === '*:hover') {
+                            return this.hasAttribute('data-nomad-hover') || Element.prototype.__nomad_orig_matches.call(this, sel);
+                        }
+                        return Element.prototype.__nomad_orig_matches.call(this, sel);
+                    };
+                }
+
+                // 4. Transparently patch Document.prototype.querySelector/querySelectorAll for :hover
+                if (!Document.prototype.__nomad_orig_qs) {
+                    Document.prototype.__nomad_orig_qs = Document.prototype.querySelector;
+                    Document.prototype.querySelector = function(sel) {
+                        if (sel === ':hover' || sel === '*:hover') {
+                            return this.querySelector('[data-nomad-hover="true"]') || Document.prototype.__nomad_orig_qs.call(this, sel);
+                        }
+                        return Document.prototype.__nomad_orig_qs.call(this, sel);
+                    };
+                }
+                if (!Document.prototype.__nomad_orig_qsa) {
+                    Document.prototype.__nomad_orig_qsa = Document.prototype.querySelectorAll;
+                    Document.prototype.querySelectorAll = function(sel) {
+                        if (sel === ':hover' || sel === '*:hover') {
+                            var found = this.querySelectorAll('[data-nomad-hover="true"]');
+                            return found.length > 0 ? found : Document.prototype.__nomad_orig_qsa.call(this, sel);
+                        }
+                        return Document.prototype.__nomad_orig_qsa.call(this, sel);
+                    };
+                }
+
+                // 5. Emulate CSS :hover stylesheet rules (including @media and nested blocks)
+                try {
+                    var sheet = elDoc.getElementById('nomad-hover-emulation');
+                    if (!sheet) {
+                        sheet = elDoc.createElement('style');
+                        sheet.id = 'nomad-hover-emulation';
+                        (elDoc.head || elDoc.documentElement).appendChild(sheet);
+                    }
+
+                    function extractHoverRules(rulesList) {
+                        var extracted = [];
+                        if (!rulesList) return extracted;
+                        for (var i = 0; i < rulesList.length; i++) {
+                            var r = rulesList[i];
+                            if (r.selectorText && r.selectorText.indexOf(':hover') !== -1) {
+                                var emulated = r.selectorText.replace(/:hover/g, '[data-nomad-hover="true"]');
+                                extracted.push(emulated + ' { ' + r.style.cssText + ' }');
+                            } else if (r.cssRules) {
+                                var inner = extractHoverRules(r.cssRules);
+                                if (inner.length > 0) {
+                                    if (r.conditionText) {
+                                        extracted.push('@media ' + r.conditionText + ' { ' + inner.join('\n') + ' }');
+                                    } else {
+                                        extracted = extracted.concat(inner);
+                                    }
+                                }
+                            }
+                        }
+                        return extracted;
+                    }
+
+                    var newRules = [];
+                    for (var s = 0; s < elDoc.styleSheets.length; s++) {
+                        try {
+                            newRules = newRules.concat(extractHoverRules(elDoc.styleSheets[s].cssRules));
+                        } catch(err) {}
+                    }
+                    sheet.textContent = newRules.join('\n');
+                } catch(cssErr) {}
+
+                // 6. Update in-app virtual cursor inside viewport
+                if (x !== undefined && y !== undefined) {
+                    this.updateVirtualCursor(x, y);
+                }
+            },
+
             // 4. Overlays indexed visual badges [e1], [e2] and obscures sensitive values for Vision Model Screenshots
             showBadges: function() {
                 this.hideBadges();
@@ -2861,4 +2932,8 @@
                 return res;
             }
         };
+
+        if (typeof window !== 'undefined') {
+            window.nomad = window.__nomad;
+        }
     })();

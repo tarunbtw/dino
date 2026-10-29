@@ -983,36 +983,11 @@ extension Tab {
                         el.dispatchEvent(new elWin.MouseEvent('mouseenter', enterOpts));
                         el.dispatchEvent(new elWin.MouseEvent('mousemove', evOpts));
 
-                        if (window.__nomad && window.__nomad.updateVirtualCursor) {
+                        if (window.__nomad && window.__nomad.emulateHover) {
+                            window.__nomad.emulateHover(el, cx, cy);
+                        } else if (window.__nomad && window.__nomad.updateVirtualCursor) {
                             window.__nomad.updateVirtualCursor(cx, cy);
                         }
-
-                        // CSS :hover state emulation for dropdown menus and tooltips
-                        try {
-                            elDoc.querySelectorAll('[data-nomad-hover]').forEach(function(prev) { prev.removeAttribute('data-nomad-hover'); });
-                            el.setAttribute('data-nomad-hover', 'true');
-                            var sheet = elDoc.getElementById('nomad-hover-emulation');
-                            if (!sheet) {
-                                sheet = elDoc.createElement('style');
-                                sheet.id = 'nomad-hover-emulation';
-                                (elDoc.head || elDoc.documentElement).appendChild(sheet);
-                            }
-                            var newRules = [];
-                            for (var s = 0; s < elDoc.styleSheets.length; s++) {
-                                try {
-                                    var rules = elDoc.styleSheets[s].cssRules;
-                                    if (!rules) continue;
-                                    for (var r = 0; r < rules.length; r++) {
-                                        var sel = rules[r].selectorText;
-                                        if (sel && sel.indexOf(':hover') !== -1) {
-                                            var emulatedSel = sel.replace(/:hover/g, '[data-nomad-hover="true"]');
-                                            newRules.push(emulatedSel + ' { ' + rules[r].style.cssText + ' }');
-                                        }
-                                    }
-                                } catch(err) {}
-                            }
-                            sheet.textContent = newRules.join('\\n');
-                        } catch(cssErr) {}
                     }
                 } catch(e) {}
             })()
