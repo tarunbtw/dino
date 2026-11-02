@@ -114,6 +114,7 @@ struct VerticalSidebarView: View {
                 .padding(.horizontal, isCollapsed ? 6 : 8)
                 .padding(.top, 2)
             }
+            .scrollIndicators(.hidden)
             .coordinateSpace(name: "VerticalSidebarSpace")
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -174,8 +175,6 @@ struct VerticalSidebarView: View {
             .frame(width: sidebarWidth, height: 42)
         } else {
             HStack(spacing: 6) {
-                Spacer()
-
                 // Toggle Sidebar Collapse Button
                 Button(action: {
                     settings.toggleSidebarCollapsed()
@@ -203,6 +202,8 @@ struct VerticalSidebarView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Switch to Top Tab Strip (⌥⌘T)")
+
+                Spacer()
             }
             .padding(.horizontal, 10)
             .frame(height: 42)

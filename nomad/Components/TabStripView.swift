@@ -38,6 +38,7 @@ struct TabStripView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     tabsHStack(computedTabWidth: computedTabWidth)
                 }
+                .scrollIndicators(.hidden)
                 .frame(height: geo.size.height, alignment: .center)
             } else {
                 HStack(spacing: tabSpacing) {

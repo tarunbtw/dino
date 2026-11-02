@@ -84,7 +84,7 @@ struct ExtensionsMenuPopover: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 8)
             } else {
-                ScrollView(.vertical, showsIndicators: true) {
+                ScrollView(.vertical, showsIndicators: false) {
                     VStack(spacing: 2) {
                         ForEach(manager.installed) { ext in
                             ExtensionMenuRow(
@@ -98,6 +98,7 @@ struct ExtensionsMenuPopover: View {
                     .padding(.horizontal, 6)
                     .padding(.vertical, 6)
                 }
+                .scrollIndicators(.hidden)
                 .frame(maxHeight: 260)
             }
 

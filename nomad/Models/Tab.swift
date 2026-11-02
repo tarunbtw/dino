@@ -95,6 +95,31 @@ final class Tab: NSObject, Identifiable, ObservableObject {
     var lastActiveTime: Date = Date()
     var preservedScrollOffset: CGPoint = .zero
 
+    // MARK: - Navigation History Stacks
+    private var historyBackStack: [URL?] = []
+    private var historyForwardStack: [URL?] = []
+
+    func updateNavigationState() {
+        let backAvailable: Bool = {
+            if isInternalPage {
+                return !historyBackStack.isEmpty
+            }
+            return webView.canGoBack || !historyBackStack.isEmpty
+        }()
+        let forwardAvailable: Bool = {
+            if isInternalPage {
+                return !historyForwardStack.isEmpty
+            }
+            return webView.canGoForward || !historyForwardStack.isEmpty
+        }()
+        if self.canGoBack != backAvailable {
+            self.canGoBack = backAvailable
+        }
+        if self.canGoForward != forwardAvailable {
+            self.canGoForward = forwardAvailable
+        }
+    }
+
     // MARK: - Developer Drawer & Live Inspection State
     @Published var isDevDrawerVisible: Bool = false
     @Published var isInspectorActive: Bool = false
@@ -423,12 +448,24 @@ final class Tab: NSObject, Identifiable, ObservableObject {
         self.navigationSeq += 1
         let seq = self.navigationSeq
         self.lastNavigationStartTime = Date()
-        self.url = url
         self.lastNavigationError = nil
+
+        let prev = self.url
+        if prev != url {
+            if let p = prev {
+                historyBackStack.append(p)
+            } else if !isBlank {
+                historyBackStack.append(nil)
+            }
+            historyForwardStack.removeAll()
+        }
+
+        self.url = url
         if url.scheme == "nomad" {
             self.isBlank = false
             self.isLoading = false
             self.title = "Settings"
+            updateNavigationState()
             return
         }
 
@@ -475,6 +512,7 @@ final class Tab: NSObject, Identifiable, ObservableObject {
         }
         recordNavigation(self.currentNavigation, for: seq)
         fetchFavicon(for: url)
+        updateNavigationState()
     }
 
     /// Dynamically switches the web view configuration if navigating to an extension that requires WKWebExtensionContext.webViewConfiguration.
@@ -510,14 +548,116 @@ final class Tab: NSObject, Identifiable, ObservableObject {
     }
 
     func goBack() {
+        if isInternalPage {
+            if let prev = historyBackStack.popLast() {
+                if let cur = self.url {
+                    historyForwardStack.append(cur)
+                }
+                if let target = prev {
+                    if target.scheme == "nomad" {
+                        self.url = target
+                        self.isBlank = false
+                        self.title = "Settings"
+                    } else {
+                        self.url = target
+                        self.isBlank = (target.absoluteString == "about:blank")
+                        if webView.url == target {
+                            self.title = webView.title ?? target.host ?? "New Tab"
+                        } else {
+                            let request = URLRequest(url: target)
+                            self.currentNavigation = webView.load(request)
+                        }
+                    }
+                } else {
+                    self.url = nil
+                    self.isBlank = true
+                    self.title = "New Tab"
+                }
+                updateNavigationState()
+                return
+            }
+        }
+
         if webView.canGoBack {
             webView.goBack()
+            return
+        }
+
+        if let prev = historyBackStack.popLast() {
+            if let cur = self.url {
+                historyForwardStack.append(cur)
+            }
+            if let target = prev {
+                if target.scheme == "nomad" {
+                    self.url = target
+                    self.isBlank = false
+                    self.title = "Settings"
+                } else {
+                    load(url: target)
+                }
+            } else {
+                self.url = nil
+                self.isBlank = true
+                self.title = "New Tab"
+            }
+            updateNavigationState()
         }
     }
 
     func goForward() {
+        if isInternalPage {
+            if let next = historyForwardStack.popLast() {
+                if let cur = self.url {
+                    historyBackStack.append(cur)
+                }
+                if let target = next {
+                    if target.scheme == "nomad" {
+                        self.url = target
+                        self.isBlank = false
+                        self.title = "Settings"
+                    } else {
+                        self.url = target
+                        self.isBlank = (target.absoluteString == "about:blank")
+                        if webView.url == target {
+                            self.title = webView.title ?? target.host ?? "New Tab"
+                        } else {
+                            let request = URLRequest(url: target)
+                            self.currentNavigation = webView.load(request)
+                        }
+                    }
+                } else {
+                    self.url = nil
+                    self.isBlank = true
+                    self.title = "New Tab"
+                }
+                updateNavigationState()
+                return
+            }
+        }
+
         if webView.canGoForward {
             webView.goForward()
+            return
+        }
+
+        if let next = historyForwardStack.popLast() {
+            if let cur = self.url {
+                historyBackStack.append(cur)
+            }
+            if let target = next {
+                if target.scheme == "nomad" {
+                    self.url = target
+                    self.isBlank = false
+                    self.title = "Settings"
+                } else {
+                    load(url: target)
+                }
+            } else {
+                self.url = nil
+                self.isBlank = true
+                self.title = "New Tab"
+            }
+            updateNavigationState()
         }
     }
 
@@ -733,6 +873,7 @@ final class Tab: NSObject, Identifiable, ObservableObject {
                 } else if self.url == nil {
                     self.isBlank = true
                 }
+                self.updateNavigationState()
                 ExtensionManager.shared.tabDidChange(self, properties: [.URL])
             }
         })
@@ -760,19 +901,17 @@ final class Tab: NSObject, Identifiable, ObservableObject {
             }
         })
 
-        observers.append(webView.observe(\.canGoBack, options: [.new]) { [weak self] wv, _ in
+        observers.append(webView.observe(\.canGoBack, options: [.new]) { [weak self] _, _ in
             guard let self else { return }
-            let canBack = wv.canGoBack
             Task { @MainActor [weak self] in
-                self?.canGoBack = canBack
+                self?.updateNavigationState()
             }
         })
 
-        observers.append(webView.observe(\.canGoForward, options: [.new]) { [weak self] wv, _ in
+        observers.append(webView.observe(\.canGoForward, options: [.new]) { [weak self] _, _ in
             guard let self else { return }
-            let canForward = wv.canGoForward
             Task { @MainActor [weak self] in
-                self?.canGoForward = canForward
+                self?.updateNavigationState()
             }
         })
 

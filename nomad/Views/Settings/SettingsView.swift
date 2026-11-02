@@ -65,12 +65,13 @@ struct SettingsView: View {
             // Left Navigation Rail
             sidebarRail
                 .frame(width: 180)
-                .background(Color.primary.opacity(0.02))
 
-            Divider().opacity(0.15)
+            Rectangle()
+                .fill(Color(nsColor: .separatorColor).opacity(0.35))
+                .frame(width: 1)
 
             // Right Main Content
-            ScrollView(.vertical, showsIndicators: true) {
+            ScrollView(.vertical, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 28) {
                     switch selectedSection {
                     case .general:
@@ -90,13 +91,10 @@ struct SettingsView: View {
                 .padding(32)
                 .frame(maxWidth: 680, alignment: .leading)
             }
+            .scrollIndicators(.hidden)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .background(
-            settings.isVibrant
-                ? Color(nsColor: .windowBackgroundColor).opacity(0.4)
-                : Color(nsColor: .windowBackgroundColor)
-        )
+        .background(Color(nsColor: .windowBackgroundColor))
         .preferredColorScheme(settings.colorScheme)
         .tint(settings.accentColor)
         .onAppear {
@@ -162,7 +160,7 @@ struct SettingsView: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+                .strokeBorder(Color(nsColor: .separatorColor).opacity(0.35), lineWidth: 1)
         )
     }
 

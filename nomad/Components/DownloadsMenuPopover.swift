@@ -55,7 +55,7 @@ struct DownloadsMenuPopover: View {
                 }
                 .frame(maxWidth: .infinity)
             } else {
-                ScrollView(.vertical, showsIndicators: true) {
+                ScrollView(.vertical, showsIndicators: false) {
                     VStack(spacing: 4) {
                         ForEach(manager.downloads) { item in
                             DownloadRow(item: item)
@@ -64,6 +64,7 @@ struct DownloadsMenuPopover: View {
                     .padding(.horizontal, 8)
                     .padding(.vertical, 6)
                 }
+                .scrollIndicators(.hidden)
                 .frame(maxHeight: 280)
             }
 
