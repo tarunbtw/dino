@@ -25,21 +25,18 @@ struct TopBarView: View {
             }
         }
         .frame(height: 50)
-        .simultaneousGesture(
-            TapGesture().onEnded {
-                NSApp.keyWindow?.makeFirstResponder(nil)
-            }
-        )
         .background {
             if settings.isVibrant {
                 Color.clear
-            } else if let activeTab = store.activeTab, let themeColor = activeTab.themeColor {
-                themeColor
             } else {
                 Color(nsColor: .windowBackgroundColor)
             }
         }
-        .environment(\.colorScheme, (store.activeTab?.isThemeColorLight == true) ? .light : (settings.colorScheme ?? .dark))
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color(nsColor: .separatorColor).opacity(0.35))
+                .frame(height: 1)
+        }
         .overlay(alignment: .bottom) {
             if let activeTab = store.activeTab {
                 ProgressBarView(tab: activeTab)
@@ -70,6 +67,7 @@ struct TopBarView: View {
                     Button(action: { activeTab.goBack() }) {
                         Image(systemName: "chevron.left")
                             .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Color.primary)
                             .frame(width: 26, height: 26)
                     }
                     .buttonStyle(.plain)
@@ -80,6 +78,7 @@ struct TopBarView: View {
                     Button(action: { activeTab.goForward() }) {
                         Image(systemName: "chevron.right")
                             .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Color.primary)
                             .frame(width: 26, height: 26)
                     }
                     .buttonStyle(.plain)
@@ -92,6 +91,7 @@ struct TopBarView: View {
                     }) {
                         Image(systemName: activeTab.isLoading ? "xmark" : "arrow.clockwise")
                             .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Color.primary)
                             .frame(width: 26, height: 26)
                     }
                     .buttonStyle(.plain)
@@ -130,18 +130,26 @@ struct TopBarView: View {
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
                     .focused($isAddressFieldFocused)
+                    .onChange(of: addressText) { _, newText in
+                        store.omniboxText = newText
+                    }
                     .onSubmit {
                         let trimmed = addressText.trimmingCharacters(in: .whitespacesAndNewlines)
                         if !trimmed.isEmpty {
                             tab.load(text: trimmed)
                         }
                         isEditingAddress = false
+                        store.isOmniboxEditing = false
                     }
                     .onExitCommand {
                         isEditingAddress = false
+                        store.isOmniboxEditing = false
                     }
 
-                Button(action: { isEditingAddress = false }) {
+                Button(action: {
+                    isEditingAddress = false
+                    store.isOmniboxEditing = false
+                }) {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 11))
                         .foregroundStyle(.tertiary)
@@ -166,7 +174,9 @@ struct TopBarView: View {
                 .contentShape(Rectangle())
                 .onTapGesture {
                     addressText = tab.url?.absoluteString ?? ""
+                    store.omniboxText = addressText
                     isEditingAddress = true
+                    store.isOmniboxEditing = true
                     DispatchQueue.main.async {
                         isAddressFieldFocused = true
                     }
@@ -182,25 +192,18 @@ struct TopBarView: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .strokeBorder(isEditingAddress ? settings.accentColor.opacity(0.4) : Color.primary.opacity(0.04), lineWidth: 1)
         )
-        .overlay(alignment: .topLeading) {
-            if isEditingAddress && !addressText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                OmniboxSuggestionsView(query: addressText, width: 520) { selectedURL in
-                    tab.load(url: selectedURL)
-                    isEditingAddress = false
-                }
-                .offset(y: 34)
-                .zIndex(300)
-            }
-        }
         .onChange(of: isAddressFieldFocused) { _, focused in
             if !focused && isEditingAddress {
                 isEditingAddress = false
+                store.isOmniboxEditing = false
             }
         }
         .onChange(of: store.isAddressBarFocused) { _, focused in
             if focused {
                 addressText = tab.url?.absoluteString ?? ""
+                store.omniboxText = addressText
                 isEditingAddress = true
+                store.isOmniboxEditing = true
                 store.isAddressBarFocused = false
                 DispatchQueue.main.async {
                     isAddressFieldFocused = true

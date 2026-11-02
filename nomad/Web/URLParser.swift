@@ -24,7 +24,7 @@ enum URLParser {
         let lower = trimmed.lowercased()
 
         // Direct internal schemes (nomad://settings, redirects nomad://tune to settings)
-        if lower == "settings" || lower == "nomad://settings" || lower == "tune" || lower == "nomad://tune" {
+        if lower.hasPrefix("nomad://") || lower.hasPrefix("nomad:") || lower == "settings" || lower == "tune" {
             return URL(string: "nomad://settings")!
         }
 

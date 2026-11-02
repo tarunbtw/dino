@@ -223,7 +223,7 @@ final class SettingsStore: ObservableObject {
     }
 
     var accentColor: Color {
-        .primary
+        Color.accentColor
     }
 
     var customBgColor: Color {

@@ -42,6 +42,17 @@ struct OmniboxSuggestionsView: View {
         var results: [OmniboxSuggestionItem] = []
         var seenURLs = Set<String>()
 
+        // 0. Internal nomad:// pages
+        if lower.hasPrefix("nomad") || lower.contains("setting") {
+            results.append(OmniboxSuggestionItem(
+                kind: .bookmark,
+                title: "Settings",
+                subtitle: "nomad://settings",
+                url: URL(string: "nomad://settings")!
+            ))
+            seenURLs.insert("nomad://settings")
+        }
+
         // 1. Matching Bookmarks
         for bm in settings.bookmarks {
             if bm.title.localizedCaseInsensitiveContains(lower) || bm.url.localizedCaseInsensitiveContains(lower) {
@@ -77,16 +88,18 @@ struct OmniboxSuggestionsView: View {
             }
         }
 
-        // 3. Search Engine Fallback suggestion
-        let searchBase = settings.searchEngineBaseURL
-        let encoded = URLParser.encodeQueryComponent(trimmed)
-        if let searchURL = URL(string: "\(searchBase)\(encoded)") {
-            results.append(OmniboxSuggestionItem(
-                kind: .search,
-                title: "Search for \"\(trimmed)\"",
-                subtitle: settings.searchEngineName,
-                url: searchURL
-            ))
+        // 3. Search Engine Fallback suggestion (never search for internal nomad:// schemes)
+        if !lower.hasPrefix("nomad:") && !lower.hasPrefix("nomad://") {
+            let searchBase = settings.searchEngineBaseURL
+            let encoded = URLParser.encodeQueryComponent(trimmed)
+            if let searchURL = URL(string: "\(searchBase)\(encoded)") {
+                results.append(OmniboxSuggestionItem(
+                    kind: .search,
+                    title: "Search for \"\(trimmed)\"",
+                    subtitle: settings.searchEngineName,
+                    url: searchURL
+                ))
+            }
         }
 
         return results

@@ -63,6 +63,8 @@ final class BrowserStore: ObservableObject {
     @Published var tabs: [Tab] = []
     @Published var activeTabId: UUID?
     @Published var isAddressBarFocused: Bool = false
+    @Published var isOmniboxEditing: Bool = false
+    @Published var omniboxText: String = ""
     @Published var splitPairs: [SplitPair] = []
     @Published var spaces: [Space] = Space.defaultSpaces
     @Published var activeSpaceId: UUID = Space.defaultFirstID

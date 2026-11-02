@@ -61,6 +61,19 @@ struct BrowserView: View {
                 .transition(.opacity.combined(with: .scale(scale: 0.98)))
                 .zIndex(300)
             }
+
+            // Floating Suggestions Dropdown for top bar Omnibox (rendered at root window level above all webviews)
+            if store.isOmniboxEditing && !store.omniboxText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                let sidebarOffset: CGFloat = settings.isVerticalTabs ? (settings.isSidebarCollapsed ? 68 : CGFloat(settings.sidebarWidth)) : 0
+                OmniboxSuggestionsView(query: store.omniboxText, width: 520) { selectedURL in
+                    store.activeTab?.load(url: selectedURL)
+                    store.isOmniboxEditing = false
+                }
+                .padding(.leading, sidebarOffset + 92)
+                .padding(.top, 42)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .zIndex(250)
+            }
         }
         .background {
             if settings.isVibrant {

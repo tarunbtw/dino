@@ -23,7 +23,7 @@ struct VerticalSidebarView: View {
     @State private var isSettling: Bool = false
     private let tabRowHeight: CGFloat = 28
     private let tabRowSpacing: CGFloat = 2
-    private var tabStep: CGFloat { tabRowHeight + tabRowSpacing }
+    private var tabStep: CGFloat { isCollapsed ? (34 + tabRowSpacing) : (tabRowHeight + tabRowSpacing) }
 
     private var isCollapsed: Bool { settings.isSidebarCollapsed }
     private var sidebarWidth: CGFloat { isCollapsed ? 68 : CGFloat(settings.sidebarWidth) }
@@ -32,7 +32,7 @@ struct VerticalSidebarView: View {
         VStack(spacing: 0) {
             // Header: Traffic lights safe area + collapse toggle
             headerSection
-                .frame(height: isCollapsed ? 86 : 48)
+                .frame(height: isCollapsed ? 88 : 48)
 
             // Spaces Switcher Bar
             spacesBarSection
@@ -79,10 +79,17 @@ struct VerticalSidebarView: View {
                     Button(action: {
                         store.newTab(url: nil, select: true)
                     }) {
-                        HStack(spacing: 6) {
+                        if isCollapsed {
                             Image(systemName: "plus")
-                                .font(.system(size: 11, weight: .semibold))
-                            if !isCollapsed {
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(Color.primary)
+                                .frame(width: 34, height: 34)
+                                .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                .contentShape(Rectangle())
+                        } else {
+                            HStack(spacing: 6) {
+                                Image(systemName: "plus")
+                                    .font(.system(size: 11, weight: .semibold))
                                 Text("New Tab")
                                     .font(.system(size: 11, weight: .medium))
                                 Spacer()
@@ -90,13 +97,13 @@ struct VerticalSidebarView: View {
                                     .font(.system(size: 10))
                                     .foregroundStyle(.tertiary)
                             }
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 8)
+                            .frame(height: 28)
+                            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                            .contentShape(Rectangle())
                         }
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: isCollapsed ? .center : .leading)
-                        .padding(.horizontal, isCollapsed ? 0 : 8)
-                        .frame(height: 28)
-                        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .help("New Tab (⌘T)")
@@ -110,9 +117,9 @@ struct VerticalSidebarView: View {
             Divider()
                 .padding(.horizontal, 10)
 
-            // Footer Section (+ New Tab, Toggle Layout)
+            // Footer Section (Settings)
             footerSection
-                .frame(height: 40)
+                .frame(height: 44)
                 .padding(.horizontal, isCollapsed ? 6 : 10)
         }
         .frame(width: sidebarWidth)
@@ -131,6 +138,11 @@ struct VerticalSidebarView: View {
             }
         }
         .overlay(alignment: .trailing) {
+            Rectangle()
+                .fill(Color(nsColor: .separatorColor).opacity(0.35))
+                .frame(width: 1)
+        }
+        .overlay(alignment: .trailing) {
             if !isCollapsed {
                 sidebarResizeHandle
             }
@@ -144,20 +156,20 @@ struct VerticalSidebarView: View {
     @ViewBuilder
     private var headerSection: some View {
         if isCollapsed {
-            VStack(spacing: 6) {
-                // Window drag area to protect traffic lights (height 48pt)
+            VStack(spacing: 8) {
+                // Window drag area to protect traffic lights (height 44pt)
                 WindowDragArea()
-                    .frame(width: 68, height: 48)
+                    .frame(width: 68, height: 44)
 
                 // Expand button placed cleanly below traffic lights safe area
                 Button(action: {
                     settings.toggleSidebarCollapsed()
                 }) {
                     Image(systemName: "sidebar.left")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 32, height: 28)
-                        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Color.primary)
+                        .frame(width: 34, height: 34)
+                        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -289,7 +301,7 @@ struct VerticalSidebarView: View {
         if isCollapsed {
             VStack(spacing: 4) {
                 ForEach(pinned) { tab in
-                    pinnedSquare(tab: tab, size: 28)
+                    pinnedSquare(tab: tab, size: 34)
                 }
             }
         } else {
@@ -306,11 +318,11 @@ struct VerticalSidebarView: View {
         let isFocused = tab.id == store.activeTabId
         Button(action: { store.selectTab(id: tab.id) }) {
             ZStack {
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(isFocused ? Color.primary.opacity(0.10) : Color.primary.opacity(0.04))
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(isFocused ? Color.primary.opacity(0.12) : Color.primary.opacity(0.04))
 
                 if isFocused {
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .strokeBorder(settings.accentColor.opacity(0.5), lineWidth: 1)
                 }
 
@@ -345,10 +357,17 @@ struct VerticalSidebarView: View {
     @ViewBuilder
     private var footerSection: some View {
         Button(action: { store.openSettings() }) {
-            HStack(spacing: 6) {
+            if isCollapsed {
                 Image(systemName: "gearshape")
-                    .font(.system(size: 11, weight: .medium))
-                if !isCollapsed {
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Color.primary)
+                    .frame(width: 34, height: 34)
+                    .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .contentShape(Rectangle())
+            } else {
+                HStack(spacing: 6) {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 11, weight: .medium))
                     Text("Settings")
                         .font(.system(size: 11, weight: .medium))
                     Spacer()
@@ -356,13 +375,13 @@ struct VerticalSidebarView: View {
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
                 }
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 8)
+                .frame(height: 28)
+                .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .contentShape(Rectangle())
             }
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: isCollapsed ? .center : .leading)
-            .padding(.horizontal, isCollapsed ? 0 : 8)
-            .frame(height: 28)
-            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .help("Settings (⌘,)")
@@ -523,26 +542,43 @@ private struct VerticalTabRowView: View {
     @State private var lastClickTime: TimeInterval = 0
 
     var body: some View {
-        HStack(spacing: 8) {
-            // Tab Favicon / Indicator
-            tabIconView
-                .frame(width: 16, height: 16)
+        Group {
+            if isCollapsed {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(isActive ? Color.primary.opacity(0.12) : (isHovered ? Color.primary.opacity(0.05) : Color.clear))
 
-            if !isCollapsed {
-                expandedContent
+                    if isActive {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(Color.accentColor.opacity(0.5), lineWidth: 1)
+                    }
+
+                    tabIconView
+                        .frame(width: 16, height: 16)
+                }
+                .frame(width: 34, height: 34)
+                .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            } else {
+                HStack(spacing: 8) {
+                    // Tab Favicon / Indicator
+                    tabIconView
+                        .frame(width: 16, height: 16)
+
+                    expandedContent
+                }
+                .padding(.horizontal, 8)
+                .frame(height: 28)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(isActive ? Color.primary.opacity(0.08) : (isHovered ? Color.primary.opacity(0.04) : Color.clear))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .strokeBorder(isActive ? Color.primary.opacity(0.06) : Color.clear, lineWidth: 1)
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
             }
         }
-        .padding(.horizontal, isCollapsed ? 6 : 8)
-        .frame(height: 28)
-        .background(
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(isActive ? Color.primary.opacity(0.08) : (isHovered ? Color.primary.opacity(0.04) : Color.clear))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .strokeBorder(isActive ? Color.primary.opacity(0.06) : Color.clear, lineWidth: 1)
-        )
-        .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         .onTapGesture {
             let now = ProcessInfo.processInfo.systemUptime
             if now - lastClickTime < 0.35 {

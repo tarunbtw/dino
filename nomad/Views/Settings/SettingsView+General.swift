@@ -174,7 +174,7 @@ extension SettingsView {
                                 updater.relaunch()
                             }
                             .buttonStyle(.borderedProminent)
-                            .tint(settings.accentColor)
+                            .tint(Color.green)
                             .controlSize(.small)
                         case .waiting:
                             Button("Install Update") {
