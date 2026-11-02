@@ -42,20 +42,6 @@ extension SettingsView {
                 }
             }
 
-            // Window Vibrancy / Acrylic Glass
-            card(title: "Translucent Vibrancy") {
-                Toggle(isOn: $settings.isVibrant) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Enable Window Blur & Transparency")
-                            .font(.system(size: 13, weight: .medium))
-                        Text("Applies native behind-window acrylic glass blur across the window canvas")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .toggleStyle(.switch)
-            }
-
             // Default Search Engine
             card(title: "Default Search Engine") {
                 HStack {

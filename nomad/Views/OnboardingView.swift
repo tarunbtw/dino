@@ -19,15 +19,8 @@ struct OnboardingView: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            // Background Canvas (supports vibrant translucency or solid window background)
-            Group {
-                if settings.isVibrant {
-                    VisualEffectView(material: .underWindowBackground, blendingMode: .behindWindow)
-                } else {
-                    Color(nsColor: .windowBackgroundColor)
-                }
-            }
-            .ignoresSafeArea()
+            Color(nsColor: .windowBackgroundColor)
+                .ignoresSafeArea()
 
             VStack(spacing: 0) {
                 // Top drag region preserving native window dragging & traffic lights alignment

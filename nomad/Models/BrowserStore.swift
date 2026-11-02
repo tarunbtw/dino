@@ -148,7 +148,8 @@ final class BrowserStore: ObservableObject {
         
         tab.onOpenURLInNewTab = { [weak self, weak tab] targetURL in
             guard let self else { return }
-            let isIncog = tab?.isIncognito ?? false
+            let isIncog = (tab?.wantsNextNewTabIncognito == true) || (tab?.isIncognito ?? false)
+            tab?.wantsNextNewTabIncognito = false
             if tab?.wantsNextNewTabInSplit == true {
                 tab?.wantsNextNewTabInSplit = false
                 let newCreated = self.newTab(url: targetURL, isIncognito: isIncog, select: true)
@@ -163,7 +164,8 @@ final class BrowserStore: ObservableObject {
         tab.onOpenTabWithWebView = { [weak self, weak tab] config, action in
             guard let self else { return nil }
             let targetURL = action.request.url
-            let isIncog = tab?.isIncognito ?? false
+            let isIncog = (tab?.wantsNextNewTabIncognito == true) || (tab?.isIncognito ?? false)
+            tab?.wantsNextNewTabIncognito = false
             let newCreated = self.newTab(url: targetURL, configuration: config, isIncognito: isIncog, select: true)
             if tab?.wantsNextNewTabInSplit == true {
                 tab?.wantsNextNewTabInSplit = false
@@ -177,6 +179,15 @@ final class BrowserStore: ObservableObject {
         tab.onRequestCloseTab = { [weak self, weak tab] in
             guard let self, let tab else { return }
             self.closeTab(id: tab.id)
+        }
+
+        tab.onRequestNewTab = { [weak self] url in
+            self?.newTab(url: url, select: true)
+        }
+
+        tab.onRequestDuplicateTab = { [weak self, weak tab] in
+            guard let self, let tab else { return }
+            self.newTab(url: tab.url, isIncognito: tab.isIncognito, select: true)
         }
 
         tab.onDidFocus = { [weak self, weak tab] in

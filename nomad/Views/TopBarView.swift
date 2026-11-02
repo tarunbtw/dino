@@ -25,13 +25,7 @@ struct TopBarView: View {
             }
         }
         .frame(height: 50)
-        .background {
-            if settings.isVibrant {
-                Color.clear
-            } else {
-                Color(nsColor: .windowBackgroundColor)
-            }
-        }
+        .background(Color(nsColor: .windowBackgroundColor))
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(Color(nsColor: .separatorColor).opacity(0.35))

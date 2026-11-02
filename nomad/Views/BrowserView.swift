@@ -74,15 +74,7 @@ struct BrowserView: View {
                 .zIndex(250)
             }
         }
-        .background {
-            if settings.isVibrant {
-                VisualEffectView(material: .underWindowBackground, blendingMode: .behindWindow)
-                    .ignoresSafeArea()
-            } else {
-                Color(nsColor: .windowBackgroundColor)
-                    .ignoresSafeArea()
-            }
-        }
+        .background(Color(nsColor: .windowBackgroundColor).ignoresSafeArea())
         .preferredColorScheme(settings.colorScheme)
         .tint(settings.accentColor)
         .onExitCommand {
@@ -661,13 +653,8 @@ private struct EmptyStateView: View {
         .allowsHitTesting(false)
     }
 
-    @ViewBuilder
     private var themeSolidBackground: some View {
-        if settings.isVibrant {
-            Color(nsColor: .windowBackgroundColor).opacity(0.15)
-        } else {
-            Color(nsColor: .windowBackgroundColor)
-        }
+        Color(nsColor: .windowBackgroundColor)
     }
 
     private func submit() {
@@ -679,28 +666,6 @@ private struct EmptyStateView: View {
         } else {
             tab.load(text: trimmed)
         }
-    }
-}
-
-// MARK: - AppKit Window Vibrancy & Visual Effects
-
-/// Native AppKit visual effect view providing blurred vibrancy behind windows.
-struct VisualEffectView: NSViewRepresentable {
-    var material: NSVisualEffectView.Material = .underWindowBackground
-    var blendingMode: NSVisualEffectView.BlendingMode = .behindWindow
-
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let effectView = NSVisualEffectView()
-        effectView.material = material
-        effectView.blendingMode = blendingMode
-        effectView.state = .active
-        return effectView
-    }
-
-    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
-        nsView.material = material
-        nsView.blendingMode = blendingMode
-        nsView.state = .active
     }
 }
 

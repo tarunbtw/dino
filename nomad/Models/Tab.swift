@@ -127,6 +127,7 @@ final class Tab: NSObject, Identifiable, ObservableObject {
     @Published var isReaderModeActive: Bool = false
     @Published var isFloatingVideo: Bool = false
     @Published var wantsNextNewTabInSplit: Bool = false
+    @Published var wantsNextNewTabIncognito: Bool = false
     @Published var isPinned: Bool = false
     @Published var spaceId: UUID? = nil
     @Published var hoveredLink: String? = nil
@@ -266,6 +267,12 @@ final class Tab: NSObject, Identifiable, ObservableObject {
 
     /// Hook to close this tab if it was opened solely for an immediate file download
     var onRequestCloseTab: (() -> Void)?
+
+    /// Hook to request opening a new tab
+    var onRequestNewTab: ((URL?) -> Void)?
+
+    /// Hook to request duplicating this tab
+    var onRequestDuplicateTab: (() -> Void)?
 
     /// Hook called when this tab receives user interaction / focus
     var onDidFocus: (() -> Void)?

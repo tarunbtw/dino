@@ -95,10 +95,6 @@ final class SettingsStore: ObservableObject {
         }
     }
 
-    @AppStorage("nomad.windowVibrancy") var isVibrant: Bool = false {
-        didSet { objectWillChange.send() }
-    }
-
     @AppStorage("nomad.backgroundStyle") var backgroundStyle: String = "default" {
         didSet { objectWillChange.send() }
     }

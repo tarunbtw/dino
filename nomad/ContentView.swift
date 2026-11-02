@@ -34,7 +34,7 @@ private struct BrowserMainView: View {
             }
         }
         .frame(minWidth: 640, minHeight: 420)
-        .background(WindowConfigurator(isVibrant: settings.isVibrant))
+        .background(WindowConfigurator())
         .preferredColorScheme(settings.colorScheme)
         .tint(settings.accentColor)
         .onAppear {
@@ -44,27 +44,15 @@ private struct BrowserMainView: View {
 }
 
 /// Permanently disables automatic window dragging so tabs can be dragged freely without moving the window,
-/// and synchronizes window transparency / vibrancy.
+/// and ensures window is always solid and non-translucent.
 private struct WindowConfigurator: NSViewRepresentable {
-    let isVibrant: Bool
-
     func makeNSView(context: Context) -> ConfigNSView {
-        let view = ConfigNSView()
-        view.isVibrant = isVibrant
-        return view
+        ConfigNSView()
     }
 
-    func updateNSView(_ nsView: ConfigNSView, context: Context) {
-        if nsView.isVibrant != isVibrant {
-            nsView.isVibrant = isVibrant
-        }
-    }
+    func updateNSView(_ nsView: ConfigNSView, context: Context) {}
 
     final class ConfigNSView: NSView {
-        var isVibrant: Bool = false {
-            didSet { apply() }
-        }
-
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             apply()
@@ -76,13 +64,8 @@ private struct WindowConfigurator: NSViewRepresentable {
             window.isMovableByWindowBackground = false
             window.titlebarAppearsTransparent = true
             window.titleVisibility = .hidden
-            if isVibrant {
-                window.isOpaque = false
-                window.backgroundColor = .clear
-            } else {
-                window.isOpaque = true
-                window.backgroundColor = .windowBackgroundColor
-            }
+            window.isOpaque = true
+            window.backgroundColor = .windowBackgroundColor
             window.invalidateShadow()
             SettingsStore.shared.applyTheme()
         }

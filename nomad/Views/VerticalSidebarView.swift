@@ -132,15 +132,7 @@ struct VerticalSidebarView: View {
                 NSApp.keyWindow?.makeFirstResponder(nil)
             }
         )
-        .background {
-            if settings.isVibrant {
-                VisualEffectView(material: .sidebar, blendingMode: .behindWindow)
-                    .ignoresSafeArea()
-            } else {
-                Color(nsColor: .windowBackgroundColor)
-                    .ignoresSafeArea()
-            }
-        }
+        .background(Color(nsColor: .windowBackgroundColor).ignoresSafeArea())
         .overlay(alignment: .trailing) {
             Rectangle()
                 .fill(Color(nsColor: .separatorColor).opacity(0.35))
