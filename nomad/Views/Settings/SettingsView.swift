@@ -40,6 +40,7 @@ struct SettingsView: View {
 
     enum Section: String, CaseIterable, Identifiable {
         case general = "General"
+        case passwords = "Passwords"
         case history = "History"
         case bookmarks = "Bookmarks"
         case downloads = "Downloads"
@@ -50,6 +51,7 @@ struct SettingsView: View {
         var icon: String {
             switch self {
             case .general: return "gearshape"
+            case .passwords: return "key.fill"
             case .history: return "clock.arrow.circlepath"
             case .bookmarks: return "bookmark"
             case .downloads: return "arrow.down.circle"
@@ -73,6 +75,8 @@ struct SettingsView: View {
                     switch selectedSection {
                     case .general:
                         generalSection
+                    case .passwords:
+                        passwordsSection
                     case .history:
                         historySection
                     case .bookmarks:

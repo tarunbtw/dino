@@ -263,4 +263,50 @@ enum TabScripts {
         };
     })();
     """
+
+    // MARK: - Native Link Peek Hover & Credential Autofill Hook
+    static let linkHoverAndAutofillScript = """
+    (function() {
+        if (window.__nomad_link_hover_active) return;
+        window.__nomad_link_hover_active = true;
+
+        document.addEventListener('mouseover', function(e) {
+            const a = e.target && e.target.closest ? e.target.closest('a') : null;
+            if (a && a.href && window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.nomadLinkHover) {
+                window.webkit.messageHandlers.nomadLinkHover.postMessage({ url: a.href });
+            }
+        }, true);
+
+        document.addEventListener('mouseout', function(e) {
+            const a = e.target && e.target.closest ? e.target.closest('a') : null;
+            if (a && window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.nomadLinkHover) {
+                window.webkit.messageHandlers.nomadLinkHover.postMessage({ url: null });
+            }
+        }, true);
+
+        document.addEventListener('submit', function(e) {
+            const form = e.target;
+            if (!form || !form.elements) return;
+            let username = '';
+            let password = '';
+            for (let i = 0; i < form.elements.length; i++) {
+                const el = form.elements[i];
+                if (!el || !el.name) continue;
+                if (el.type === 'password' && el.value) {
+                    password = el.value;
+                } else if ((el.type === 'text' || el.type === 'email') && (el.name.includes('user') || el.name.includes('email') || el.name.includes('login') || el.autocomplete === 'username') && el.value) {
+                    username = el.value;
+                }
+            }
+            if (username && password && location.protocol === 'https:' && window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.nomadAutofill) {
+                window.webkit.messageHandlers.nomadAutofill.postMessage({
+                    action: 'save',
+                    host: location.host,
+                    user: username,
+                    secret: password
+                });
+            }
+        }, true);
+    })();
+    """
 }

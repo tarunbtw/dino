@@ -168,6 +168,22 @@ struct NavigationControls: View {
             .buttonStyle(.plain)
             .help("Settings (nomad://settings, ⌘,)")
 
+            Button(action: {
+                settings.toggleTabLayout()
+            }) {
+                Image(systemName: settings.isVerticalTabs ? "rectangle.topthird.inset.filled" : "sidebar.left")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(settings.isVerticalTabs ? Color.primary : Color.secondary)
+                    .frame(width: 24, height: 24)
+                    .background(
+                        settings.isVerticalTabs ? Color.primary.opacity(0.08) : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    )
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(settings.isVerticalTabs ? "Switch to Top Tab Strip (⌥⌘T)" : "Switch to Vertical Sidebar (⌥⌘T)")
+
             if case .ready(let release) = updater.stage {
                 Button(action: { updater.relaunch() }) {
                     HStack(spacing: 4) {

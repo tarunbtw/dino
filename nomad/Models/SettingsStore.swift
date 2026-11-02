@@ -129,6 +129,35 @@ final class SettingsStore: ObservableObject {
         didSet { objectWillChange.send() }
     }
 
+    // MARK: - Tab Layout & Sidebar Preferences
+    @AppStorage("nomad.tabLayout") var tabLayout: String = "top" { // "top" or "vertical"
+        didSet { objectWillChange.send() }
+    }
+
+    @AppStorage("nomad.isSidebarCollapsed") var isSidebarCollapsed: Bool = false {
+        didSet { objectWillChange.send() }
+    }
+
+    @AppStorage("nomad.sidebarWidth") var sidebarWidth: Double = 220 {
+        didSet { objectWillChange.send() }
+    }
+
+    var isVerticalTabs: Bool {
+        tabLayout == "vertical"
+    }
+
+    func toggleTabLayout() {
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) {
+            tabLayout = (tabLayout == "vertical") ? "top" : "vertical"
+        }
+    }
+
+    func toggleSidebarCollapsed() {
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.88)) {
+            isSidebarCollapsed.toggle()
+        }
+    }
+
     // MARK: - Navigation State
     @AppStorage("nomad.settings.activeSection") var activeSection: String = "General" {
         didSet { objectWillChange.send() }

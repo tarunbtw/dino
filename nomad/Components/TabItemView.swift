@@ -86,15 +86,7 @@ struct TabItemView: View {
                         // Standard & Medium width mode
                         HStack(spacing: 6) {
                             tabIconView
-
-                            if tabWidth >= 70 {
-                                Text(displayTitle)
-                                    .font(.system(size: 11, weight: isActive ? .medium : .regular))
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
-                                    .foregroundStyle(isActive ? .primary : .secondary)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
+                            tabTitleView
                         }
                         .padding(.leading, 8)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: tabWidth < 70 ? .center : .leading)
@@ -156,6 +148,40 @@ struct TabItemView: View {
             }
             lastClickTime = now
         }
+        .contextMenu {
+            if let split = store.splitPairs.first(where: { $0.contains(tab.id) }) {
+                Button("Swap Split Panes") {
+                    store.swapSplit(splitPairId: split.id)
+                }
+                Button("Close Split View") {
+                    store.closeSplit(for: tab.id)
+                }
+            } else {
+                Button("Split with New Tab") {
+                    store.splitCurrentTab()
+                }
+            }
+            Divider()
+            Button(tab.isPinned ? "Unpin Tab" : "Pin Tab") {
+                store.togglePin(tabId: tab.id)
+            }
+            Button("Reload") {
+                tab.reload()
+            }
+            Button("Duplicate Tab") {
+                store.newTab(url: tab.url, isIncognito: tab.isIncognito, select: true)
+            }
+            Button("Close Other Tabs") {
+                let others = store.tabs.filter { $0.id != tab.id }
+                for other in others {
+                    store.closeTab(id: other.id)
+                }
+            }
+            Divider()
+            Button("Close Tab") {
+                store.closeTab(id: tab.id)
+            }
+        }
 
         .overlay(alignment: .topLeading) {
             if isEditing && !editText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -181,6 +207,28 @@ struct TabItemView: View {
             if focused && isActive && !tab.isBlank {
                 startEditing()
                 store.isAddressBarFocused = false
+            }
+        }
+    }
+
+    private var isTabSplit: Bool {
+        store.splitPairs.contains { $0.contains(tab.id) }
+    }
+
+    @ViewBuilder
+    private var tabTitleView: some View {
+        if tabWidth >= 70 {
+            Text(displayTitle)
+                .font(.system(size: 11, weight: isActive ? .medium : .regular))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .foregroundStyle(isActive ? .primary : .secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            if isTabSplit {
+                Image(systemName: "square.split.2x1")
+                    .font(.system(size: 8.5))
+                    .foregroundStyle(isActive ? .primary : .secondary)
             }
         }
     }

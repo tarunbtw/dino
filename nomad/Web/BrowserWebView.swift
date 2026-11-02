@@ -27,6 +27,11 @@ final class BrowserWebView: WKWebView {
         }
     }
 
+    override func mouseDown(with event: NSEvent) {
+        tab?.onDidFocus?()
+        super.mouseDown(with: event)
+    }
+
     private var swipeAccumulatedX: CGFloat = 0
     private var isTrackingSwipe = false
     private var swipeDirection: Tab.SwipeDirection? = nil
@@ -135,5 +140,32 @@ final class BrowserWebView: WKWebView {
         }
 
         super.scrollWheel(with: event)
+    }
+
+    // MARK: - Native Context Menu Customization
+    private var openLinkAction: Selector?
+    private weak var openLinkTarget: AnyObject?
+
+    override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
+        super.willOpenMenu(menu, with: event)
+        if let index = menu.items.firstIndex(where: { $0.identifier?.rawValue == "WKMenuItemIdentifierOpenLinkInNewWindow" }) {
+            let item = menu.items[index]
+            self.openLinkAction = item.action
+            self.openLinkTarget = item.target
+
+            if let splitItem = item.copy() as? NSMenuItem {
+                splitItem.title = "Open Link in Split View"
+                splitItem.identifier = NSUserInterfaceItemIdentifier("NomadOpenLinkInSplitView")
+                splitItem.target = self
+                splitItem.action = #selector(openLinkInSplitViewAction(_:))
+                menu.insertItem(splitItem, at: index + 1)
+            }
+        }
+    }
+
+    @objc private func openLinkInSplitViewAction(_ sender: Any?) {
+        guard let action = openLinkAction else { return }
+        tab?.wantsNextNewTabInSplit = true
+        NSApp.sendAction(action, to: openLinkTarget, from: sender)
     }
 }

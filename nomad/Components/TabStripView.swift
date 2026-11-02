@@ -25,10 +25,12 @@ struct TabStripView: View {
     var body: some View {
         GeometryReader { geo in
             let availableWidth = geo.size.width
-            let count = max(1, store.tabs.count)
-            let totalSpacing = CGFloat(count) * tabSpacing
-            let availableForTabs = max(minTabWidth, availableWidth - plusButtonWidth - totalSpacing - 8)
-            let naturalWidth = availableForTabs / CGFloat(count)
+            let pinnedCount = store.tabs.filter { $0.isPinned }.count
+            let unpinnedCount = max(1, store.tabs.count - pinnedCount)
+            let pinnedWidth = CGFloat(pinnedCount) * (34.0 + tabSpacing)
+            let totalSpacing = CGFloat(store.tabs.count) * tabSpacing
+            let availableForTabs = max(minTabWidth, availableWidth - plusButtonWidth - pinnedWidth - totalSpacing - 8)
+            let naturalWidth = availableForTabs / CGFloat(unpinnedCount)
             let computedTabWidth = max(minTabWidth, min(maxTabWidth, naturalWidth))
             let needsScroll = naturalWidth < minTabWidth
 
@@ -58,6 +60,7 @@ struct TabStripView: View {
         HStack(spacing: tabSpacing) {
             ForEach(Array(store.tabs.enumerated()), id: \.element.id) { index, tab in
                 let isDragging = draggingTabId == tab.id
+                let tabW: CGFloat = tab.isPinned ? 34.0 : computedTabWidth
                 let offset = tabOffset(for: tab, index: index, step: step)
 
                 TabItemView(
@@ -65,7 +68,7 @@ struct TabStripView: View {
                     tab: tab,
                     isActive: tab.id == store.activeTabId,
                     isDragging: isDragging,
-                    tabWidth: computedTabWidth,
+                    tabWidth: tabW,
                     index: index,
                     count: count,
                     step: step,

@@ -120,6 +120,16 @@ extension Tab: WKScriptMessageHandler {
                     self.webView.evaluateJavaScript(updateScript, completionHandler: nil)
                 }
             }
+        } else if name == "nomadLinkHover", let dict = body as? [String: Any] {
+            self.hoveredLink = dict["url"] as? String
+        } else if name == "nomadAutofill", let dict = body as? [String: Any] {
+            let action = dict["action"] as? String ?? ""
+            if action == "save",
+               let host = dict["host"] as? String,
+               let user = dict["user"] as? String,
+               let secret = dict["secret"] as? String {
+                KeychainVault.shared.save(host: host, user: user, secret: secret)
+            }
         }
     }
 

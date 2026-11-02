@@ -16,24 +16,39 @@ struct BrowserView: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            VStack(spacing: 0) {
-                // Top browser chrome (includes bottom progress bar overlay)
-                TopBarView(store: store, settings: settings)
-                    .frame(height: 50)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .layoutPriority(1)
-                    .zIndex(100)
+            HStack(spacing: 0) {
+                if settings.isVerticalTabs {
+                    VerticalSidebarView(store: store, settings: settings)
+                        .zIndex(200)
+                }
 
-                // Tab Stage (observes activeTab directly with silky crossfade animation)
-                if let activeTab = store.activeTab {
-                    TabStageView(store: store, tab: activeTab, settings: settings)
-                        .id(activeTab.id)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .clipped()
-                        .zIndex(0)
-                } else {
-                    Color.clear
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                VStack(spacing: 0) {
+                    // Top browser chrome (includes bottom progress bar overlay)
+                    TopBarView(store: store, settings: settings)
+                        .frame(height: 50)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .layoutPriority(1)
+                        .zIndex(100)
+
+                    // Tab Stage (observes activeTab or activeSplitPair directly)
+                    if let split = store.activeSplitPair,
+                       let leftTab = store.tabs.first(where: { $0.id == split.leftTabId }),
+                       let rightTab = store.tabs.first(where: { $0.id == split.rightTabId }) {
+                        SplitStageView(store: store, split: split, leftTab: leftTab, rightTab: rightTab, settings: settings)
+                            .id(split.id)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .clipped()
+                            .zIndex(0)
+                    } else if let activeTab = store.activeTab {
+                        TabStageView(store: store, tab: activeTab, settings: settings)
+                            .id(activeTab.id)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .clipped()
+                            .zIndex(0)
+                    } else {
+                        Color.clear
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
                 }
             }
 
@@ -72,6 +87,7 @@ struct BrowserView: View {
     private var keyboardShortcutBridge: some View {
         Group {
             Button("New Tab") { store.newTab() }.keyboardShortcut("t", modifiers: .command)
+            Button("Reopen Closed Tab") { store.reopenLastClosedTab() }.keyboardShortcut("t", modifiers: [.command, .shift])
             Button("New Incognito") { store.newIncognitoTab() }.keyboardShortcut("n", modifiers: [.command, .shift])
             Button("Close Tab") { if let activeId = store.activeTabId { store.closeTab(id: activeId) } }.keyboardShortcut("w", modifiers: .command)
             Button("Address Bar") { store.isAddressBarFocused = true }.keyboardShortcut("l", modifiers: .command)
@@ -94,6 +110,16 @@ struct BrowserView: View {
             Button("Element Zapper") { store.activeTab?.toggleElementZapper() }.keyboardShortcut("h", modifiers: [.command, .shift])
             Button("Reader Mode") { store.activeTab?.toggleReaderMode() }.keyboardShortcut("r", modifiers: [.command, .shift])
             Button("Picture in Picture") { store.activeTab?.togglePictureInPicture() }.keyboardShortcut("p", modifiers: [.command, .shift])
+            Button("Toggle Split View") { store.toggleSplitCurrentTab() }.keyboardShortcut("s", modifiers: [.command, .option])
+            Button("Swap Split Panes") { store.swapSplit() }.keyboardShortcut("s", modifiers: [.command, .control])
+            Button("Toggle Tab Layout") { settings.toggleTabLayout() }.keyboardShortcut("t", modifiers: [.command, .option])
+            Button("Toggle Sidebar") { settings.toggleSidebarCollapsed() }.keyboardShortcut("s", modifiers: [.command, .shift])
+            Button("Toggle Pin Tab") { if let id = store.activeTabId { store.togglePin(tabId: id) } }.keyboardShortcut("p", modifiers: [.command, .option])
+            Button("Next Space") { store.switchNextSpace() }.keyboardShortcut("]", modifiers: [.command, .control])
+            Button("Prev Space") { store.switchNextSpace() }.keyboardShortcut("[", modifiers: [.command, .control])
+            Button("Space 1") { store.switchSpace(at: 0) }.keyboardShortcut("1", modifiers: .control)
+            Button("Space 2") { store.switchSpace(at: 1) }.keyboardShortcut("2", modifiers: .control)
+            Button("Space 3") { store.switchSpace(at: 2) }.keyboardShortcut("3", modifiers: .control)
         }
         .opacity(0)
         .allowsHitTesting(false)
@@ -207,8 +233,157 @@ private struct TabStageView: View {
                     ))
                     .zIndex(200)
             }
+            // Sleek Arc/Safari-style Link Hover Bubble
+            if let link = tab.hoveredLink, !link.isEmpty {
+                VStack {
+                    Spacer()
+                    HStack {
+                        Text(link)
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(Color(nsColor: .windowBackgroundColor).opacity(0.92), in: Capsule())
+                            .overlay(Capsule().strokeBorder(Color.primary.opacity(0.12), lineWidth: 1))
+                            .shadow(color: .black.opacity(0.1), radius: 8, y: 2)
+                            .frame(maxWidth: 480, alignment: .leading)
+                        Spacer()
+                    }
+                    .padding(.leading, 12)
+                    .padding(.bottom, 8)
+                }
+                .transition(.opacity)
+                .allowsHitTesting(false)
+                .zIndex(250)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// Dual-pane stage for side-by-side tab browsing with an interactive draggable divider.
+private struct SplitStageView: View {
+    @ObservedObject var store: BrowserStore
+    let split: SplitPair
+    @ObservedObject var leftTab: Tab
+    @ObservedObject var rightTab: Tab
+    @ObservedObject var settings: SettingsStore
+
+    private let dividerWidth: CGFloat = 8
+
+    var body: some View {
+        GeometryReader { geo in
+            let totalW = geo.size.width
+            let usableW = max(100, totalW - dividerWidth)
+            let leftW = max(120, min(usableW - 120, usableW * CGFloat(split.ratio)))
+            let rightW = max(120, usableW - leftW)
+
+            HStack(spacing: 0) {
+                // Left Pane
+                paneView(for: leftTab, width: leftW)
+
+                // Divider
+                SplitDividerView(
+                    store: store,
+                    split: split,
+                    totalWidth: usableW,
+                    currentRatio: split.ratio
+                )
+                .frame(width: dividerWidth)
+
+                // Right Pane
+                paneView(for: rightTab, width: rightW)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func paneView(for tab: Tab, width: CGFloat) -> some View {
+        let isFocused = store.activeTabId == tab.id
+        ZStack(alignment: .topTrailing) {
+            TabStageView(store: store, tab: tab, settings: settings)
+                .frame(width: width)
+
+            // Pane Active Highlight
+            if isFocused {
+                RoundedRectangle(cornerRadius: 0)
+                    .strokeBorder(settings.accentColor.opacity(0.35), lineWidth: 1.5)
+                    .allowsHitTesting(false)
+            }
+        }
+        .frame(width: width)
+        .clipped()
+    }
+}
+
+/// Draggable divider between two split view panes with resize cursor, double-click to reset, and context menu.
+private struct SplitDividerView: View {
+    @ObservedObject var store: BrowserStore
+    let split: SplitPair
+    let totalWidth: CGFloat
+    let currentRatio: Double
+
+    @State private var isHovered: Bool = false
+    @State private var dragStartRatio: Double = 0.5
+
+    var body: some View {
+        ZStack {
+            Color.clear
+                .contentShape(Rectangle())
+
+            // Hairline separator
+            Rectangle()
+                .fill(Color(nsColor: .separatorColor).opacity(0.65))
+                .frame(width: 1)
+
+            // Pill Grab Handle
+            Capsule()
+                .fill(isHovered ? Color.secondary.opacity(0.65) : Color.secondary.opacity(0.25))
+                .frame(width: 3.5, height: 28)
+                .animation(.easeInOut(duration: 0.15), value: isHovered)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onHover { hovering in
+            isHovered = hovering
+            if hovering {
+                NSCursor.resizeLeftRight.push()
+            } else {
+                NSCursor.pop()
+            }
+        }
+        .gesture(
+            DragGesture(minimumDistance: 1)
+                .onChanged { value in
+                    let deltaRatio = Double(value.translation.width / totalWidth)
+                    let newRatio = min(0.8, max(0.2, dragStartRatio + deltaRatio))
+                    store.setSplitRatio(splitPairId: split.id, ratio: newRatio)
+                }
+                .onEnded { _ in
+                    dragStartRatio = split.ratio
+                }
+        )
+        .onTapGesture(count: 2) {
+            withAnimation(.spring(response: 0.25, dampingFraction: 0.88)) {
+                store.setSplitRatio(splitPairId: split.id, ratio: 0.5)
+            }
+        }
+        .contextMenu {
+            Button("Swap Panes") {
+                store.swapSplit(splitPairId: split.id)
+            }
+            Button("Reset to 50 / 50") {
+                store.setSplitRatio(splitPairId: split.id, ratio: 0.5)
+            }
+            Divider()
+            Button("Close Split View") {
+                store.closeSplit(for: split.leftTabId)
+            }
+        }
+        .onAppear {
+            dragStartRatio = currentRatio
+        }
     }
 }
 

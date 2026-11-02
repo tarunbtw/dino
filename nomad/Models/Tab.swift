@@ -101,6 +101,10 @@ final class Tab: NSObject, Identifiable, ObservableObject {
     @Published var isZapperActive: Bool = false
     @Published var isReaderModeActive: Bool = false
     @Published var isFloatingVideo: Bool = false
+    @Published var wantsNextNewTabInSplit: Bool = false
+    @Published var isPinned: Bool = false
+    @Published var spaceId: UUID? = nil
+    @Published var hoveredLink: String? = nil
     @Published var readerArticle: ReaderArticle? = nil
     @Published var consoleEntries: [ConsoleEntry] = []
     @Published var networkEntries: [NetworkEntry] = []
@@ -235,6 +239,9 @@ final class Tab: NSObject, Identifiable, ObservableObject {
 
     /// Hook to close this tab if it was opened solely for an immediate file download
     var onRequestCloseTab: (() -> Void)?
+
+    /// Hook called when this tab receives user interaction / focus
+    var onDidFocus: (() -> Void)?
     
     private(set) var hasLoaded: Bool = false
     private var observers: [NSKeyValueObservation] = []
@@ -285,12 +292,23 @@ final class Tab: NSObject, Identifiable, ObservableObject {
         ucc.removeScriptMessageHandler(forName: "nomadNetwork", contentWorld: .defaultClient)
         ucc.removeScriptMessageHandler(forName: "nomadZapper")
         ucc.removeScriptMessageHandler(forName: "nomadFrameBridge")
+        ucc.removeScriptMessageHandler(forName: "nomadLinkHover")
+        ucc.removeScriptMessageHandler(forName: "nomadAutofill")
         ucc.add(WeakScriptMessageHandler(delegate: self), name: "nomadConsole")
         ucc.add(WeakScriptMessageHandler(delegate: self), name: "nomadInspect")
         ucc.add(WeakScriptMessageHandler(delegate: self), contentWorld: .page, name: "nomadNetwork")
         ucc.add(WeakScriptMessageHandler(delegate: self), contentWorld: .defaultClient, name: "nomadNetwork")
         ucc.add(WeakScriptMessageHandler(delegate: self), name: "nomadZapper")
         ucc.add(WeakScriptMessageHandler(delegate: self), name: "nomadFrameBridge")
+        ucc.add(WeakScriptMessageHandler(delegate: self), name: "nomadLinkHover")
+        ucc.add(WeakScriptMessageHandler(delegate: self), name: "nomadAutofill")
+
+        let linkScript = WKUserScript(
+            source: TabScripts.linkHoverAndAutofillScript,
+            injectionTime: .atDocumentEnd,
+            forMainFrameOnly: false
+        )
+        ucc.addUserScript(linkScript)
 
         setupObservers()
 
@@ -379,6 +397,8 @@ final class Tab: NSObject, Identifiable, ObservableObject {
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "nomadNetwork", contentWorld: .defaultClient)
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "nomadZapper")
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "nomadFrameBridge")
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: "nomadLinkHover")
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: "nomadAutofill")
     }
 
     deinit {
