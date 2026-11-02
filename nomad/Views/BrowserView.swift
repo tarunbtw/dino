@@ -16,19 +16,19 @@ struct BrowserView: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            HStack(spacing: 0) {
-                if settings.isVerticalTabs {
-                    VerticalSidebarView(store: store, settings: settings)
-                        .zIndex(200)
-                }
+            VStack(spacing: 0) {
+                // Top browser chrome (includes bottom progress bar overlay)
+                TopBarView(store: store, settings: settings)
+                    .frame(height: 50)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .layoutPriority(1)
+                    .zIndex(100)
 
-                VStack(spacing: 0) {
-                    // Top browser chrome (includes bottom progress bar overlay)
-                    TopBarView(store: store, settings: settings)
-                        .frame(height: 50)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .layoutPriority(1)
-                        .zIndex(100)
+                HStack(spacing: 0) {
+                    if settings.isVerticalTabs {
+                        VerticalSidebarView(store: store, settings: settings)
+                            .zIndex(50)
+                    }
 
                     // Tab Stage (observes activeTab or activeSplitPair directly)
                     if let split = store.activeSplitPair,
@@ -64,12 +64,11 @@ struct BrowserView: View {
 
             // Floating Suggestions Dropdown for top bar Omnibox (rendered at root window level above all webviews)
             if store.isOmniboxEditing && !store.omniboxText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                let sidebarOffset: CGFloat = settings.isVerticalTabs ? (settings.isSidebarCollapsed ? 68 : CGFloat(settings.sidebarWidth)) : 0
                 OmniboxSuggestionsView(query: store.omniboxText, width: 520) { selectedURL in
                     store.activeTab?.load(url: selectedURL)
                     store.isOmniboxEditing = false
                 }
-                .padding(.leading, sidebarOffset + 92)
+                .padding(.leading, 172)
                 .padding(.top, 42)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .zIndex(250)

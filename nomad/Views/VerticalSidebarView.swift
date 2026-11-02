@@ -21,6 +21,8 @@ struct VerticalSidebarView: View {
     @State private var draggingTabId: UUID? = nil
     @State private var dragOffset: CGFloat = 0
     @State private var isSettling: Bool = false
+    @State private var isHoveringNewTab: Bool = false
+    @State private var isHoveringSettings: Bool = false
     private let tabRowHeight: CGFloat = 28
     private let tabRowSpacing: CGFloat = 2
     private var tabStep: CGFloat { isCollapsed ? (34 + tabRowSpacing) : (tabRowHeight + tabRowSpacing) }
@@ -30,9 +32,9 @@ struct VerticalSidebarView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header: Traffic lights safe area + collapse toggle
+            // Header: Collapse toggle
             headerSection
-                .frame(height: isCollapsed ? 88 : 48)
+                .frame(height: 42)
 
             // Spaces Switcher Bar
             spacesBarSection
@@ -84,7 +86,7 @@ struct VerticalSidebarView: View {
                                 .font(.system(size: 12, weight: .semibold))
                                 .foregroundStyle(Color.primary)
                                 .frame(width: 34, height: 34)
-                                .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                .background(isHoveringNewTab ? Color.primary.opacity(0.05) : Color.clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                                 .contentShape(Rectangle())
                         } else {
                             HStack(spacing: 6) {
@@ -101,11 +103,12 @@ struct VerticalSidebarView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 8)
                             .frame(height: 28)
-                            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                            .background(isHoveringNewTab ? Color.primary.opacity(0.04) : Color.clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                             .contentShape(Rectangle())
                         }
                     }
                     .buttonStyle(.plain)
+                    .onHover { isHoveringNewTab = $0 }
                     .help("New Tab (⌘T)")
                 }
                 .padding(.horizontal, isCollapsed ? 6 : 8)
@@ -156,32 +159,21 @@ struct VerticalSidebarView: View {
     @ViewBuilder
     private var headerSection: some View {
         if isCollapsed {
-            VStack(spacing: 8) {
-                // Window drag area to protect traffic lights (height 44pt)
-                WindowDragArea()
-                    .frame(width: 68, height: 44)
-
-                // Expand button placed cleanly below traffic lights safe area
-                Button(action: {
-                    settings.toggleSidebarCollapsed()
-                }) {
-                    Image(systemName: "sidebar.left")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Color.primary)
-                        .frame(width: 34, height: 34)
-                        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("Expand Sidebar (⇧⌘S)")
+            Button(action: {
+                settings.toggleSidebarCollapsed()
+            }) {
+                Image(systemName: "sidebar.left")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Color.primary)
+                    .frame(width: 34, height: 34)
+                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .contentShape(Rectangle())
             }
-            .frame(width: 68)
+            .buttonStyle(.plain)
+            .help("Expand Sidebar (⇧⌘S)")
+            .frame(width: sidebarWidth, height: 42)
         } else {
             HStack(spacing: 6) {
-                // Window Drag Area for traffic lights
-                WindowDragArea()
-                    .frame(width: 72, height: 48)
-
                 Spacer()
 
                 // Toggle Sidebar Collapse Button
@@ -213,7 +205,7 @@ struct VerticalSidebarView: View {
                 .help("Switch to Top Tab Strip (⌥⌘T)")
             }
             .padding(.horizontal, 10)
-            .frame(height: 48)
+            .frame(height: 42)
         }
     }
 
@@ -362,7 +354,7 @@ struct VerticalSidebarView: View {
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(Color.primary)
                     .frame(width: 34, height: 34)
-                    .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .background(isHoveringSettings ? Color.primary.opacity(0.05) : Color.clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                     .contentShape(Rectangle())
             } else {
                 HStack(spacing: 6) {
@@ -379,11 +371,12 @@ struct VerticalSidebarView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 8)
                 .frame(height: 28)
-                .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .background(isHoveringSettings ? Color.primary.opacity(0.04) : Color.clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                 .contentShape(Rectangle())
             }
         }
         .buttonStyle(.plain)
+        .onHover { isHoveringSettings = $0 }
         .help("Settings (⌘,)")
     }
 

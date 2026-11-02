@@ -61,6 +61,10 @@ struct TopBarView: View {
     @ViewBuilder
     private var verticalModeBar: some View {
         HStack(spacing: 8) {
+            // Traffic lights safe drag area
+            WindowDragArea()
+                .frame(width: 78, height: 50)
+
             if let activeTab = store.activeTab {
                 // Navigation history buttons
                 HStack(spacing: 2) {
