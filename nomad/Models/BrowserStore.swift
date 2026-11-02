@@ -384,6 +384,16 @@ final class BrowserStore: ObservableObject {
         // Dissolve any previous split pairs containing either tab
         splitPairs.removeAll { $0.contains(primaryId) || $0.contains(secondaryId) }
 
+        // Reposition secondary tab immediately adjacent to primary tab in tab list
+        if let primIdx = tabs.firstIndex(where: { $0.id == primaryId }),
+           let secIdx = tabs.firstIndex(where: { $0.id == secondaryId }) {
+            if secIdx != primIdx + 1 {
+                let secTab = tabs.remove(at: secIdx)
+                let newPrimIdx = tabs.firstIndex(where: { $0.id == primaryId }) ?? primIdx
+                tabs.insert(secTab, at: min(tabs.count, newPrimIdx + 1))
+            }
+        }
+
         let pair = SplitPair(leftTabId: primaryId, rightTabId: secondaryId, ratio: ratio)
         withAnimation(.easeInOut(duration: 0.22)) {
             splitPairs.append(pair)
@@ -392,13 +402,19 @@ final class BrowserStore: ObservableObject {
         persistSession()
     }
 
-    /// Toggles split view for current active tab (splits if single, closes split if already split).
+    /// Toggles split view for current active tab (splits if single, ungroups if already split).
     func toggleSplitCurrentTab() {
         guard let activeId = activeTabId else { return }
         if activeSplitPair != nil {
             closeSplit(for: activeId)
         } else {
-            splitCurrentTab()
+            // If there is another open unpinned tab in this space (e.g. GitHub + Settings), pair with it directly
+            let otherUnpinned = unpinnedTabsForActiveSpace.filter { $0.id != activeId }
+            if otherUnpinned.count == 1, let partner = otherUnpinned.first {
+                splitTab(primaryId: activeId, secondaryId: partner.id)
+            } else {
+                splitCurrentTab()
+            }
         }
     }
 
@@ -412,11 +428,12 @@ final class BrowserStore: ObservableObject {
         return newT
     }
 
-    /// Closes the split pair for the given tab, returning both tabs to standalone status.
+    /// Ungroups the split pair for the given tab, returning both tabs to standalone status (never closes tabs).
     func closeSplit(for tabId: UUID) {
         withAnimation(.easeInOut(duration: 0.22)) {
             splitPairs.removeAll { $0.contains(tabId) }
         }
+        activeTabId = tabId
         persistSession()
     }
 

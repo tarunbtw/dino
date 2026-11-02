@@ -19,42 +19,44 @@ struct NavigationControls: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            Button(action: { tab.goBack() }) {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 12, weight: .semibold))
-                    .frame(width: 24, height: 24)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(!tab.canGoBack)
-            .opacity(tab.canGoBack ? 1.0 : 0.35)
-            .help("Back (⌘[)")
-
-            Button(action: { tab.goForward() }) {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .semibold))
-                    .frame(width: 24, height: 24)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(!tab.canGoForward)
-            .opacity(tab.canGoForward ? 1.0 : 0.35)
-            .help("Forward (⌘])")
-
-            Button(action: {
-                if tab.isLoading {
-                    tab.stopLoading()
-                } else {
-                    tab.reload()
+            if !settings.isVerticalTabs {
+                Button(action: { tab.goBack() }) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 12, weight: .semibold))
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
                 }
-            }) {
-                Image(systemName: tab.isLoading ? "xmark" : "arrow.clockwise")
-                    .font(.system(size: 11, weight: .medium))
-                    .frame(width: 24, height: 24)
-                    .contentShape(Rectangle())
+                .buttonStyle(.plain)
+                .disabled(!tab.canGoBack)
+                .opacity(tab.canGoBack ? 1.0 : 0.35)
+                .help("Back (⌘[)")
+
+                Button(action: { tab.goForward() }) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(!tab.canGoForward)
+                .opacity(tab.canGoForward ? 1.0 : 0.35)
+                .help("Forward (⌘])")
+
+                Button(action: {
+                    if tab.isLoading {
+                        tab.stopLoading()
+                    } else {
+                        tab.reload()
+                    }
+                }) {
+                    Image(systemName: tab.isLoading ? "xmark" : "arrow.clockwise")
+                        .font(.system(size: 11, weight: .medium))
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(tab.isLoading ? "Stop Loading" : "Reload (⌘R)")
             }
-            .buttonStyle(.plain)
-            .help(tab.isLoading ? "Stop Loading" : "Reload (⌘R)")
 
             // 1-Click Chrome Web Store install button when visiting an extension page
             WebStoreInstallPill(tab: tab, store: store)
@@ -152,37 +154,39 @@ struct NavigationControls: View {
             .opacity(canInspect ? 1.0 : 0.35)
             .help("Developer Tools (⌘⌥I)")
 
-            let isSettingsActive = tab.isInternalPage
+            if !settings.isVerticalTabs {
+                let isSettingsActive = tab.isInternalPage
 
-            Button(action: { store.openSettings() }) {
-                Image(systemName: isSettingsActive ? "gearshape.fill" : "gearshape")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(isSettingsActive ? Color.primary : Color.secondary)
-                    .frame(width: 24, height: 24)
-                    .background(
-                        isSettingsActive ? Color.primary.opacity(0.08) : Color.clear,
-                        in: RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    )
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help("Settings (nomad://settings, ⌘,)")
+                Button(action: { store.openSettings() }) {
+                    Image(systemName: isSettingsActive ? "gearshape.fill" : "gearshape")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(isSettingsActive ? Color.primary : Color.secondary)
+                        .frame(width: 24, height: 24)
+                        .background(
+                            isSettingsActive ? Color.primary.opacity(0.08) : Color.clear,
+                            in: RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        )
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Settings (nomad://settings, ⌘,)")
 
-            Button(action: {
-                settings.toggleTabLayout()
-            }) {
-                Image(systemName: settings.isVerticalTabs ? "rectangle.topthird.inset.filled" : "sidebar.left")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(settings.isVerticalTabs ? Color.primary : Color.secondary)
-                    .frame(width: 24, height: 24)
-                    .background(
-                        settings.isVerticalTabs ? Color.primary.opacity(0.08) : Color.clear,
-                        in: RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    )
-                    .contentShape(Rectangle())
+                Button(action: {
+                    settings.toggleTabLayout()
+                }) {
+                    Image(systemName: settings.isVerticalTabs ? "rectangle.topthird.inset.filled" : "sidebar.left")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(settings.isVerticalTabs ? Color.primary : Color.secondary)
+                        .frame(width: 24, height: 24)
+                        .background(
+                            settings.isVerticalTabs ? Color.primary.opacity(0.08) : Color.clear,
+                            in: RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        )
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(settings.isVerticalTabs ? "Switch to Top Tab Strip (⌥⌘T)" : "Switch to Vertical Sidebar (⌥⌘T)")
             }
-            .buttonStyle(.plain)
-            .help(settings.isVerticalTabs ? "Switch to Top Tab Strip (⌥⌘T)" : "Switch to Vertical Sidebar (⌥⌘T)")
 
             if case .ready(let release) = updater.stage {
                 Button(action: { updater.relaunch() }) {

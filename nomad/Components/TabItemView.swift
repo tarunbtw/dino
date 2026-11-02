@@ -91,20 +91,36 @@ struct TabItemView: View {
                         .padding(.leading, 8)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: tabWidth < 70 ? .center : .leading)
 
-                        // Close button on trailing edge
+                        // Trailing controls (Ungroup button when split + Close button)
                         if isHovered || isActive {
-                            Button(action: {
-                                store.closeTab(id: tab.id)
-                            }) {
-                                Image(systemName: "xmark")
-                                    .font(.system(size: 9, weight: .semibold))
-                                    .foregroundStyle(.secondary)
-                                    .frame(width: 16, height: 16)
-                                    .contentShape(Rectangle())
+                            HStack(spacing: 2) {
+                                if isTabSplit {
+                                    Button(action: {
+                                        store.closeSplit(for: tab.id)
+                                    }) {
+                                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                            .font(.system(size: 8, weight: .semibold))
+                                            .foregroundStyle(.secondary)
+                                            .frame(width: 14, height: 16)
+                                            .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help("Separate Tabs (Ungroup)")
+                                }
+
+                                Button(action: {
+                                    store.closeTab(id: tab.id)
+                                }) {
+                                    Image(systemName: "xmark")
+                                        .font(.system(size: 9, weight: .semibold))
+                                        .foregroundStyle(.secondary)
+                                        .frame(width: 16, height: 16)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .help("Close Tab (⌘W)")
                             }
-                            .buttonStyle(.plain)
                             .padding(.trailing, 6)
-                            .help("Close Tab (⌘W)")
                         } else if tabWidth >= 70 {
                             Spacer().frame(width: 14)
                         }
@@ -153,12 +169,23 @@ struct TabItemView: View {
                 Button("Swap Split Panes") {
                     store.swapSplit(splitPairId: split.id)
                 }
-                Button("Close Split View") {
+                Button("Separate Tabs (Ungroup)") {
                     store.closeSplit(for: tab.id)
                 }
             } else {
                 Button("Split with New Tab") {
                     store.splitCurrentTab()
+                }
+
+                let candidateTabs = store.tabs.filter { $0.id != tab.id && !$0.isPinned }
+                if !candidateTabs.isEmpty {
+                    Menu("Split with Tab") {
+                        ForEach(candidateTabs) { other in
+                            Button(other.title.isEmpty ? "Blank Tab" : other.title) {
+                                store.splitTab(primaryId: tab.id, secondaryId: other.id)
+                            }
+                        }
+                    }
                 }
             }
             Divider()

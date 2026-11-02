@@ -288,8 +288,7 @@ private struct SplitStageView: View {
                 SplitDividerView(
                     store: store,
                     split: split,
-                    totalWidth: usableW,
-                    currentRatio: split.ratio
+                    totalWidth: usableW
                 )
                 .frame(width: dividerWidth)
 
@@ -297,6 +296,7 @@ private struct SplitStageView: View {
                 paneView(for: rightTab, width: rightW)
             }
         }
+        .coordinateSpace(name: "SplitStageCoordinateSpace")
     }
 
     @ViewBuilder
@@ -312,6 +312,22 @@ private struct SplitStageView: View {
                     .strokeBorder(settings.accentColor.opacity(0.35), lineWidth: 1.5)
                     .allowsHitTesting(false)
             }
+
+            // Quick Separate / Ungroup button in top-trailing corner of each pane
+            Button(action: {
+                store.closeSplit(for: tab.id)
+            }) {
+                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                    .font(.system(size: 9.5, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(5)
+                    .background(Color(nsColor: .windowBackgroundColor).opacity(0.85), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5))
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 8)
+            .padding(.trailing, 8)
+            .help("Separate Tabs (Ungroup)")
         }
         .frame(width: width)
         .clipped()
@@ -323,10 +339,8 @@ private struct SplitDividerView: View {
     @ObservedObject var store: BrowserStore
     let split: SplitPair
     let totalWidth: CGFloat
-    let currentRatio: Double
 
     @State private var isHovered: Bool = false
-    @State private var dragStartRatio: Double = 0.5
 
     var body: some View {
         ZStack {
@@ -354,14 +368,10 @@ private struct SplitDividerView: View {
             }
         }
         .gesture(
-            DragGesture(minimumDistance: 1)
+            DragGesture(minimumDistance: 1, coordinateSpace: .named("SplitStageCoordinateSpace"))
                 .onChanged { value in
-                    let deltaRatio = Double(value.translation.width / totalWidth)
-                    let newRatio = min(0.8, max(0.2, dragStartRatio + deltaRatio))
+                    let newRatio = min(0.8, max(0.2, Double(value.location.x / totalWidth)))
                     store.setSplitRatio(splitPairId: split.id, ratio: newRatio)
-                }
-                .onEnded { _ in
-                    dragStartRatio = split.ratio
                 }
         )
         .onTapGesture(count: 2) {
@@ -377,12 +387,9 @@ private struct SplitDividerView: View {
                 store.setSplitRatio(splitPairId: split.id, ratio: 0.5)
             }
             Divider()
-            Button("Close Split View") {
+            Button("Separate Tabs (Ungroup)") {
                 store.closeSplit(for: split.leftTabId)
             }
-        }
-        .onAppear {
-            dragStartRatio = currentRatio
         }
     }
 }
@@ -543,6 +550,43 @@ private struct EmptyStateView: View {
                         }
                     }
                     .padding(.top, 4)
+                }
+
+                // Quick Open Tabs Pairing Pills when in Split View
+                if let split = store.splitPairs.first(where: { $0.contains(tab.id) }),
+                   let partnerId = split.partner(of: tab.id) {
+                    let candidateTabs = store.tabs.filter { $0.id != tab.id && $0.id != partnerId && !$0.isPinned }
+                    if !candidateTabs.isEmpty {
+                        VStack(spacing: 8) {
+                            Text("Pair with an open tab:")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(.secondary)
+
+                            HStack(spacing: 8) {
+                                ForEach(candidateTabs) { candidate in
+                                    Button(action: {
+                                        store.splitTab(primaryId: partnerId, secondaryId: candidate.id)
+                                        store.closeTab(id: tab.id)
+                                    }) {
+                                        HStack(spacing: 6) {
+                                            Image(systemName: candidate.isInternalPage ? "gearshape.fill" : "globe")
+                                                .font(.system(size: 10))
+                                                .foregroundStyle(settings.accentColor)
+                                            Text(candidate.title.isEmpty ? "Blank Tab" : candidate.title)
+                                                .font(.system(size: 11, weight: .medium))
+                                                .foregroundStyle(.primary)
+                                                .lineLimit(1)
+                                        }
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 5)
+                                        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+                        .padding(.top, 6)
+                    }
                 }
             }
 

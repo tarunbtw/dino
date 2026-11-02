@@ -18,14 +18,21 @@ struct VerticalSidebarView: View {
     @State private var newSpaceName: String = ""
     @State private var isDraggingSidebarWidth: Bool = false
 
+    @State private var draggingTabId: UUID? = nil
+    @State private var dragOffset: CGFloat = 0
+    @State private var isSettling: Bool = false
+    private let tabRowHeight: CGFloat = 28
+    private let tabRowSpacing: CGFloat = 2
+    private var tabStep: CGFloat { tabRowHeight + tabRowSpacing }
+
     private var isCollapsed: Bool { settings.isSidebarCollapsed }
-    private var sidebarWidth: CGFloat { isCollapsed ? 54 : CGFloat(settings.sidebarWidth) }
+    private var sidebarWidth: CGFloat { isCollapsed ? 68 : CGFloat(settings.sidebarWidth) }
 
     var body: some View {
         VStack(spacing: 0) {
             // Header: Traffic lights safe area + collapse toggle
             headerSection
-                .frame(height: 48)
+                .frame(height: isCollapsed ? 86 : 48)
 
             // Spaces Switcher Bar
             spacesBarSection
@@ -45,19 +52,33 @@ struct VerticalSidebarView: View {
 
             // Tabs List for Active Space
             ScrollView(.vertical, showsIndicators: false) {
-                VStack(spacing: 2) {
-                    ForEach(store.unpinnedTabsForActiveSpace) { tab in
+                let currentTabs = store.unpinnedTabsForActiveSpace
+                VStack(spacing: tabRowSpacing) {
+                    ForEach(Array(currentTabs.enumerated()), id: \.element.id) { index, tab in
+                        let isDragging = draggingTabId == tab.id
+                        let offset = tabOffsetY(for: tab, index: index, tabs: currentTabs)
+
                         VerticalTabRowView(
                             store: store,
                             tab: tab,
                             isActive: tab.id == store.activeTabId,
-                            isCollapsed: isCollapsed
+                            isDragging: isDragging,
+                            isCollapsed: isCollapsed,
+                            offsetY: offset,
+                            onDragChanged: { translation in
+                                handleDragChanged(tabId: tab.id, translation: translation)
+                            },
+                            onDragEnded: { translation in
+                                handleDragEnded(tabId: tab.id, translation: translation, tabs: currentTabs)
+                            }
                         )
+                        .animation(draggingTabId == nil ? nil : (isDragging && !isSettling ? nil : .spring(response: 0.18, dampingFraction: 0.95)), value: offset)
                     }
                 }
                 .padding(.horizontal, isCollapsed ? 6 : 8)
                 .padding(.top, 2)
             }
+            .coordinateSpace(name: "VerticalSidebarSpace")
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             Divider()
@@ -91,32 +112,49 @@ struct VerticalSidebarView: View {
     // MARK: - Header Section
     @ViewBuilder
     private var headerSection: some View {
-        HStack(spacing: 6) {
-            if !isCollapsed {
+        if isCollapsed {
+            VStack(spacing: 6) {
+                // Window drag area to protect traffic lights (height 48pt)
+                WindowDragArea()
+                    .frame(width: 68, height: 48)
+
+                // Expand button placed cleanly below traffic lights safe area
+                Button(action: {
+                    settings.toggleSidebarCollapsed()
+                }) {
+                    Image(systemName: "sidebar.left")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 32, height: 28)
+                        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Expand Sidebar (⇧⌘S)")
+            }
+            .frame(width: 68)
+        } else {
+            HStack(spacing: 6) {
                 // Window Drag Area for traffic lights
                 WindowDragArea()
                     .frame(width: 72, height: 48)
 
                 Spacer()
-            }
 
-            // Toggle Sidebar Collapse Button
-            Button(action: {
-                settings.toggleSidebarCollapsed()
-            }) {
-                Image(systemName: isCollapsed ? "sidebar.left" : "sidebar.left")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 28, height: 28)
-                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help(isCollapsed ? "Expand Sidebar (⇧⌘S)" : "Collapse Sidebar (⇧⌘S)")
+                // Toggle Sidebar Collapse Button
+                Button(action: {
+                    settings.toggleSidebarCollapsed()
+                }) {
+                    Image(systemName: "sidebar.left")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28, height: 28)
+                        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Collapse Sidebar (⇧⌘S)")
 
-            if isCollapsed {
-                // In collapsed mode, place Layout switch icon below
-            } else {
                 // Switch back to Horizontal Top Tabs
                 Button(action: {
                     settings.toggleTabLayout()
@@ -131,8 +169,9 @@ struct VerticalSidebarView: View {
                 .buttonStyle(.plain)
                 .help("Switch to Top Tab Strip (⌥⌘T)")
             }
+            .padding(.horizontal, 10)
+            .frame(height: 48)
         }
-        .padding(.horizontal, isCollapsed ? 8 : 10)
     }
 
     // MARK: - Spaces Bar Section
@@ -361,6 +400,95 @@ struct VerticalSidebarView: View {
         .padding(20)
         .frame(width: 280)
     }
+
+    // MARK: - Vertical Tab Drag Reordering
+    private func tabOffsetY(for tab: Tab, index: Int, tabs: [Tab]) -> CGFloat {
+        guard let draggingId = draggingTabId,
+              let draggingIndex = tabs.firstIndex(where: { $0.id == draggingId }) else {
+            return 0
+        }
+
+        if tab.id == draggingId {
+            return dragOffset
+        }
+
+        let rawShift = Int((dragOffset / tabStep).rounded())
+        let targetIndex = min(max(0, draggingIndex + rawShift), tabs.count - 1)
+
+        if draggingIndex < targetIndex {
+            // Dragging down: tabs between (draggingIndex + 1) and targetIndex shift up
+            if index > draggingIndex && index <= targetIndex {
+                return -tabStep
+            }
+        } else if draggingIndex > targetIndex {
+            // Dragging up: tabs between targetIndex and (draggingIndex - 1) shift down
+            if index >= targetIndex && index < draggingIndex {
+                return tabStep
+            }
+        }
+
+        return 0
+    }
+
+    private func handleDragChanged(tabId: UUID, translation: CGFloat) {
+        guard !isSettling else { return }
+        if draggingTabId == nil {
+            draggingTabId = tabId
+            if store.activeTabId != tabId {
+                store.selectTab(id: tabId)
+            }
+        }
+        dragOffset = translation
+    }
+
+    private func handleDragEnded(tabId: UUID, translation: CGFloat, tabs: [Tab]) {
+        guard !isSettling,
+              let draggingLocalIndex = tabs.firstIndex(where: { $0.id == tabId }),
+              let draggingGlobalIndex = store.tabs.firstIndex(where: { $0.id == tabId }) else {
+            draggingTabId = nil
+            dragOffset = 0
+            isSettling = false
+            return
+        }
+
+        let rawShift = Int((translation / tabStep).rounded())
+        let targetLocalIndex = min(max(0, draggingLocalIndex + rawShift), tabs.count - 1)
+
+        isSettling = true
+
+        if targetLocalIndex != draggingLocalIndex {
+            let targetTab = tabs[targetLocalIndex]
+            if let targetGlobalIndex = store.tabs.firstIndex(where: { $0.id == targetTab.id }) {
+                let targetOffset = CGFloat(targetLocalIndex - draggingLocalIndex) * tabStep
+                withAnimation(.spring(response: 0.18, dampingFraction: 0.95)) {
+                    dragOffset = targetOffset
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) {
+                        store.moveTab(from: draggingGlobalIndex, to: targetGlobalIndex)
+                        draggingTabId = nil
+                        dragOffset = 0
+                        isSettling = false
+                    }
+                }
+                return
+            }
+        }
+
+        withAnimation(.spring(response: 0.18, dampingFraction: 0.95)) {
+            dragOffset = 0
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                draggingTabId = nil
+                isSettling = false
+            }
+        }
+    }
 }
 
 /// An individual tab row inside the vertical sidebar.
@@ -368,7 +496,11 @@ private struct VerticalTabRowView: View {
     @ObservedObject var store: BrowserStore
     @ObservedObject var tab: Tab
     let isActive: Bool
+    let isDragging: Bool
     let isCollapsed: Bool
+    let offsetY: CGFloat
+    let onDragChanged: (CGFloat) -> Void
+    let onDragEnded: (CGFloat) -> Void
 
     @State private var isHovered: Bool = false
 
@@ -397,6 +529,19 @@ private struct VerticalTabRowView: View {
             )
         }
         .buttonStyle(.plain)
+        .offset(y: offsetY)
+        .zIndex(isDragging ? 100 : (isActive ? 1 : 0))
+        .shadow(color: .black.opacity(isDragging ? 0.16 : 0), radius: 8, y: 2)
+        .scaleEffect(isDragging ? 1.02 : 1.0)
+        .gesture(
+            DragGesture(minimumDistance: 3, coordinateSpace: .named("VerticalSidebarSpace"))
+                .onChanged { value in
+                    onDragChanged(value.translation.height)
+                }
+                .onEnded { value in
+                    onDragEnded(value.translation.height)
+                }
+        )
         .onHover { isHovered = $0 }
         .help(isCollapsed ? displayTitle : "")
         .contextMenu {
@@ -404,12 +549,23 @@ private struct VerticalTabRowView: View {
                 Button("Swap Split Panes") {
                     store.swapSplit(splitPairId: split.id)
                 }
-                Button("Close Split View") {
+                Button("Separate Tabs (Ungroup)") {
                     store.closeSplit(for: tab.id)
                 }
             } else {
                 Button("Split with New Tab") {
                     store.splitCurrentTab()
+                }
+
+                let candidateTabs = store.tabs.filter { $0.id != tab.id && !$0.isPinned }
+                if !candidateTabs.isEmpty {
+                    Menu("Split with Tab") {
+                        ForEach(candidateTabs) { other in
+                            Button(other.title.isEmpty ? "Blank Tab" : other.title) {
+                                store.splitTab(primaryId: tab.id, secondaryId: other.id)
+                            }
+                        }
+                    }
                 }
             }
             Divider()
@@ -452,19 +608,35 @@ private struct VerticalTabRowView: View {
                 .foregroundStyle(isActive ? Color.primary : Color.secondary)
         }
 
-        // Close Button (visible on hover or when active)
+        // Close / Ungroup Buttons (visible on hover or when active)
         if isHovered || isActive {
-            Button(action: {
-                store.closeTab(id: tab.id)
-            }) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 8.5, weight: .semibold))
-                    .foregroundStyle(Color.secondary)
-                    .frame(width: 16, height: 16)
-                    .contentShape(Rectangle())
+            HStack(spacing: 2) {
+                if store.splitPairs.contains(where: { $0.contains(tab.id) }) {
+                    Button(action: {
+                        store.closeSplit(for: tab.id)
+                    }) {
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .font(.system(size: 7.5, weight: .semibold))
+                            .foregroundStyle(Color.secondary)
+                            .frame(width: 14, height: 16)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Separate Tabs (Ungroup)")
+                }
+
+                Button(action: {
+                    store.closeTab(id: tab.id)
+                }) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 8.5, weight: .semibold))
+                        .foregroundStyle(Color.secondary)
+                        .frame(width: 16, height: 16)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Close Tab (⌘W)")
             }
-            .buttonStyle(.plain)
-            .help("Close Tab (⌘W)")
         }
     }
 
