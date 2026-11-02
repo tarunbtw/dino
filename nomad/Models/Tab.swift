@@ -106,6 +106,8 @@ final class Tab: NSObject, Identifiable, ObservableObject {
     @Published var spaceId: UUID? = nil
     @Published var hoveredLink: String? = nil
     @Published var readerArticle: ReaderArticle? = nil
+    @Published var themeColor: Color? = nil
+    @Published var isThemeColorLight: Bool = false
     @Published var consoleEntries: [ConsoleEntry] = []
     @Published var networkEntries: [NetworkEntry] = []
     @Published var inspectedElementInfo: InspectedElementInfo? = nil
@@ -773,7 +775,83 @@ final class Tab: NSObject, Identifiable, ObservableObject {
                 self?.canGoForward = canForward
             }
         })
+
+        observers.append(webView.observe(\.themeColor, options: [.new]) { [weak self] wv, _ in
+            guard let self else { return }
+            let color = wv.themeColor
+            Task { @MainActor [weak self] in
+                self?.updateThemeColor(color)
+            }
+        })
     }
+
+    func updateThemeColor(_ nsColor: NSColor?) {
+        guard let ns = nsColor else {
+            self.themeColor = nil
+            self.isThemeColorLight = false
+            return
+        }
+        self.themeColor = Color(nsColor: ns)
+        if let rgb = ns.usingColorSpace(.sRGB) {
+            let lum = 0.299 * rgb.redComponent + 0.587 * rgb.greenComponent + 0.114 * rgb.blueComponent
+            self.isThemeColorLight = (lum > 0.6)
+        }
+    }
+
+    func parseAndSetThemeColor(_ colorStr: String) {
+        if colorStr.hasPrefix("#") {
+            var clean = colorStr.trimmingCharacters(in: .whitespacesAndNewlines)
+            if clean.hasPrefix("#") { clean.removeFirst() }
+            if clean.count == 6, let intVal = UInt64(clean, radix: 16) {
+                let r = Double((intVal >> 16) & 0xFF) / 255.0
+                let g = Double((intVal >> 8) & 0xFF) / 255.0
+                let b = Double(intVal & 0xFF) / 255.0
+                self.themeColor = Color(.sRGB, red: r, green: g, blue: b, opacity: 1.0)
+                let lum = 0.299 * r + 0.587 * g + 0.114 * b
+                self.isThemeColorLight = (lum > 0.6)
+            }
+        } else if let match = colorStr.range(of: #"[0-9]+(?:\.[0-9]+)?,\s*[0-9]+(?:\.[0-9]+)?,\s*[0-9]+(?:\.[0-9]+)?"#, options: .regularExpression) {
+            let parts = colorStr[match].components(separatedBy: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+            if parts.count >= 3 {
+                let r = parts[0] / 255.0
+                let g = parts[1] / 255.0
+                let b = parts[2] / 255.0
+                if r == 0 && g == 0 && b == 0 && colorStr.contains(", 0)") {
+                    return
+                }
+                self.themeColor = Color(.sRGB, red: r, green: g, blue: b, opacity: 1.0)
+                let lum = 0.299 * r + 0.587 * g + 0.114 * b
+                self.isThemeColorLight = (lum > 0.6)
+            }
+        }
+    }
+
+    func detectPageThemeColor() {
+        guard !isBlank && !isInternalPage else {
+            self.themeColor = nil
+            self.isThemeColorLight = false
+            return
+        }
+        if let nativeColor = webView.themeColor {
+            self.updateThemeColor(nativeColor)
+            return
+        }
+        let js = """
+        (function() {
+            let meta = document.querySelector('meta[name="theme-color"]');
+            if (meta && meta.content) return meta.content;
+            let bg = window.getComputedStyle(document.body).backgroundColor;
+            return bg || '';
+        })();
+        """
+        webView.evaluateJavaScript(js) { [weak self] result, _ in
+            guard let self = self, let colorStr = result as? String, !colorStr.isEmpty else { return }
+            Task { @MainActor in
+                self.parseAndSetThemeColor(colorStr)
+            }
+        }
+    }
+
     // MARK: - Favicon Fetching
     func fetchFavicon(for url: URL) {
         guard url.scheme == "http" || url.scheme == "https", let host = url.host, !host.isEmpty else {

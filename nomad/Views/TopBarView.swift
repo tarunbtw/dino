@@ -25,13 +25,21 @@ struct TopBarView: View {
             }
         }
         .frame(height: 50)
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                NSApp.keyWindow?.makeFirstResponder(nil)
+            }
+        )
         .background {
             if settings.isVibrant {
                 Color.clear
+            } else if let activeTab = store.activeTab, let themeColor = activeTab.themeColor {
+                themeColor
             } else {
                 Color(nsColor: .windowBackgroundColor)
             }
         }
+        .environment(\.colorScheme, (store.activeTab?.isThemeColorLight == true) ? .light : (settings.colorScheme ?? .dark))
         .overlay(alignment: .bottom) {
             if let activeTab = store.activeTab {
                 ProgressBarView(tab: activeTab)
@@ -95,12 +103,15 @@ struct TopBarView: View {
                 omniboxPill(tab: activeTab)
                     .frame(maxWidth: 520)
 
-                Spacer()
+                // Free space window drag area (supports window dragging and double-click to zoom/fullscreen)
+                WindowDragArea()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                 NavigationControls(tab: activeTab, store: store, settings: settings)
                     .padding(.trailing, 14)
             } else {
-                Spacer()
+                WindowDragArea()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -171,6 +182,21 @@ struct TopBarView: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .strokeBorder(isEditingAddress ? settings.accentColor.opacity(0.4) : Color.primary.opacity(0.04), lineWidth: 1)
         )
+        .overlay(alignment: .topLeading) {
+            if isEditingAddress && !addressText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                OmniboxSuggestionsView(query: addressText, width: 520) { selectedURL in
+                    tab.load(url: selectedURL)
+                    isEditingAddress = false
+                }
+                .offset(y: 34)
+                .zIndex(300)
+            }
+        }
+        .onChange(of: isAddressFieldFocused) { _, focused in
+            if !focused && isEditingAddress {
+                isEditingAddress = false
+            }
+        }
         .onChange(of: store.isAddressBarFocused) { _, focused in
             if focused {
                 addressText = tab.url?.absoluteString ?? ""

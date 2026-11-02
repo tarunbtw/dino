@@ -74,6 +74,32 @@ struct VerticalSidebarView: View {
                         )
                         .animation(draggingTabId == nil ? nil : (isDragging && !isSettling ? nil : .spring(response: 0.18, dampingFraction: 0.95)), value: offset)
                     }
+
+                    // New Tab Button directly below open tabs
+                    Button(action: {
+                        store.newTab(url: nil, select: true)
+                    }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "plus")
+                                .font(.system(size: 11, weight: .semibold))
+                            if !isCollapsed {
+                                Text("New Tab")
+                                    .font(.system(size: 11, weight: .medium))
+                                Spacer()
+                                Text("⌘T")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: isCollapsed ? .center : .leading)
+                        .padding(.horizontal, isCollapsed ? 0 : 8)
+                        .frame(height: 28)
+                        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("New Tab (⌘T)")
                 }
                 .padding(.horizontal, isCollapsed ? 6 : 8)
                 .padding(.top, 2)
@@ -90,6 +116,11 @@ struct VerticalSidebarView: View {
                 .padding(.horizontal, isCollapsed ? 6 : 10)
         }
         .frame(width: sidebarWidth)
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                NSApp.keyWindow?.makeFirstResponder(nil)
+            }
+        )
         .background {
             if settings.isVibrant {
                 VisualEffectView(material: .sidebar, blendingMode: .behindWindow)
@@ -313,42 +344,28 @@ struct VerticalSidebarView: View {
     // MARK: - Footer Section
     @ViewBuilder
     private var footerSection: some View {
-        HStack(spacing: 6) {
-            Button(action: {
-                store.newTab(url: nil, select: true)
-            }) {
-                HStack(spacing: 6) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 11, weight: .semibold))
-                    if !isCollapsed {
-                        Text("New Tab")
-                            .font(.system(size: 11, weight: .medium))
-                        Spacer()
-                        Text("⌘T")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, isCollapsed ? 4 : 8)
-                .frame(height: 28)
-                .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
-            }
-            .buttonStyle(.plain)
-
-            if !isCollapsed {
-                Button(action: { store.openSettings() }) {
-                    Image(systemName: "gearshape")
+        Button(action: { store.openSettings() }) {
+            HStack(spacing: 6) {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 11, weight: .medium))
+                if !isCollapsed {
+                    Text("Settings")
                         .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 28, height: 28)
-                        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
+                    Spacer()
+                    Text("⌘,")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
                 }
-                .buttonStyle(.plain)
-                .help("Settings (⌘,)")
             }
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: isCollapsed ? .center : .leading)
+            .padding(.horizontal, isCollapsed ? 0 : 8)
+            .frame(height: 28)
+            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .help("Settings (⌘,)")
     }
 
     // MARK: - Trailing Resize Handle
@@ -503,32 +520,39 @@ private struct VerticalTabRowView: View {
     let onDragEnded: (CGFloat) -> Void
 
     @State private var isHovered: Bool = false
+    @State private var lastClickTime: TimeInterval = 0
 
     var body: some View {
-        Button(action: {
-            store.selectTab(id: tab.id)
-        }) {
-            HStack(spacing: 8) {
-                // Tab Favicon / Indicator
-                tabIconView
-                    .frame(width: 16, height: 16)
+        HStack(spacing: 8) {
+            // Tab Favicon / Indicator
+            tabIconView
+                .frame(width: 16, height: 16)
 
-                if !isCollapsed {
-                    expandedContent
-                }
+            if !isCollapsed {
+                expandedContent
             }
-            .padding(.horizontal, isCollapsed ? 6 : 8)
-            .frame(height: 28)
-            .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(isActive ? Color.primary.opacity(0.08) : (isHovered ? Color.primary.opacity(0.04) : Color.clear))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .strokeBorder(isActive ? Color.primary.opacity(0.06) : Color.clear, lineWidth: 1)
-            )
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, isCollapsed ? 6 : 8)
+        .frame(height: 28)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(isActive ? Color.primary.opacity(0.08) : (isHovered ? Color.primary.opacity(0.04) : Color.clear))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .strokeBorder(isActive ? Color.primary.opacity(0.06) : Color.clear, lineWidth: 1)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .onTapGesture {
+            let now = ProcessInfo.processInfo.systemUptime
+            if now - lastClickTime < 0.35 {
+                store.selectTab(id: tab.id)
+                store.isAddressBarFocused = true
+            } else {
+                store.selectTab(id: tab.id)
+            }
+            lastClickTime = now
+        }
         .offset(y: offsetY)
         .zIndex(isDragging ? 100 : (isActive ? 1 : 0))
         .shadow(color: .black.opacity(isDragging ? 0.16 : 0), radius: 8, y: 2)
