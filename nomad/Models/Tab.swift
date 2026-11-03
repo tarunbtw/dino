@@ -130,6 +130,7 @@ final class Tab: NSObject, Identifiable, ObservableObject {
     @Published var wantsNextNewTabIncognito: Bool = false
     @Published var isPinned: Bool = false
     @Published var spaceId: UUID? = nil
+    @Published var profileType: NomadProfileType = NomadProfileManager.defaultProfile
     @Published var hoveredLink: String? = nil
     @Published var readerArticle: ReaderArticle? = nil
     @Published var themeColor: Color? = nil
@@ -271,6 +272,9 @@ final class Tab: NSObject, Identifiable, ObservableObject {
     /// Hook to request opening a new tab
     var onRequestNewTab: ((URL?) -> Void)?
 
+    /// Hook to request peeking at a link in a floating preview
+    var onRequestPeek: ((URL) -> Void)?
+
     /// Hook to request duplicating this tab
     var onRequestDuplicateTab: (() -> Void)?
 
@@ -280,10 +284,12 @@ final class Tab: NSObject, Identifiable, ObservableObject {
     private(set) var hasLoaded: Bool = false
     private var observers: [NSKeyValueObservation] = []
 
-    init(id: UUID = UUID(), initialURL: URL? = nil, configuration: WKWebViewConfiguration? = nil, isIncognito: Bool = false, lazy: Bool = false) {
+    init(id: UUID = UUID(), initialURL: URL? = nil, configuration: WKWebViewConfiguration? = nil, profileType: NomadProfileType? = nil, isIncognito: Bool = false, lazy: Bool = false) {
         self.id = id
         self.url = initialURL
         self.isIncognito = isIncognito
+        let effectiveProfile = profileType ?? NomadProfileManager.defaultProfile
+        self.profileType = effectiveProfile
 
         if let initialURL = initialURL,
            (initialURL.scheme == ExtensionManager.scheme || initialURL.scheme == "webkit-extension"),
@@ -298,7 +304,7 @@ final class Tab: NSObject, Identifiable, ObservableObject {
 
         self.isBlank = (initialURL == nil || initialURL?.absoluteString == "about:blank")
         
-        let effectiveConfig = configuration ?? ExtensionManager.shared.configuration(for: initialURL) ?? WebKitPool.makeConfiguration(isIncognito: isIncognito)
+        let effectiveConfig = configuration ?? ExtensionManager.shared.configuration(for: initialURL) ?? WebKitPool.makeConfiguration(profile: effectiveProfile, isIncognito: isIncognito)
         let webView = BrowserWebView(frame: NSRect(x: 0, y: 0, width: 1180, height: 730), configuration: effectiveConfig)
         webView.appearance = SettingsStore.shared.currentAppearance
         webView.customUserAgent = WebKitPool.customUserAgent

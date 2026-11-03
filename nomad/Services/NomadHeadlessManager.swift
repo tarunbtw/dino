@@ -45,12 +45,72 @@ final class NomadHeadlessManager: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var isStarted = false
 
+    var profile: NomadProfileType = .agent
+    var idleTimeoutSeconds: TimeInterval = 60.0
+    var autoReapEnabled: Bool = true
+    private(set) var lastActivityDate: Date = Date()
+    private var reaperTimer: Timer?
+
     private init() {}
+
+    /// Records recent automation or network activity, resetting the idle countdown.
+    func recordActivity() {
+        lastActivityDate = Date()
+    }
+
+    /// Evaluates worker idle duration and cleanly shuts down if idle threshold is met.
+    private func checkIdleTimeout() {
+        guard autoReapEnabled, idleTimeoutSeconds > 0 else { return }
+        let idle = Date().timeIntervalSince(lastActivityDate)
+        if idle >= idleTimeoutSeconds {
+            print("[nomad] Worker idle for \(Int(idle))s (threshold: \(Int(idleTimeoutSeconds))s). Auto-reaping to conserve RAM and energy.")
+            NomadCLIManager.cleanupOnExit()
+            exit(0)
+        }
+    }
+
+    /// Parses CLI flags and environment variables for profile and auto-reaping configurations.
+    private func parseCLIConfiguration() {
+        let args = CommandLine.arguments
+
+        // Profile configuration
+        if let idx = args.firstIndex(of: "--profile"), idx + 1 < args.count {
+            let val = args[idx + 1].lowercased()
+            if let p = NomadProfileType(rawValue: val) {
+                self.profile = p
+            }
+        } else if let envProf = ProcessInfo.processInfo.environment["NOMAD_PROFILE"]?.lowercased(),
+                  let p = NomadProfileType(rawValue: envProf) {
+            self.profile = p
+        }
+
+        // Auto-reap configuration
+        if args.contains("--no-reap") || ProcessInfo.processInfo.environment["NOMAD_IDLE_TIMEOUT"] == "0" {
+            self.autoReapEnabled = false
+        } else if let idx = args.firstIndex(of: "--idle-timeout"), idx + 1 < args.count,
+                  let sec = Double(args[idx + 1]) {
+            if sec <= 0 {
+                self.autoReapEnabled = false
+            } else {
+                self.idleTimeoutSeconds = sec
+            }
+        } else if let envSec = ProcessInfo.processInfo.environment["NOMAD_IDLE_TIMEOUT"],
+                  let sec = Double(envSec) {
+            if sec <= 0 {
+                self.autoReapEnabled = false
+            } else {
+                self.idleTimeoutSeconds = sec
+            }
+        }
+    }
 
     /// Starts headless execution, spins up the offscreen window host, and initializes the BrowserStore.
     func start() {
         guard Self.isHeadless, !isStarted else { return }
         isStarted = true
+
+        parseCLIConfiguration()
+        NomadProfileManager.defaultProfile = self.profile
 
         // Configure activation policy to accessory (runs as background daemon without Dock icon or Menu bar)
         NSApplication.shared.setActivationPolicy(.accessory)
@@ -93,6 +153,7 @@ final class NomadHeadlessManager: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self, weak browserStore] _ in
                 guard let self = self, let store = browserStore else { return }
+                self.recordActivity()
                 if let activeTab = store.activeTab {
                     self.attachWebView(activeTab.webView)
                 }
@@ -101,7 +162,17 @@ final class NomadHeadlessManager: ObservableObject {
 
         // Start agent server bound to headless store
         NomadAgentServer.shared.start(store: browserStore)
-        print("[nomad] Headless runtime initialized (1280x800)")
+
+        // Schedule auto-reaper timer if enabled
+        if autoReapEnabled && idleTimeoutSeconds > 0 {
+            reaperTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { _ in
+                MainActor.assumeIsolated {
+                    NomadHeadlessManager.shared.checkIdleTimeout()
+                }
+            }
+        }
+
+        print("[nomad] Headless runtime initialized (1280x800, Profile: \(profile.rawValue), Auto-reap: \(autoReapEnabled ? "\(Int(idleTimeoutSeconds))s" : "disabled"))")
     }
 
     /// Attaches any tab's webView to the offscreen host window so windowNumber and WebKit rendering are active.

@@ -68,6 +68,8 @@ final class BrowserStore: ObservableObject {
     @Published var splitPairs: [SplitPair] = []
     @Published var spaces: [Space] = Space.defaultSpaces
     @Published var activeSpaceId: UUID = Space.defaultFirstID
+    @Published var peekTab: Tab? = nil
+    @Published var peekFromTabId: UUID? = nil
 
     struct ClosedTabSnapshot {
         let url: URL?
@@ -106,8 +108,15 @@ final class BrowserStore: ObservableObject {
     }
 
     init() {
-        // Start with an initial clean blank tab
-        _ = newTab(url: nil, select: true, lazy: false)
+        let restoredURLs = NomadHeadlessManager.isHeadless ? [] : SessionManager.shared.restore()
+        if !restoredURLs.isEmpty {
+            for (idx, url) in restoredURLs.enumerated() {
+                _ = newTab(url: url, select: idx == 0, lazy: idx != 0)
+            }
+        } else {
+            // Start with an initial clean blank tab
+            _ = newTab(url: nil, select: true, lazy: false)
+        }
         ExtensionManager.shared.start(with: self)
         NomadAgentServer.shared.start(store: self)
 
@@ -194,6 +203,11 @@ final class BrowserStore: ObservableObject {
 
         tab.onRequestNewTab = { [weak self] url in
             self?.newTab(url: url, select: true)
+        }
+
+        tab.onRequestPeek = { [weak self, weak tab] targetURL in
+            guard let self = self, let tab = tab else { return }
+            self.peek(targetURL, from: tab)
         }
 
         tab.onRequestDuplicateTab = { [weak self, weak tab] in
@@ -308,6 +322,40 @@ final class BrowserStore: ObservableObject {
             }
             enforceMemoryGovernor()
             persistSession()
+        }
+    }
+
+    /// Opens a link in an Arc-style floating peek preview over the current tab.
+    func peek(_ url: URL, from sourceTab: Tab) {
+        let page = Tab(initialURL: url, isIncognito: sourceTab.isIncognito)
+        page.onRequestPeek = { [weak self, weak page] u in
+            guard let self = self, let p = page else { return }
+            self.peek(u, from: p)
+        }
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+            self.peekTab = page
+            self.peekFromTabId = sourceTab.id
+        }
+    }
+
+    /// Dismisses the floating peek preview.
+    func closePeek() {
+        withAnimation(.easeInOut(duration: 0.16)) {
+            self.peekTab = nil
+            self.peekFromTabId = nil
+        }
+    }
+
+    /// Promotes the peek preview to a full tab or split view pane.
+    func keepPeek(beside: Bool = false) {
+        guard let page = peekTab else { return }
+        let fromId = peekFromTabId
+        closePeek()
+        tabs.append(page)
+        if beside, let fromId = fromId, let fromTab = tabs.first(where: { $0.id == fromId }) {
+            splitTab(primaryId: fromTab.id, secondaryId: page.id)
+        } else {
+            selectTab(id: page.id)
         }
     }
 

@@ -17,6 +17,16 @@ extension Tab: WKNavigationDelegate {
             return
         }
 
+        // Shift-click link hover preview (Peek)
+        if navigationAction.modifierFlags.contains(.shift),
+           navigationAction.navigationType == .linkActivated,
+           let targetURL = navigationAction.request.url,
+           ["http", "https"].contains(targetURL.scheme?.lowercased() ?? "") {
+            self.onRequestPeek?(targetURL)
+            decisionHandler(.cancel, preferences)
+            return
+        }
+
         // Security scheme & network block validation
         if let targetURL = navigationAction.request.url {
             let urlString = targetURL.absoluteString
@@ -174,8 +184,8 @@ extension Tab: WKNavigationDelegate {
             fetchFavicon(for: currentURL)
             detectPageThemeColor()
 
-            // Record visited page in HistoryStore (bypassed in Incognito mode)
-            if !self.isIncognito {
+            // Record visited page in HistoryStore (only for user profile, bypassed in Incognito mode and Agent profiles)
+            if !self.isIncognito && self.profileType == .user {
                 HistoryStore.shared.addVisit(url: currentURL, title: self.title)
             }
 

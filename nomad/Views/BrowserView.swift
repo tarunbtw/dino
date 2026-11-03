@@ -73,12 +73,29 @@ struct BrowserView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .zIndex(250)
             }
+
+            // Arc-style Floating Link Peek Preview (Shift-click on links)
+            if let peekTab = store.peekTab {
+                Color.black.opacity(0.32)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        store.closePeek()
+                    }
+                    .transition(.opacity)
+                    .zIndex(400)
+
+                PeekOverlayView(store: store, tab: peekTab, settings: settings)
+                    .transition(.scale(scale: 0.96).combined(with: .opacity))
+                    .zIndex(401)
+            }
         }
         .background(Color(nsColor: .windowBackgroundColor).ignoresSafeArea())
         .preferredColorScheme(settings.colorScheme)
         .tint(settings.accentColor)
         .onExitCommand {
-            if let tab = store.activeTab, tab.isZapperActive {
+            if store.peekTab != nil {
+                store.closePeek()
+            } else if let tab = store.activeTab, tab.isZapperActive {
                 tab.stopElementZapper()
             }
         }
@@ -817,4 +834,93 @@ private extension View {
         background(CursorRectView(cursor: cursor))
     }
 }
+
+/// Floating modal preview panel for Shift-clicking hyperlinks (Arc-style Peek).
+private struct PeekOverlayView: View {
+    @ObservedObject var store: BrowserStore
+    @ObservedObject var tab: Tab
+    @ObservedObject var settings: SettingsStore
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack {
+                HStack(alignment: .top, spacing: 10) {
+                    VStack(spacing: 0) {
+                        // Header bar with link title and action controls
+                        HStack(spacing: 8) {
+                            Image(systemName: "globe")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+
+                            Text(tab.title.isEmpty ? (tab.url?.host ?? "Preview") : tab.title)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+
+                            Spacer()
+
+                            // Keep beside in Split View
+                            Button {
+                                store.keepPeek(beside: true)
+                            } label: {
+                                Image(systemName: "rectangle.split.2x1")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 26, height: 26)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .help("Keep beside this page in Split View")
+
+                            // Open as full tab
+                            Button {
+                                store.keepPeek(beside: false)
+                            } label: {
+                                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 26, height: 26)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .help("Open as Full Tab")
+
+                            // Close peek
+                            Button {
+                                store.closePeek()
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 26, height: 26)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .help("Close Preview (Esc)")
+                        }
+                        .padding(.horizontal, 14)
+                        .frame(height: 38)
+                        .background(Color(nsColor: .windowBackgroundColor))
+
+                        Divider()
+
+                        WebStage(tab: tab)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                    .background(Color(nsColor: .windowBackgroundColor))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
+                    )
+                    .shadow(color: .black.opacity(0.3), radius: 24, y: 8)
+                }
+                .frame(width: min(geo.size.width * 0.82, 1100), height: min(geo.size.height * 0.86, 760))
+            }
+            .frame(width: geo.size.width, height: geo.size.height)
+        }
+    }
+}
+
 

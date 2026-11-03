@@ -54,7 +54,10 @@ final class NomadUnixSocketBridge: @unchecked Sendable {
 
     private init() {}
 
-    func start(port: UInt16, token: String) {
+    func start(port: UInt16, token: String, socketPath: String? = nil) {
+        if let socketPath = socketPath, !socketPath.isEmpty {
+            Self.configuredSocketPath = socketPath
+        }
         queue.async { [weak self] in
             self?.startSync(port: port, token: token)
         }
@@ -239,6 +242,10 @@ final class NomadUnixSocketBridge: @unchecked Sendable {
                     break
                 }
                 break
+            }
+
+            DispatchQueue.main.async {
+                NomadHeadlessManager.shared.recordActivity()
             }
 
             // Dispatch handling of this connection

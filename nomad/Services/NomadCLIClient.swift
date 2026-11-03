@@ -212,7 +212,7 @@ enum NomadCLIClient {
             return resp
         }
 
-        emitError("nomad: Nomad is not running. Start it with 'nomad start' or 'nomad headless'")
+        emitError("nomad: Nomad is not running. Start it with 'nomad start' or launch the Nomad app.")
         exit(1)
     }
 
@@ -430,8 +430,19 @@ enum NomadCLIClient {
     @discardableResult
     static func execute(command: String, rawArgs: [String], port: UInt16?, socketPath: String?) -> Bool {
         let args = parseArguments(rawArgs, command: command)
-        let activePort = args.stringOption(["--port"]).flatMap(UInt16.init) ?? port
-        let activeSocket = args.stringOption(["--socket"]) ?? socketPath
+        let preferGUI = args.boolFlag(["--gui"])
+        let preferWorker = args.boolFlag(["--worker"])
+        let explicitPort = args.stringOption(["--port"]).flatMap(UInt16.init) ?? port
+        let explicitSocket = args.stringOption(["--socket"]) ?? socketPath
+
+        let target = NomadCLIManager.resolveTargetEndpoint(
+            explicitPort: explicitPort,
+            explicitSocket: explicitSocket,
+            preferGUI: preferGUI,
+            preferWorker: preferWorker
+        )
+        let activePort = target.port
+        let activeSocket = target.socketPath
 
         if args.boolFlag(["--help", "-h"]) {
             showCommandHelp(command.lowercased())
@@ -440,7 +451,7 @@ enum NomadCLIClient {
 
         if let allowed = allowedCommandOptions[command.lowercased()] {
             var valid = allowed
-            valid.formUnion(["--port", "--socket", "--help", "-h"])
+            valid.formUnion(["--port", "--socket", "--gui", "--worker", "--help", "-h"])
             for f in args.flags {
                 if !valid.contains(f) {
                     emitError("nomad \(command): unknown option '\(f)'")

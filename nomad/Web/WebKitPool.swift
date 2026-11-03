@@ -19,10 +19,15 @@ enum WebKitPool {
     /// Creates a standardized WKWebViewConfiguration.
     /// Ready for WebExtensions (WKWebExtensionController) and custom user scripts.
     @MainActor
-    static func makeConfiguration(isIncognito: Bool = false) -> WKWebViewConfiguration {
+    static func makeConfiguration(profile: NomadProfileType? = nil, isIncognito: Bool = false) -> WKWebViewConfiguration {
         let config = WKWebViewConfiguration()
-        if isIncognito {
+        let effectiveProfile = profile ?? NomadProfileManager.defaultProfile
+        if isIncognito || effectiveProfile == .ephemeral {
             config.websiteDataStore = WKWebsiteDataStore.nonPersistent()
+        } else if effectiveProfile == .agent {
+            config.websiteDataStore = NomadProfileManager.websiteDataStore(for: .agent)
+        } else {
+            config.websiteDataStore = WKWebsiteDataStore.default()
         }
         ExtensionManager.shared.attach(config)
         

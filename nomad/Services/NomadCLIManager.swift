@@ -9,61 +9,123 @@ import Foundation
 import AppKit
 
 /// Central CLI dispatcher and process lifecycle manager for Nomad.
-/// Implements clean Go/Docker-style subcommands and flags for foreground and background execution.
+/// Implements concurrent multi-instance orchestration, isolated agent profiles,
+/// auto-reaping idle governance, and conflict-free daemon execution.
 enum NomadCLIManager {
 
     private static var sigintSource: DispatchSourceSignal?
     private static var sigtermSource: DispatchSourceSignal?
 
-    static var pidFilePath: String {
+    struct NomadWorkerDescriptor: Codable {
+        let pid: Int32
+        let port: UInt16
+        let socketPath: String
+        let profile: String
+        let createdAt: Double
+    }
+
+    struct TargetEndpoint {
+        let socketPath: String
+        let port: UInt16
+        let targetType: String
+    }
+
+    static var nomadDirectory: String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return "\(home)/.nomad/nomad.pid"
+        return "\(home)/.nomad"
+    }
+
+    static var workersDirectory: String {
+        return "\(nomadDirectory)/workers"
+    }
+
+    static var guiPidFilePath: String {
+        return "\(nomadDirectory)/nomad-gui.pid"
+    }
+
+    static var legacyPidFilePath: String {
+        return "\(nomadDirectory)/nomad.pid"
+    }
+
+    static var pidFilePath: String {
+        return legacyPidFilePath
     }
 
     static var logFilePath: String {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return "\(home)/.nomad/nomad.log"
+        return "\(nomadDirectory)/nomad.log"
     }
 
     static func ensureNomadDirectory() {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let dir = "\(home)/.nomad"
+        let dir = nomadDirectory
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true, attributes: [
+            .posixPermissions: 0o700
+        ])
+        let wDir = workersDirectory
+        try? FileManager.default.createDirectory(atPath: wDir, withIntermediateDirectories: true, attributes: [
             .posixPermissions: 0o700
         ])
     }
 
-    /// Records the current process ID into ~/.nomad/nomad.pid.
-    static func recordCurrentPID() {
-        ensureNomadDirectory()
-        let pid = getpid()
-        let path = pidFilePath
-        try? "\(pid)\n".write(toFile: path, atomically: true, encoding: .utf8)
-        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path)
+    static func workerDescriptorPath(for pid: pid_t) -> String {
+        return "\(workersDirectory)/worker-\(pid).json"
     }
 
-    /// Cleans up the PID file and Unix socket on shutdown.
-    static func cleanupOnExit() {
-        let path = pidFilePath
-        if FileManager.default.fileExists(atPath: path) {
-            if let content = try? String(contentsOfFile: path, encoding: .utf8),
-               let pid = Int32(content.trimmingCharacters(in: .whitespacesAndNewlines)),
-               pid == getpid() {
-                unlink(path)
+    static func workerSocketPath(for pid: pid_t) -> String {
+        return "\(workersDirectory)/worker-\(pid).sock"
+    }
+
+    /// Records an active headless worker descriptor to disk.
+    static func recordWorker(pid: pid_t, port: UInt16, socketPath: String, profile: String) {
+        ensureNomadDirectory()
+        let desc = NomadWorkerDescriptor(
+            pid: pid,
+            port: port,
+            socketPath: socketPath,
+            profile: profile,
+            createdAt: Date().timeIntervalSince1970
+        )
+        let path = workerDescriptorPath(for: pid)
+        if let data = try? JSONEncoder().encode(desc) {
+            try? data.write(to: URL(fileURLWithPath: path))
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path)
+        }
+    }
+
+    /// Scans and returns all actively running headless worker processes, purging stale records.
+    static func getRunningWorkers() -> [NomadWorkerDescriptor] {
+        ensureNomadDirectory()
+        let dir = workersDirectory
+        guard let files = try? FileManager.default.contentsOfDirectory(atPath: dir) else {
+            return []
+        }
+        var active: [NomadWorkerDescriptor] = []
+        for file in files where file.hasSuffix(".json") && file.hasPrefix("worker-") {
+            let fullPath = (dir as NSString).appendingPathComponent(file)
+            guard let data = try? Data(contentsOf: URL(fileURLWithPath: fullPath)),
+                  let desc = try? JSONDecoder().decode(NomadWorkerDescriptor.self, from: data) else {
+                unlink(fullPath)
+                continue
+            }
+            let res = kill(desc.pid, 0)
+            if res == 0 || errno == EPERM {
+                active.append(desc)
+            } else if errno == ESRCH {
+                unlink(fullPath)
+                unlink(desc.socketPath)
+            } else {
+                active.append(desc)
             }
         }
-        unlink(NomadUnixSocketBridge.defaultSocketPath)
+        return active.sorted(by: { $0.createdAt < $1.createdAt })
     }
 
-    /// Returns the PID from ~/.nomad/nomad.pid if the process is currently alive.
-    /// Automatically cleans up stale PID files if the process is dead.
-    static func getRunningPID() -> pid_t? {
-        let path = pidFilePath
+    /// Returns the PID of the active Nomad GUI browser if running.
+    static func getRunningGUIPID() -> pid_t? {
+        let path = guiPidFilePath
         guard let content = try? String(contentsOfFile: path, encoding: .utf8),
               let pid = Int32(content.trimmingCharacters(in: .whitespacesAndNewlines)) else {
             return nil
         }
-
         let res = kill(pid, 0)
         if res == 0 || errno == EPERM {
             return pid
@@ -75,8 +137,136 @@ enum NomadCLIManager {
         }
     }
 
+    /// Records the current process ID into ~/.nomad/nomad-gui.pid or worker registry.
+    static func recordCurrentPID() {
+        ensureNomadDirectory()
+        let pid = getpid()
+        if NomadHeadlessManager.isHeadless {
+            if getRunningGUIPID() == nil {
+                try? "\(pid)\n".write(toFile: legacyPidFilePath, atomically: true, encoding: .utf8)
+                try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: legacyPidFilePath)
+            }
+        } else {
+            try? "\(pid)\n".write(toFile: guiPidFilePath, atomically: true, encoding: .utf8)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: guiPidFilePath)
+            try? "\(pid)\n".write(toFile: legacyPidFilePath, atomically: true, encoding: .utf8)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: legacyPidFilePath)
+        }
+    }
+
+    /// Cleans up PID and socket files on process termination.
+    static func cleanupOnExit() {
+        let pid = getpid()
+        if NomadHeadlessManager.isHeadless {
+            unlink(workerDescriptorPath(for: pid))
+            unlink(workerSocketPath(for: pid))
+            if let legacyContent = try? String(contentsOfFile: legacyPidFilePath, encoding: .utf8),
+               let legacyPid = Int32(legacyContent.trimmingCharacters(in: .whitespacesAndNewlines)),
+               legacyPid == pid {
+                unlink(legacyPidFilePath)
+            }
+        } else {
+            if let guiContent = try? String(contentsOfFile: guiPidFilePath, encoding: .utf8),
+               let guiPid = Int32(guiContent.trimmingCharacters(in: .whitespacesAndNewlines)),
+               guiPid == pid {
+                unlink(guiPidFilePath)
+            }
+            if let legacyContent = try? String(contentsOfFile: legacyPidFilePath, encoding: .utf8),
+               let legacyPid = Int32(legacyContent.trimmingCharacters(in: .whitespacesAndNewlines)),
+               legacyPid == pid {
+                unlink(legacyPidFilePath)
+            }
+            unlink(NomadUnixSocketBridge.defaultSocketPath)
+        }
+    }
+
+    /// Returns any running Nomad PID (GUI or worker) if alive.
+    static func getRunningPID() -> pid_t? {
+        if let gui = getRunningGUIPID() {
+            return gui
+        }
+        let workers = getRunningWorkers()
+        if let first = workers.first {
+            return first.pid
+        }
+        let path = legacyPidFilePath
+        guard let content = try? String(contentsOfFile: path, encoding: .utf8),
+              let pid = Int32(content.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            return nil
+        }
+        let res = kill(pid, 0)
+        if res == 0 || errno == EPERM {
+            return pid
+        } else if errno == ESRCH {
+            unlink(path)
+            return nil
+        } else {
+            return pid
+        }
+    }
+
+    /// Resolves the intended endpoint (worker vs GUI) for CLI driver commands.
+    static func resolveTargetEndpoint(
+        explicitPort: UInt16? = nil,
+        explicitSocket: String? = nil,
+        preferGUI: Bool = false,
+        preferWorker: Bool = false
+    ) -> TargetEndpoint {
+        if let s = explicitSocket {
+            let p = explicitPort ?? (s.contains("worker-") ? 9223 : NomadAgentServer.defaultPort)
+            return TargetEndpoint(socketPath: s, port: p, targetType: "custom")
+        }
+        if let p = explicitPort {
+            return TargetEndpoint(socketPath: NomadUnixSocketBridge.defaultSocketPath, port: p, targetType: "custom")
+        }
+
+        let guiPID = getRunningGUIPID()
+        let workers = getRunningWorkers()
+
+        if preferGUI {
+            return TargetEndpoint(
+                socketPath: NomadUnixSocketBridge.defaultSocketPath,
+                port: NomadAgentServer.defaultPort,
+                targetType: "gui"
+            )
+        }
+
+        if preferWorker, let lastWorker = workers.last {
+            return TargetEndpoint(
+                socketPath: lastWorker.socketPath,
+                port: lastWorker.port,
+                targetType: "worker"
+            )
+        }
+
+        // Default heuristic: If an isolated headless worker is active, route automation commands to worker!
+        if let lastWorker = workers.last {
+            return TargetEndpoint(
+                socketPath: lastWorker.socketPath,
+                port: lastWorker.port,
+                targetType: "worker"
+            )
+        }
+
+        // If no worker is active, route to the GUI browser
+        if guiPID != nil {
+            return TargetEndpoint(
+                socketPath: NomadUnixSocketBridge.defaultSocketPath,
+                port: NomadAgentServer.defaultPort,
+                targetType: "gui"
+            )
+        }
+
+        // Fallback default
+        return TargetEndpoint(
+            socketPath: NomadUnixSocketBridge.defaultSocketPath,
+            port: NomadAgentServer.defaultPort,
+            targetType: "default"
+        )
+    }
+
     /// Emits an error message to stderr.
-    private static func emitError(_ message: String) {
+    static func emitError(_ message: String) {
         let formatted = "\(message)\n"
         if let data = formatted.data(using: .utf8) {
             FileHandle.standardError.write(data)
@@ -94,15 +284,15 @@ enum NomadCLIManager {
 
         let rawArgs = Array(CommandLine.arguments.dropFirst())
 
-        // 1. No arguments: launch native GUI browser (or activate existing instance)
+        // 1. No arguments: launch native GUI browser (or activate existing GUI instance)
         if rawArgs.isEmpty {
-            if let pid = getRunningPID(), let app = NSRunningApplication(processIdentifier: pid) {
+            if let pid = getRunningGUIPID(), let app = NSRunningApplication(processIdentifier: pid) {
                 if #available(macOS 14.0, *) {
                     app.activate()
                 } else {
                     app.activate(options: [.activateIgnoringOtherApps])
                 }
-                print("[nomad] Nomad is already running (PID \(pid)). Brought window to front.")
+                print("[nomad] Nomad GUI is already running (PID \(pid)). Brought window to front.")
                 return true
             }
             return false
@@ -128,7 +318,7 @@ enum NomadCLIManager {
         var scanIdx = 0
         while scanIdx < rawArgs.count {
             let tok = rawArgs[scanIdx]
-            if tok == "--port" || tok == "--socket" {
+            if tok == "--port" || tok == "--socket" || tok == "--profile" || tok == "--idle-timeout" {
                 scanIdx += 2
                 continue
             }
@@ -154,6 +344,12 @@ enum NomadCLIManager {
         var subcommand: String? = nil
         var configuredPort: UInt16? = nil
         var configuredSocket: String? = nil
+        var configuredProfile: String? = nil
+        var configuredIdleTimeout: Double? = nil
+        var noReap = false
+        var stopWorkersOnly = false
+        var stopGUIOnly = false
+        var stopAll = false
         var isDaemonChild = false
         var unrecognizedTokens: [String] = []
 
@@ -214,6 +410,36 @@ enum NomadCLIManager {
             case "--daemon-child":
                 isDaemonChild = true
 
+            case "--profile":
+                i += 1
+                if i < rawArgs.count {
+                    configuredProfile = rawArgs[i]
+                } else {
+                    emitError("nomad: option '--profile' requires an argument (agent, ephemeral, user)")
+                    exit(1)
+                }
+
+            case "--idle-timeout":
+                i += 1
+                if i < rawArgs.count, let sec = Double(rawArgs[i]) {
+                    configuredIdleTimeout = sec
+                } else {
+                    emitError("nomad: option '--idle-timeout' requires a number in seconds")
+                    exit(1)
+                }
+
+            case "--no-reap":
+                noReap = true
+
+            case "--workers":
+                stopWorkersOnly = true
+
+            case "--all":
+                stopAll = true
+
+            case "--gui":
+                stopGUIOnly = true
+
             case "--port":
                 i += 1
                 if i < rawArgs.count, let p = UInt16(rawArgs[i]) {
@@ -254,6 +480,15 @@ enum NomadCLIManager {
                     configuredSocket = val
                     NomadUnixSocketBridge.configuredSocketPath = val
                     setenv("NOMAD_SOCKET_PATH", val, 1)
+                } else if token.hasPrefix("--profile=") {
+                    configuredProfile = String(token.dropFirst(10))
+                } else if token.hasPrefix("--idle-timeout=") {
+                    if let sec = Double(token.dropFirst(15)) {
+                        configuredIdleTimeout = sec
+                    } else {
+                        emitError("nomad: option '--idle-timeout' requires a number in seconds")
+                        exit(1)
+                    }
                 } else {
                     unrecognizedTokens.append(token)
                 }
@@ -278,7 +513,6 @@ enum NomadCLIManager {
         }
 
         guard let cmd = subcommand else {
-            // Options were passed without a command (e.g. `nomad --port 9222`) -> run GUI with those options
             return false
         }
 
@@ -293,11 +527,17 @@ enum NomadCLIManager {
             return true
 
         case "start":
-            handleStart(port: configuredPort, socket: configuredSocket)
+            handleStart(
+                port: configuredPort,
+                socket: configuredSocket,
+                profile: configuredProfile,
+                idleTimeout: configuredIdleTimeout,
+                noReap: noReap
+            )
             return true
 
         case "stop":
-            handleStop()
+            handleStop(stopAll: stopAll, stopWorkersOnly: stopWorkersOnly, stopGUIOnly: stopGUIOnly)
             return true
 
         case "status":
@@ -309,7 +549,12 @@ enum NomadCLIManager {
             exit(0)
 
         case "headless":
-            return handleHeadless(isDaemonChild: isDaemonChild)
+            return handleHeadless(
+                isDaemonChild: isDaemonChild,
+                profile: configuredProfile,
+                idleTimeout: configuredIdleTimeout,
+                noReap: noReap
+            )
 
         default:
             emitError("nomad: unknown command '\(cmd)'")
@@ -335,13 +580,23 @@ enum NomadCLIManager {
           nomad [command] [options]
 
         Daemon & Process Commands:
-          start               Run as a background daemon in RAM
-          stop                Stop the running background daemon
-          status              Check background daemon status
+          start               Run as a background daemon in RAM (supports concurrent workers)
+          stop                Stop running workers or instances (--workers, --gui, --all)
+          status              Check running GUI and worker status
           headless            Run in foreground with live console logs
           mcp                 Run stdio Model Context Protocol (MCP) server
           version             Print version information
           help                Show available commands and options
+
+        Daemon & Worker Options:
+          --profile <type>    Browser profile partition: agent (default), ephemeral, user
+          --idle-timeout <s>  Worker auto-reap idle countdown in seconds (default: 60)
+          --no-reap           Disable auto-reaping idle shutdown
+          --port <port>       Explicit loopback HTTP port (default: auto-allocated)
+          --socket <path>     Explicit Unix domain socket path
+          --workers           Target all headless workers (for stop)
+          --gui               Target GUI instance (for stop/snap/commands)
+          --all               Target all Nomad instances (for stop)
 
         Browser Automation Commands (Token-Optimized Driver):
           snap [options]      Capture compact semantic markdown snapshot
@@ -373,6 +628,8 @@ enum NomadCLIManager {
           reload              Reload the current page
 
         Driver Options:
+          --gui               Route action specifically to GUI window
+          --worker            Route action specifically to headless worker
           --native            Dispatch native hardware events via macOS CGEvent
           --right, -r         Trigger context menu / right-click (for click)
           --submit            Press Enter after typing (for type)
@@ -386,38 +643,44 @@ enum NomadCLIManager {
           --mode <mode>       Wait mode: auto, selector, text, state, networkidle
           --tab <id|idx>      Target specific tab by index or ID
           -l, --labeled       Render element ID badges on screenshot (for shot)
-          --port <port>       Agent HTTP port (default: 9222)
-          --socket <path>     Agent Unix domain socket (default: ~/.nomad/nomad.sock)
         """
         print(helpText)
         exit(0)
     }
 
-    private static func handleStart(port: UInt16?, socket: String?) {
+    private static func handleStart(
+        port: UInt16?,
+        socket: String?,
+        profile: String?,
+        idleTimeout: Double?,
+        noReap: Bool
+    ) {
         ensureNomadDirectory()
-        let activePort = port ?? NomadAgentServer.defaultPort
-        let activeSocket = socket ?? NomadUnixSocketBridge.defaultSocketPath
+        let guiPid = getRunningGUIPID()
+        let selectedProfile = profile ?? "agent"
 
-        if let existingPID = getRunningPID() {
-            print("[nomad] Daemon is already running (PID \(existingPID))")
-            print("[nomad] HTTP: http://127.0.0.1:\(activePort)")
-            print("[nomad] Socket: \(activeSocket)")
-            exit(0)
+        if let gui = guiPid {
+            print("[nomad] GUI instance detected (PID \(gui)). Spawning isolated headless agent worker...")
         }
 
         let execURL = Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0])
         let proc = Process()
         proc.executableURL = execURL
 
-        var childArgs = ["headless", "--daemon-child"]
+        var childArgs = ["headless", "--daemon-child", "--profile", selectedProfile]
         if let p = port {
             childArgs.append(contentsOf: ["--port", "\(p)"])
         }
         if let s = socket {
             childArgs.append(contentsOf: ["--socket", s])
         }
-        proc.arguments = childArgs
+        if noReap {
+            childArgs.append("--no-reap")
+        } else if let timeout = idleTimeout {
+            childArgs.append(contentsOf: ["--idle-timeout", "\(timeout)"])
+        }
 
+        proc.arguments = childArgs
         proc.standardInput = FileHandle.nullDevice
 
         let logPath = logFilePath
@@ -435,104 +698,189 @@ enum NomadCLIManager {
 
         do {
             try proc.run()
-            let pid = proc.processIdentifier
+            let childPid = proc.processIdentifier
 
-            // Record initial PID
-            let path = pidFilePath
-            try? "\(pid)\n".write(toFile: path, atomically: true, encoding: .utf8)
-            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path)
+            // Wait for child worker to initialize and register its descriptor
+            var workerDesc: NomadWorkerDescriptor? = nil
+            for _ in 0..<30 {
+                usleep(50_000)
+                let workers = getRunningWorkers()
+                if let found = workers.first(where: { $0.pid == childPid }) {
+                    workerDesc = found
+                    break
+                }
+                if kill(childPid, 0) != 0 { break }
+            }
 
-            // Allow child process initialization
-            usleep(300_000)
+            if kill(childPid, 0) == 0 {
+                let activePort = workerDesc?.port ?? port ?? (guiPid != nil ? 9223 : NomadAgentServer.defaultPort)
+                let activeSocket = workerDesc?.socketPath ?? socket ?? workerSocketPath(for: childPid)
 
-            if kill(pid, 0) == 0 {
-                print("[nomad] Daemon started (PID \(pid))")
+                print("[nomad] Headless worker started (PID \(childPid), Profile: \(selectedProfile))")
                 print("[nomad] HTTP: http://127.0.0.1:\(activePort)")
                 print("[nomad] Socket: \(activeSocket)")
+                if noReap {
+                    print("[nomad] Auto-reaper: disabled")
+                } else {
+                    let to = idleTimeout ?? 60.0
+                    print("[nomad] Auto-reaper: active (\(Int(to))s idle timeout)")
+                }
                 exit(0)
             } else {
-                emitError("[nomad] Failed to start daemon. Check \(logPath) for details.")
-                unlink(path)
+                emitError("[nomad] Failed to start headless worker. Check \(logPath) for details.")
                 exit(1)
             }
         } catch {
-            emitError("[nomad] Error starting daemon: \(error.localizedDescription)")
+            emitError("[nomad] Error starting headless worker: \(error.localizedDescription)")
             exit(1)
         }
     }
 
-    private static func handleStop() {
-        guard let pid = getRunningPID() else {
-            unlink(NomadUnixSocketBridge.defaultSocketPath)
-            print("[nomad] No running daemon found")
+    private static func handleStop(stopAll: Bool = false, stopWorkersOnly: Bool = false, stopGUIOnly: Bool = false) {
+        let guiPid = getRunningGUIPID()
+        let workers = getRunningWorkers()
+
+        if stopGUIOnly {
+            if let gui = guiPid {
+                terminateProcess(gui)
+                unlink(guiPidFilePath)
+                unlink(NomadUnixSocketBridge.defaultSocketPath)
+                print("[nomad] Nomad GUI (PID \(gui)) stopped")
+            } else {
+                print("[nomad] Nomad GUI is not running")
+            }
             exit(0)
         }
 
-        // Send SIGTERM
-        kill(pid, SIGTERM)
-
-        // Wait up to 2 seconds for clean teardown
-        var stopped = false
-        for _ in 0..<20 {
-            usleep(100_000)
-            if kill(pid, 0) != 0 {
-                stopped = true
-                break
+        if stopWorkersOnly {
+            if workers.isEmpty {
+                print("[nomad] No headless workers running")
+            } else {
+                for w in workers {
+                    terminateProcess(w.pid)
+                    unlink(workerDescriptorPath(for: w.pid))
+                    unlink(w.socketPath)
+                }
+                print("[nomad] Stopped \(workers.count) headless worker(s). GUI browser remains active.")
             }
+            exit(0)
         }
 
-        if !stopped {
-            kill(pid, SIGKILL)
-            usleep(100_000)
+        if stopAll {
+            var stoppedCount = 0
+            for w in workers {
+                terminateProcess(w.pid)
+                unlink(workerDescriptorPath(for: w.pid))
+                unlink(w.socketPath)
+                stoppedCount += 1
+            }
+            if let gui = guiPid {
+                terminateProcess(gui)
+                unlink(guiPidFilePath)
+                unlink(NomadUnixSocketBridge.defaultSocketPath)
+                stoppedCount += 1
+                print("[nomad] Stopped all Nomad instances (GUI + \(workers.count) worker(s))")
+            } else if stoppedCount > 0 {
+                print("[nomad] Stopped \(stoppedCount) headless worker(s)")
+            } else {
+                print("[nomad] No running Nomad instances found")
+            }
+            unlink(legacyPidFilePath)
+            exit(0)
         }
 
-        unlink(pidFilePath)
+        // Default 'nomad stop':
+        // If workers are running, stop workers cleanly!
+        if !workers.isEmpty {
+            for w in workers {
+                terminateProcess(w.pid)
+                unlink(workerDescriptorPath(for: w.pid))
+                unlink(w.socketPath)
+            }
+            if let gui = guiPid {
+                print("[nomad] Stopped \(workers.count) headless worker(s). Nomad GUI (PID \(gui)) is still active. Use 'nomad stop --all' to quit GUI.")
+            } else {
+                unlink(legacyPidFilePath)
+                print("[nomad] Stopped \(workers.count) headless worker(s)")
+            }
+            exit(0)
+        }
+
+        // No workers running, but GUI is running
+        if let gui = guiPid {
+            print("[nomad] No headless workers are running. Nomad GUI is running (PID \(gui)). Run 'nomad stop --gui' or 'nomad stop --all' to quit GUI.")
+            exit(0)
+        }
+
+        unlink(legacyPidFilePath)
         unlink(NomadUnixSocketBridge.defaultSocketPath)
-        print("[nomad] Daemon stopped")
+        print("[nomad] No running Nomad instances found")
         exit(0)
+    }
+
+    private static func terminateProcess(_ pid: pid_t) {
+        kill(pid, SIGTERM)
+        for _ in 0..<20 {
+            usleep(50_000)
+            if kill(pid, 0) != 0 { return }
+        }
+        kill(pid, SIGKILL)
+        usleep(50_000)
     }
 
     private static func handleStatus(port: UInt16?) {
-        let activePort = port ?? NomadAgentServer.defaultPort
-        let pid = getRunningPID()
+        let guiPid = getRunningGUIPID()
+        let workers = getRunningWorkers()
 
-        let probe = probeStatus(port: activePort)
+        if guiPid == nil && workers.isEmpty {
+            print("Nomad: stopped")
+            exit(0)
+        }
 
-        if let probe = probe {
-            let isDaemon = probe.mode == "headless_daemon" || probe.mode == "daemon"
-            let modeDesc = isDaemon ? "daemon" : "GUI"
-            if let pid = pid {
-                print("Nomad: running (mode: \(modeDesc), PID \(pid))")
-            } else {
-                print("Nomad: running (mode: \(modeDesc))")
+        if let gui = guiPid {
+            print("Nomad GUI: running (PID \(gui))")
+            print("  HTTP: http://127.0.0.1:9222")
+            print("  IPC Socket: \(NomadUnixSocketBridge.defaultSocketPath)")
+        } else {
+            print("Nomad GUI: stopped")
+        }
+
+        if workers.isEmpty {
+            print("Headless Workers: 0 active")
+        } else {
+            print("Headless Workers (\(workers.count) active):")
+            for w in workers {
+                let age = Int(Date().timeIntervalSince1970 - w.createdAt)
+                print("  - Worker \(w.pid): running (Port \(w.port), Profile: \(w.profile), Socket: \(w.socketPath), Uptime: \(age)s)")
             }
-            print("HTTP endpoint: http://127.0.0.1:\(probe.port)")
-            print("IPC socket: \(probe.socketPath)")
-            print("Open tabs: \(probe.tabCount)")
-            exit(0)
         }
-
-        if let pid = pid {
-            let socketPath = NomadUnixSocketBridge.defaultSocketPath
-            print("Nomad: running (mode: daemon, PID \(pid))")
-            print("HTTP endpoint: http://127.0.0.1:\(activePort)")
-            print("IPC socket: \(socketPath)")
-            exit(0)
-        }
-
-        print("Nomad: stopped")
         exit(0)
     }
 
-    private static func handleHeadless(isDaemonChild: Bool) -> Bool {
+    private static func handleHeadless(
+        isDaemonChild: Bool,
+        profile: String?,
+        idleTimeout: Double?,
+        noReap: Bool
+    ) -> Bool {
         NomadHeadlessManager.isHeadless = true
         NSApplication.shared.setActivationPolicy(.accessory)
 
+        if let profName = profile, let p = NomadProfileType(rawValue: profName) {
+            NomadHeadlessManager.shared.profile = p
+        } else {
+            NomadHeadlessManager.shared.profile = .agent
+        }
+
+        if noReap {
+            NomadHeadlessManager.shared.autoReapEnabled = false
+        } else if let timeout = idleTimeout {
+            NomadHeadlessManager.shared.idleTimeoutSeconds = timeout
+        }
+
         if !isDaemonChild {
-            if let pid = getRunningPID() {
-                emitError("[nomad] Error: Another Nomad instance is already running (PID \(pid))")
-                emitError("Run 'nomad stop' first.")
-                exit(1)
+            if let guiPid = getRunningGUIPID() {
+                print("[nomad] GUI instance detected (PID \(guiPid)). Running as concurrent headless worker.")
             }
         }
 
@@ -568,14 +916,14 @@ enum NomadCLIManager {
 
     // MARK: - HTTP Status Probe
 
-    private struct StatusProbeResult {
+    struct StatusProbeResult {
         let mode: String
         let tabCount: Int
         let port: Int
         let socketPath: String
     }
 
-    private static func probeStatus(port: UInt16) -> StatusProbeResult? {
+    static func probeStatus(port: UInt16) -> StatusProbeResult? {
         let sock = NomadUnixSocketBridge.defaultSocketPath
         if FileManager.default.fileExists(atPath: sock),
            let resp = NomadCLIClient.sendUnixSocketRequest(method: "GET", path: "/status", body: nil, socketPath: sock, timeoutSeconds: 1),

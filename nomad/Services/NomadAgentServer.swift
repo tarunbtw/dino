@@ -26,6 +26,57 @@ final class NomadAgentServer: ObservableObject {
         return 9222
     }
 
+    /// Tests whether a local loopback TCP port is available for binding.
+    nonisolated static func isPortAvailable(_ port: UInt16) -> Bool {
+        // 1. Attempt TCP connect. If connection succeeds, another listener is actively bound.
+        let connFd = Darwin.socket(AF_INET, SOCK_STREAM, 0)
+        if connFd >= 0 {
+            defer { Darwin.close(connFd) }
+            var addr = sockaddr_in()
+            addr.sin_family = sa_family_t(AF_INET)
+            addr.sin_port = port.bigEndian
+            addr.sin_addr.s_addr = inet_addr("127.0.0.1")
+            addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+
+            let connRes = withUnsafePointer(to: &addr) { ptr in
+                ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { saPtr in
+                    Darwin.connect(connFd, saPtr, socklen_t(MemoryLayout<sockaddr_in>.size))
+                }
+            }
+            if connRes == 0 {
+                return false
+            }
+        }
+
+        // 2. Attempt bind strictly without SO_REUSEADDR/SO_REUSEPORT
+        let bindFd = Darwin.socket(AF_INET, SOCK_STREAM, 0)
+        guard bindFd >= 0 else { return false }
+        defer { Darwin.close(bindFd) }
+
+        var addr = sockaddr_in()
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = port.bigEndian
+        addr.sin_addr.s_addr = inet_addr("127.0.0.1")
+        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+
+        let bindRes = withUnsafePointer(to: &addr) { ptr in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { saPtr in
+                Darwin.bind(bindFd, saPtr, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        return bindRes == 0
+    }
+
+    /// Scans loopback ports starting from `start` to allocate a collision-free endpoint for headless workers.
+    nonisolated static func findAvailablePort(startingAt start: UInt16 = 9222, maxAttempts: UInt16 = 100) -> UInt16 {
+        for p in start..<(start + maxAttempts) {
+            if isPortAvailable(p) {
+                return p
+            }
+        }
+        return start
+    }
+
     /// Constant-time string comparison to prevent timing attacks on bearer token authentication.
     nonisolated private static func constantTimeEquals(_ a: String, _ b: String) -> Bool {
         let digestA = SHA256.hash(data: Data(a.utf8))
@@ -172,7 +223,24 @@ final class NomadAgentServer: ObservableObject {
         }
         guard !isRunning, !isStarting, listener == nil else { return }
         isStarting = true
-        self.port = port ?? Self.defaultPort
+
+        let targetPort: UInt16
+        if let explicit = port {
+            targetPort = explicit
+        } else if NomadHeadlessManager.isHeadless {
+            if Self.isPortAvailable(Self.defaultPort) {
+                targetPort = Self.defaultPort
+            } else {
+                targetPort = Self.findAvailablePort(startingAt: 9223)
+            }
+        } else {
+            if Self.isPortAvailable(Self.defaultPort) {
+                targetPort = Self.defaultPort
+            } else {
+                targetPort = Self.findAvailablePort(startingAt: 9223)
+            }
+        }
+        self.port = targetPort
 
         do {
             let tcpOptions = NWProtocolTCP.Options()
@@ -196,8 +264,28 @@ final class NomadAgentServer: ObservableObject {
                     case .ready:
                         self.isStarting = false
                         self.isRunning = true
-                        NomadUnixSocketBridge.shared.start(port: self.port, token: self.token)
-                        print("[nomad] Agent server listening on http://127.0.0.1:\(self.port)")
+                        if NomadHeadlessManager.isHeadless {
+                            let pid = getpid()
+                            let workerSocket = NomadCLIManager.workerSocketPath(for: pid)
+                            NomadUnixSocketBridge.shared.start(port: self.port, token: self.token, socketPath: workerSocket)
+                            if NomadCLIManager.getRunningGUIPID() == nil {
+                                let defaultSock = "\(NomadCLIManager.nomadDirectory)/nomad.sock"
+                                if defaultSock != workerSocket {
+                                    unlink(defaultSock)
+                                    symlink(workerSocket, defaultSock)
+                                }
+                            }
+                            NomadCLIManager.recordWorker(
+                                pid: pid,
+                                port: self.port,
+                                socketPath: workerSocket,
+                                profile: NomadHeadlessManager.shared.profile.rawValue
+                            )
+                            print("[nomad] Headless agent server listening on http://127.0.0.1:\(self.port) (Socket: \(workerSocket))")
+                        } else {
+                            NomadUnixSocketBridge.shared.start(port: self.port, token: self.token)
+                            print("[nomad] Agent server listening on http://127.0.0.1:\(self.port)")
+                        }
                     case .failed(let error):
                         print("[nomad] Agent server error: \(error)")
                         self.isStarting = false
@@ -239,6 +327,9 @@ final class NomadAgentServer: ObservableObject {
     // MARK: - HTTP Request Handling (Runs on serverQueue)
 
     nonisolated private func handleIncomingConnection(_ connection: NWConnection) {
+        DispatchQueue.main.async {
+            NomadHeadlessManager.shared.recordActivity()
+        }
         // Enforce loopback check on incoming peer endpoint to prevent interface leakage
         if case .hostPort(let host, _) = connection.endpoint {
             let hostStr = "\(host)"

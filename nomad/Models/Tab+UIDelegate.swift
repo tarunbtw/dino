@@ -11,6 +11,12 @@ import WebKit
 // MARK: - WKUIDelegate
 extension Tab: WKUIDelegate {
     func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+        if navigationAction.modifierFlags.contains(.shift),
+           let targetURL = navigationAction.request.url,
+           ["http", "https"].contains(targetURL.scheme?.lowercased() ?? "") {
+            self.onRequestPeek?(targetURL)
+            return nil
+        }
         if let onOpenTabWithWebView = self.onOpenTabWithWebView {
             return onOpenTabWithWebView(configuration, navigationAction)
         }
