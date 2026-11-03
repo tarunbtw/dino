@@ -116,8 +116,10 @@ final class BrowserStore: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] notif in
-            let appearance = notif.object as? NSAppearance
-            self?.tabs.forEach { $0.webView.appearance = appearance }
+            MainActor.assumeIsolated {
+                let appearance = notif.object as? NSAppearance
+                self?.tabs.forEach { $0.webView.appearance = appearance }
+            }
         }
     }
 
