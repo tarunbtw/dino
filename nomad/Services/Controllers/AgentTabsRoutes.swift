@@ -86,6 +86,7 @@ extension NomadAgentServer {
             }
 
             let newTab = store.newTab(url: targetURL, isIncognito: isIncognito, select: select)
+            NomadCDPSessionManager.shared.notifyTargetCreated(tab: newTab, serverPort: self.port)
             let newTitle = (newTab.webView.title?.isEmpty == false ? newTab.webView.title : newTab.title) ?? ""
             let newURL = (newTab.webView.url?.absoluteString ?? newTab.url?.absoluteString) ?? ""
             sendJSON(connection: connection, object: [
@@ -129,6 +130,7 @@ extension NomadAgentServer {
             }
             let closedId = tab.id.uuidString
             store.closeTab(id: tab.id)
+            NomadCDPSessionManager.shared.notifyTargetDestroyed(tabId: closedId)
             sendJSON(connection: connection, object: ["success": true, "closedTabId": closedId, "tabsCount": store.tabs.count, "tabCount": store.tabs.count], origin: origin)
             return true
 

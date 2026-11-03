@@ -33,6 +33,91 @@ final class NomadMCPServer {
         return nil
     }
 
+    // MARK: - Auto-Registration & Configuration Export
+
+    /// Prints a JSON configuration snippet for manual MCP server registration.
+    static func printConfig() {
+        let snippet = """
+        {
+          "mcpServers": {
+            "nomad": {
+              "command": "nomad",
+              "args": ["mcp"]
+            }
+          }
+        }
+        """
+        print(snippet)
+    }
+
+    /// Automatically registers Nomad MCP server in Claude Desktop, Cursor, and/or Windsurf configuration files.
+    static func install(target: String? = nil) {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let claudeConfigURL = home.appendingPathComponent("Library/Application Support/Claude/claude_desktop_config.json")
+        let cursorConfigURL = home.appendingPathComponent(".cursor/mcp.json")
+        let windsurfConfigURL = home.appendingPathComponent(".codeium/windsurf/mcp_config.json")
+
+        var targetsToInstall: [(name: String, url: URL)] = []
+
+        if let target = target?.lowercased() {
+            switch target {
+            case "claude", "claude-desktop":
+                targetsToInstall.append(("Claude Desktop", claudeConfigURL))
+            case "cursor":
+                targetsToInstall.append(("Cursor", cursorConfigURL))
+            case "windsurf":
+                targetsToInstall.append(("Windsurf", windsurfConfigURL))
+            default:
+                print("nomad: unknown MCP target '\(target)'. Supported targets: claude, cursor, windsurf")
+                return
+            }
+        } else {
+            let fm = FileManager.default
+            if fm.fileExists(atPath: claudeConfigURL.deletingLastPathComponent().path) {
+                targetsToInstall.append(("Claude Desktop", claudeConfigURL))
+            }
+            if fm.fileExists(atPath: cursorConfigURL.deletingLastPathComponent().path) {
+                targetsToInstall.append(("Cursor", cursorConfigURL))
+            }
+            if fm.fileExists(atPath: windsurfConfigURL.deletingLastPathComponent().path) {
+                targetsToInstall.append(("Windsurf", windsurfConfigURL))
+            }
+            if targetsToInstall.isEmpty {
+                targetsToInstall.append(("Claude Desktop", claudeConfigURL))
+                targetsToInstall.append(("Cursor", cursorConfigURL))
+            }
+        }
+
+        let nomadServerEntry: [String: Any] = [
+            "command": "nomad",
+            "args": ["mcp"]
+        ]
+
+        for (appName, url) in targetsToInstall {
+            do {
+                let fm = FileManager.default
+                let parentDir = url.deletingLastPathComponent()
+                try fm.createDirectory(at: parentDir, withIntermediateDirectories: true)
+
+                var rootDict: [String: Any] = [:]
+                if let existingData = try? Data(contentsOf: url),
+                   let parsed = (try? JSONSerialization.jsonObject(with: existingData)) as? [String: Any] {
+                    rootDict = parsed
+                }
+
+                var mcpServers = (rootDict["mcpServers"] as? [String: Any]) ?? [:]
+                mcpServers["nomad"] = nomadServerEntry
+                rootDict["mcpServers"] = mcpServers
+
+                let formattedData = try JSONSerialization.data(withJSONObject: rootDict, options: [.prettyPrinted, .sortedKeys])
+                try formattedData.write(to: url, options: .atomic)
+                print("✅ Successfully registered Nomad MCP server in \(appName): \(url.path)")
+            } catch {
+                print("❌ Failed to register Nomad MCP server in \(appName): \(error.localizedDescription)")
+            }
+        }
+    }
+
     /// Synchronous stdio message loop executed when Nomad is launched with `--mcp`.
     static func run() {
         let inputHandle = FileHandle.standardInput

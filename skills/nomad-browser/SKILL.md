@@ -268,15 +268,138 @@ Usage:
 
 | Command | Description |
 | :--- | :--- |
-| `nomad` | Launch native macOS GUI browser (default with no arguments) |
-| `nomad start` | Run as a detached background daemon in RAM; returns terminal prompt immediately, writes PID to `~/.nomad/nomad.pid`, and redirects logs to `~/.nomad/nomad.log` |
-| `nomad stop` | Gracefully stop the running background daemon (SIGTERM), free RAM, and unlink PID & socket files |
-| `nomad status` | Check running daemon / GUI status, reporting process PID, HTTP endpoint, IPC socket path, and live open tab count |
+| `nomad` | Launch native macOS GUI browser (default with no arguments; activates if already open) |
+| `nomad start` | Run as an isolated detached background worker in RAM; supports concurrent execution alongside GUI, binds dynamic loopback port (`9223+`) and socket (`~/.nomad/workers/worker-<pid>.sock`), and activates auto-reaper (default: 60s idle timeout) |
+| `nomad stop` | Gracefully stop running background workers (SIGTERM) while keeping GUI browser intact. Use `--workers` for all workers, `--gui` for GUI, or `--all` for everything |
+| `nomad status` | Check running GUI and worker status, reporting process PIDs, active profiles, HTTP endpoints, IPC socket paths, and live tab counts |
 | `nomad headless` | Run in foreground with live console logs streaming to terminal; handles `Ctrl+C` (SIGINT) cleanly with graceful socket and PID cleanup |
-| `nomad mcp` | Run stdio Model Context Protocol (MCP) server for Claude Code, Cursor, and Antigravity |
-| `nomad version` | Print version and build information (`nomad version 0.1 (build 1)`) |
+| `nomad mcp` | Run stdio Model Context Protocol (MCP) server for Claude Code, Cursor, Windsurf, and Antigravity |
+| `nomad mcp install` | Auto-detect and register Nomad MCP server in Claude Desktop, Cursor, and Windsurf (`--claude`, `--cursor`, `--windsurf`) |
+| `nomad mcp config` | Print JSON configuration snippet for manual MCP server registration |
+| `nomad version` | Print version and build information (`nomad version 0.30 (build 1)`) |
 | `nomad help` | Display available commands and options |
 | `nomadd` | Direct alias for `nomad headless` |
+
+---
+
+## Universal Chrome DevTools Protocol (CDP) Ingress
+
+Nomad features an embedded, lightweight RFC 6455 WebSocket CDP bridge on `127.0.0.1:9222/cdp` and `/devtools/page/{id}`. This enables any standard agent framework—including **Playwright**, **Puppeteer**, and **`browser-use`**—to drive Nomad directly with genuine Safari WebKit anti-bot stealth and zero focus hijacking.
+
+### 1. `browser-use` (Python)
+Zero-configuration drop-in driver:
+```python
+from browser_use import Browser, BrowserConfig, Agent
+from langchain_openai import ChatOpenAI
+import asyncio
+
+# Connects to Nomad's running WebKit engine over native CDP
+browser = Browser(config=BrowserConfig(cdp_url="http://127.0.0.1:9222"))
+
+async def main():
+    agent = Agent(
+        task="Search for recent Apple Silicon benchmarks and summarize findings",
+        llm=ChatOpenAI(model="gpt-4o"),
+        browser=browser,
+    )
+    history = await agent.run()
+    print(history.final_result())
+
+asyncio.run(main())
+```
+
+### 2. Playwright (Python & TypeScript)
+
+#### Python Playwright:
+```python
+from playwright.sync_api import sync_playwright
+
+with sync_playwright() as p:
+    # Connects over Nomad's local CDP endpoint
+    browser = p.chromium.connect_over_cdp("http://127.0.0.1:9222")
+    context = browser.contexts[0]
+    page = context.pages[0] if context.pages else context.new_page()
+
+    page.goto("https://github.com")
+    print("Nomad page title:", page.title())
+    browser.close()
+```
+
+#### TypeScript / Node.js Playwright:
+```typescript
+import { chromium } from 'playwright';
+
+async function run() {
+  const browser = await chromium.connectOverCDP('http://127.0.0.1:9222');
+  const context = browser.contexts()[0];
+  const page = context.pages()[0] || await context.newPage();
+
+  await page.goto('https://github.com');
+  console.log('Nomad page title:', await page.title());
+  await browser.close();
+}
+
+run();
+```
+
+### 3. Puppeteer
+```javascript
+const puppeteer = require('puppeteer-core');
+
+(async () => {
+  const browser = await puppeteer.connect({
+    browserURL: 'http://127.0.0.1:9222'
+  });
+  const page = (await browser.pages())[0];
+  await page.goto('https://example.com');
+  console.log(await page.title());
+  await browser.disconnect();
+})();
+```
+
+### 4. CDP HTTP Discovery Endpoints
+- `GET /json/version`: Returns browser version, user agent, WebKit version, and master `webSocketDebuggerUrl`.
+- `GET /json` or `GET /json/list`: Returns JSON target array of open tabs with individual `webSocketDebuggerUrl` endpoints (`ws://127.0.0.1:9222/devtools/page/{id}`).
+- `PUT /json/new?<url>`: Spawns a new tab (optionally navigating to `<url>`) and returns target descriptor.
+- `GET /json/activate/{id}`: Switches focus to target tab.
+- `GET /json/close/{id}`: Closes target tab.
+- `GET /json/protocol`: Declares supported protocol domains (`Target`, `Browser`, `Page`, `Runtime`, `DOM`, `Input`, `Network`, `CSS`, `Log`, `Emulation`).
+
+---
+
+## Nomad Official SDKs (`nomad-browser`)
+
+Lightweight, native client libraries available in `sdks/`:
+
+### Python SDK (`sdks/python`)
+```python
+from nomad_browser import Nomad
+
+# Connects to running instance or starts isolated worker
+nomad = Nomad()
+# Or spin up dedicated background worker:
+# nomad = Nomad.start_worker(profile="agent", idle_timeout=60)
+
+nomad.navigate("https://example.com")
+snap = nomad.snapshot(mode="text", limit=50)
+print(snap["summary"])
+
+nomad.click("e1")
+nomad.type("e2", "Hello Nomad!", submit=True)
+```
+
+### TypeScript SDK (`sdks/typescript`)
+```typescript
+import { Nomad } from 'nomad-browser';
+
+const nomad = new Nomad();
+await nomad.navigate('https://example.com');
+const snap = await nomad.snapshot('text', 50);
+console.log(snap.summary);
+
+await nomad.click('e1');
+await nomad.type('e2', 'Hello Nomad!', true);
+```
 
 ### Browser Automation CLI Driver (Token-Optimized Shell Control)
 
@@ -340,7 +463,21 @@ Every subcommand supports `--help` or `-h` (e.g. `nomad snap --help`, `nomad cli
 
 Nomad includes a 100% native Swift Model Context Protocol (MCP) server directly inside the app bundle. It communicates over stdio using JSON-RPC 2.0 with zero external dependencies (no Node.js or npm required).
 
-### Claude Code (`~/.claude/desktop_config.json` or project config)
+### 1-Click Auto-Registration (`nomad mcp install`)
+Run this single command to automatically detect and configure Nomad in Claude Desktop, Cursor, and Windsurf:
+```bash
+nomad mcp install
+
+# Or target specifically:
+nomad mcp install --claude
+nomad mcp install --cursor
+nomad mcp install --windsurf
+
+# To print the JSON snippet directly:
+nomad mcp config
+```
+
+### Manual Configuration
 ```json
 {
   "mcpServers": {

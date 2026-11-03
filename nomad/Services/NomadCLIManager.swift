@@ -342,6 +342,8 @@ enum NomadCLIManager {
 
         // 4. Parse daemon options and process lifecycle subcommand tokens
         var subcommand: String? = nil
+        var mcpAction: String? = nil
+        var mcpTarget: String? = nil
         var configuredPort: UInt16? = nil
         var configuredSocket: String? = nil
         var configuredProfile: String? = nil
@@ -403,9 +405,29 @@ enum NomadCLIManager {
             case "mcp", "--mcp":
                 if subcommand == nil {
                     subcommand = "mcp"
+                    if i + 1 < rawArgs.count {
+                        let next = rawArgs[i + 1].lowercased()
+                        if next == "install" || next == "config" {
+                            i += 1
+                            mcpAction = next
+                            if i + 1 < rawArgs.count && !rawArgs[i + 1].hasPrefix("-") {
+                                i += 1
+                                mcpTarget = rawArgs[i]
+                            }
+                        }
+                    }
                 } else {
                     unrecognizedTokens.append(token)
                 }
+
+            case "--claude":
+                mcpTarget = "claude"
+
+            case "--cursor":
+                mcpTarget = "cursor"
+
+            case "--windsurf":
+                mcpTarget = "windsurf"
 
             case "--daemon-child":
                 isDaemonChild = true
@@ -545,8 +567,16 @@ enum NomadCLIManager {
             return true
 
         case "mcp":
-            NomadMCPServer.run()
-            exit(0)
+            if mcpAction == "install" {
+                NomadMCPServer.install(target: mcpTarget)
+                exit(0)
+            } else if mcpAction == "config" {
+                NomadMCPServer.printConfig()
+                exit(0)
+            } else {
+                NomadMCPServer.run()
+                exit(0)
+            }
 
         case "headless":
             return handleHeadless(
@@ -585,6 +615,8 @@ enum NomadCLIManager {
           status              Check running GUI and worker status
           headless            Run in foreground with live console logs
           mcp                 Run stdio Model Context Protocol (MCP) server
+          mcp install         Auto-register MCP server in Claude Desktop, Cursor, Windsurf
+          mcp config          Print JSON snippet for MCP server registration
           version             Print version information
           help                Show available commands and options
 

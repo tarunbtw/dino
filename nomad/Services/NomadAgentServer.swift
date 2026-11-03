@@ -482,6 +482,19 @@ final class NomadAgentServer: ObservableObject {
 
         let cleanPath = (path.count > 1 && path.hasSuffix("/")) ? String(path.dropLast()) : path
 
+        // Handle WebSocket Upgrade (CDP /devtools/page/*, /devtools/browser/*, or /cdp)
+        if headers["upgrade"]?.lowercased() == "websocket" {
+            handleCDPWebSocketUpgrade(path: cleanPath, headers: headers, connection: connection)
+            return
+        }
+
+        // Handle CDP HTTP Discovery Endpoints (/json/version, /json/list, /json/new, etc.)
+        if cleanPath.hasPrefix("/json") || cleanPath == "/devtools/version" {
+            if handleCDPDiscoveryRoute(method: method, cleanPath: cleanPath, queryString: queryString, bodyData: bodyData, queryItem: queryItem, connection: connection, origin: origin) {
+                return
+            }
+        }
+
         // Token Auth check (bypassed if NOMAD_DISABLE_AUTH=1 in environment)
         let authDisabled = ProcessInfo.processInfo.environment["NOMAD_DISABLE_AUTH"] == "1"
         var isAuthenticated = authDisabled

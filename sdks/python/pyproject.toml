@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nomad-browser"
+version = "0.30.0"
+description = "Official Python SDK and CDP bridge for Nomad - the premier native macOS agentic browser"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [
+    {name = "Nomad Team"}
+]
+keywords = ["nomad", "browser", "agent", "cdp", "web-automation", "browser-use", "playwright"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: MacOS :: MacOS X",
+    "Topic :: Internet :: WWW/HTTP :: Browsers",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence"
+]
+
+[project.urls]
+Homepage = "https://github.com/nomad-browser/nomad"
+

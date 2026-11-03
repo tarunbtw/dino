@@ -1,0 +1,24 @@
+{
+  "name": "nomad-browser",
+  "version": "0.30.0",
+  "description": "Official TypeScript/JavaScript SDK and CDP bridge for Nomad - the premier native macOS agentic browser",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc"
+  },
+  "keywords": [
+    "nomad",
+    "browser",
+    "agent",
+    "cdp",
+    "playwright",
+    "puppeteer",
+    "browser-use"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}
+
