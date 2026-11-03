@@ -225,6 +225,7 @@ extension Tab: WKNavigationDelegate {
         self.committedNavigationSeq = navSeq
         self.lastNavigationError = nil
         self.syncMockRoutes()
+        self.updateNavigationState()
     }
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {

@@ -61,41 +61,8 @@ struct TopBarView: View {
 
             if let activeTab = store.activeTab {
                 // Navigation history buttons
-                HStack(spacing: 2) {
-                    Button(action: { activeTab.goBack() }) {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(Color.primary)
-                            .frame(width: 26, height: 26)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!activeTab.canGoBack)
-                    .opacity(activeTab.canGoBack ? 1.0 : 0.35)
-                    .help("Back (⌘[)")
-
-                    Button(action: { activeTab.goForward() }) {
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(Color.primary)
-                            .frame(width: 26, height: 26)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!activeTab.canGoForward)
-                    .opacity(activeTab.canGoForward ? 1.0 : 0.35)
-                    .help("Forward (⌘])")
-
-                    Button(action: {
-                        if activeTab.isLoading { activeTab.stopLoading() } else { activeTab.reload() }
-                    }) {
-                        Image(systemName: activeTab.isLoading ? "xmark" : "arrow.clockwise")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(Color.primary)
-                            .frame(width: 26, height: 26)
-                    }
-                    .buttonStyle(.plain)
-                    .help(activeTab.isLoading ? "Stop Loading" : "Reload (⌘R)")
-                }
-                .padding(.leading, 8)
+                TopBarNavButtons(tab: activeTab)
+                    .padding(.leading, 8)
 
                 // Omnibox Address Pill
                 omniboxPill(tab: activeTab)
@@ -219,5 +186,50 @@ struct TopBarView: View {
             return host + (path == "/" ? "" : path)
         }
         return tab.isBlank ? "Search or enter address" : tab.title
+    }
+}
+
+/// Navigation controls for vertical top bar: Back, Forward, Reload with reactive @ObservedObject binding.
+private struct TopBarNavButtons: View {
+    @ObservedObject var tab: Tab
+
+    var body: some View {
+        HStack(spacing: 2) {
+            Button(action: { tab.goBack() }) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color.primary)
+                    .frame(width: 26, height: 26)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!tab.canGoBack)
+            .opacity(tab.canGoBack ? 1.0 : 0.35)
+            .help("Back (⌘[)")
+
+            Button(action: { tab.goForward() }) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color.primary)
+                    .frame(width: 26, height: 26)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!tab.canGoForward)
+            .opacity(tab.canGoForward ? 1.0 : 0.35)
+            .help("Forward (⌘])")
+
+            Button(action: {
+                if tab.isLoading { tab.stopLoading() } else { tab.reload() }
+            }) {
+                Image(systemName: tab.isLoading ? "xmark" : "arrow.clockwise")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Color.primary)
+                    .frame(width: 26, height: 26)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(tab.isLoading ? "Stop Loading" : "Reload (⌘R)")
+        }
     }
 }
