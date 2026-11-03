@@ -10,6 +10,10 @@ import Combine
 import AppKit
 import UniformTypeIdentifiers
 
+extension Notification.Name {
+    static let nomadThemeDidChange = Notification.Name("nomadThemeDidChange")
+}
+
 /// Central store for app preferences, appearance customizations, and bookmarks.
 @MainActor
 final class SettingsStore: ObservableObject {
@@ -187,18 +191,21 @@ final class SettingsStore: ObservableObject {
         }
     }
 
+    var currentAppearance: NSAppearance? {
+        switch theme {
+        case "dark": return NSAppearance(named: .darkAqua)
+        case "light": return NSAppearance(named: .aqua)
+        default: return nil
+        }
+    }
+
     func applyTheme() {
-        let appAppearance: NSAppearance? = {
-            switch theme {
-            case "dark": return NSAppearance(named: .darkAqua)
-            case "light": return NSAppearance(named: .aqua)
-            default: return nil
-            }
-        }()
+        let appAppearance = currentAppearance
         NSApp.appearance = appAppearance
         for window in NSApp.windows {
             window.appearance = appAppearance
         }
+        NotificationCenter.default.post(name: .nomadThemeDidChange, object: appAppearance)
     }
 
     // MARK: - Color & Theme Resolvers

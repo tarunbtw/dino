@@ -110,6 +110,15 @@ final class BrowserStore: ObservableObject {
         _ = newTab(url: nil, select: true, lazy: false)
         ExtensionManager.shared.start(with: self)
         NomadAgentServer.shared.start(store: self)
+
+        NotificationCenter.default.addObserver(
+            forName: .nomadThemeDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] notif in
+            let appearance = notif.object as? NSAppearance
+            self?.tabs.forEach { $0.webView.appearance = appearance }
+        }
     }
 
     /// Persists open session tabs to disk.

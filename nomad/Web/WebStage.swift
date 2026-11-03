@@ -19,6 +19,10 @@ struct WebStage: NSViewRepresentable {
     }
 
     func updateNSView(_ hostView: StageHostView, context: Context) {
+        let currentApp = SettingsStore.shared.currentAppearance
+        hostView.appearance = currentApp
+        hostView.activeView?.appearance = currentApp
+
         if tab?.isFloatingVideo == true {
             if hostView.activeView?.superview === hostView {
                 hostView.activeView?.removeFromSuperview()
@@ -60,6 +64,10 @@ final class StageHostView: NSView {
 
         // Mount the newly active web view with exact bounds matching
         if let newView = newView {
+            let currentApp = SettingsStore.shared.currentAppearance
+            appearance = currentApp
+            newView.appearance = currentApp
+
             if let wv = newView as? WKWebView, wv.magnification != 1.0 {
                 wv.setMagnification(1.0, centeredAt: .zero)
             }

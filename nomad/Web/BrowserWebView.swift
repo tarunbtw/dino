@@ -16,6 +16,7 @@ final class BrowserWebView: WKWebView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         window?.acceptsMouseMovedEvents = true
+        appearance = SettingsStore.shared.currentAppearance
     }
 
     override func mouseMoved(with event: NSEvent) {

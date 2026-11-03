@@ -206,20 +206,37 @@ struct VerticalSidebarView: View {
     @ViewBuilder
     private var spacesBarSection: some View {
         if isCollapsed {
-            // Collapsed: Small vertical dots/icons
+            // Collapsed: Clickable space color dots with comfortable hit areas
             VStack(spacing: 4) {
                 ForEach(store.spaces) { space in
                     let isCurrent = space.id == store.activeSpaceId
-                    Button(action: { store.switchSpace(id: space.id) }) {
-                        Circle()
-                            .fill(Color(hex: space.colorHex) ?? settings.accentColor)
-                            .frame(width: isCurrent ? 10 : 6, height: isCurrent ? 10 : 6)
-                            .padding(4)
+                    let dotColor = Color(hex: space.colorHex) ?? settings.accentColor
+                    Button(action: {
+                        withAnimation(.spring(response: 0.22, dampingFraction: 0.88)) {
+                            store.switchSpace(id: space.id)
+                        }
+                    }) {
+                        ZStack {
+                            if isCurrent {
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .fill(dotColor.opacity(0.16))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                            .strokeBorder(dotColor.opacity(0.45), lineWidth: 1)
+                                    )
+                            }
+                            Circle()
+                                .fill(dotColor)
+                                .frame(width: isCurrent ? 8 : 7, height: isCurrent ? 8 : 7)
+                        }
+                        .frame(width: 38, height: 24)
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .help("Space: \(space.name)")
                 }
             }
+            .frame(maxWidth: .infinity)
         } else {
             // Expanded: Horizontal scroll of space pills + add button
             ScrollView(.horizontal, showsIndicators: false) {
@@ -304,11 +321,11 @@ struct VerticalSidebarView: View {
         Button(action: { store.selectTab(id: tab.id) }) {
             ZStack {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(isFocused ? Color.primary.opacity(0.12) : Color.primary.opacity(0.04))
+                    .fill(isFocused ? Color.primary.opacity(0.16) : Color.primary.opacity(0.04))
 
                 if isFocused {
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .strokeBorder(settings.accentColor.opacity(0.5), lineWidth: 1)
+                        .strokeBorder(settings.accentColor, lineWidth: 1.5)
                 }
 
                 if let favicon = tab.favicon {
@@ -325,6 +342,14 @@ struct VerticalSidebarView: View {
                 }
             }
             .frame(width: size, height: size)
+            .overlay(alignment: .leading) {
+                if isFocused && isCollapsed {
+                    Capsule()
+                        .fill(settings.accentColor)
+                        .frame(width: 3, height: 16)
+                        .offset(x: -8)
+                }
+            }
         }
         .buttonStyle(.plain)
         .help(tab.title.isEmpty ? (tab.url?.host ?? "Pinned Tab") : tab.title)
@@ -524,6 +549,7 @@ private struct VerticalTabRowView: View {
     let onDragChanged: (CGFloat) -> Void
     let onDragEnded: (CGFloat) -> Void
 
+    @ObservedObject private var settings = SettingsStore.shared
     @State private var isHovered: Bool = false
     @State private var lastClickTime: TimeInterval = 0
 
@@ -532,35 +558,54 @@ private struct VerticalTabRowView: View {
             if isCollapsed {
                 ZStack {
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(isActive ? Color.primary.opacity(0.12) : (isHovered ? Color.primary.opacity(0.05) : Color.clear))
+                        .fill(isActive ? Color.primary.opacity(0.16) : (isHovered ? Color.primary.opacity(0.06) : Color.clear))
 
                     if isActive {
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .strokeBorder(Color.accentColor.opacity(0.5), lineWidth: 1)
+                            .strokeBorder(settings.accentColor, lineWidth: 1.5)
                     }
 
                     tabIconView
                         .frame(width: 16, height: 16)
                 }
                 .frame(width: 34, height: 34)
+                .overlay(alignment: .leading) {
+                    if isActive {
+                        Capsule()
+                            .fill(settings.accentColor)
+                            .frame(width: 3, height: 16)
+                            .offset(x: -8)
+                    }
+                }
                 .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             } else {
-                HStack(spacing: 8) {
-                    // Tab Favicon / Indicator
+                HStack(spacing: 0) {
+                    if isActive {
+                        Capsule()
+                            .fill(settings.accentColor)
+                            .frame(width: 3, height: 14)
+                            .padding(.trailing, 6)
+                    } else {
+                        Color.clear
+                            .frame(width: 3, height: 14)
+                            .padding(.trailing, 6)
+                    }
+
                     tabIconView
                         .frame(width: 16, height: 16)
+                        .padding(.trailing, 8)
 
                     expandedContent
                 }
-                .padding(.horizontal, 8)
+                .padding(.horizontal, 6)
                 .frame(height: 28)
                 .background(
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(isActive ? Color.primary.opacity(0.08) : (isHovered ? Color.primary.opacity(0.04) : Color.clear))
+                        .fill(isActive ? Color.primary.opacity(0.12) : (isHovered ? Color.primary.opacity(0.04) : Color.clear))
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .strokeBorder(isActive ? Color.primary.opacity(0.06) : Color.clear, lineWidth: 1)
+                        .strokeBorder(isActive ? Color.primary.opacity(0.10) : Color.clear, lineWidth: 1)
                 )
                 .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
             }
@@ -641,7 +686,7 @@ private struct VerticalTabRowView: View {
     private var expandedContent: some View {
         // Tab Title
         Text(displayTitle)
-            .font(.system(size: 11, weight: isActive ? .medium : .regular))
+            .font(.system(size: 11.5, weight: isActive ? .semibold : .regular))
             .lineLimit(1)
             .truncationMode(.tail)
             .foregroundStyle(isActive ? Color.primary : Color.secondary)

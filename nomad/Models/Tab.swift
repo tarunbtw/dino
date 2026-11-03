@@ -300,6 +300,7 @@ final class Tab: NSObject, Identifiable, ObservableObject {
         
         let effectiveConfig = configuration ?? ExtensionManager.shared.configuration(for: initialURL) ?? WebKitPool.makeConfiguration(isIncognito: isIncognito)
         let webView = BrowserWebView(frame: NSRect(x: 0, y: 0, width: 1180, height: 730), configuration: effectiveConfig)
+        webView.appearance = SettingsStore.shared.currentAppearance
         webView.customUserAgent = WebKitPool.customUserAgent
         webView.allowsBackForwardNavigationGestures = false
         webView.allowsMagnification = false
@@ -538,6 +539,7 @@ final class Tab: NSObject, Identifiable, ObservableObject {
         webView.tab = nil
 
         let newWebView = BrowserWebView(frame: NSRect(x: 0, y: 0, width: 1180, height: 730), configuration: targetConfig)
+        newWebView.appearance = SettingsStore.shared.currentAppearance
         newWebView.customUserAgent = WebKitPool.customUserAgent
         newWebView.allowsBackForwardNavigationGestures = false
         newWebView.allowsMagnification = false
