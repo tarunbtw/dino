@@ -19,10 +19,13 @@ Nomad is an ultra-lightweight, native macOS WebKit browser engine featuring an e
 | Tool | Purpose | Token Cost |
 | :--- | :--- | :--- |
 | `nomad_status` | Check engine status, open tabs, active page, and supported capabilities (gated capabilities for minimal token footprint) | ~40 tokens |
-| `nomad_tabs` | List all open tabs (id, title, url, active status; supports 1-based index or UUID) | ~100 tokens |
-| `nomad_new_tab` | Open a new tab (optional `url`, `isIncognito`, `select`) | ~50 tokens |
+| `nomad_tabs` | List all open tabs (id, title, url, active status, `isGhost`; supports 1-based index or UUID) | ~100 tokens |
+| `nomad_new_tab` | Open a new tab (optional `url`, `isIncognito`, `isGhost`, `select`) | ~50 tokens |
 | `nomad_switch_tab` | Switch focused active tab by `id` or index | ~30 tokens |
 | `nomad_close_tab` | Close tab by `id` or index | ~30 tokens |
+| `nomad_promote_tab` | Promote an agent background ghost tab to a visible tab in the human workspace | ~30 tokens |
+| `nomad_split_tab` | Pair an agent ghost tab side-by-side with current tab for live co-browsing | ~30 tokens |
+| `nomad_pip` | Toggle floating Picture-in-Picture window for live monitoring of an agent tab | ~30 tokens |
 | `nomad_navigate` | Navigate active tab to URL, or go back, forward, reload (`action: 'back'|'forward'|'reload'|'url'`, optional `allowLocalFiles: true` for `file://` URLs) | ~50 tokens |
 | `nomad_wait` | Wait for page settlement (`mode: 'auto'` default: checks navigation, inflight requests, selector, and DOM stability), or specific mode (`stability`, `selector`, `networkidle`, `url`, `timeout`, `text`) | ~40 tokens |
 | `nomad_find` | Fast element lookup matching role, text query, or selector across entire document tree | ~15 tokens |
@@ -119,11 +122,20 @@ Supported action types:
 - `clear`: Wipes input/textarea/contentEditable value and triggers change events.
 - `press`: Simulates key press or modifier chord (e.g. `key: "Enter"`, `key: "Meta+A"`, `key: "Escape"`). Validates key names against standard named keys (`Enter`, `Tab`, `Escape`, `Backspace`, `Delete`, `ArrowUp/Down/Left/Right`, `Space`, function keys `F1`–`F12`, and modifier chords); rejects unknown key names. Supports keyboard stepping on `<input type="range">` and `<input type="number">`: `ArrowRight`/`ArrowUp` steps up (`stepUp()`) and `ArrowLeft`/`ArrowDown` steps down (`stepDown()`) with `input` and `change` event dispatch.
 - `selectOption`: Chooses native HTML `<select>` dropdown option by `optionValue` or `optionText`. For custom ARIA/div dropdowns (e.g. Radix, HeadlessUI, React-Select), click the dropdown trigger element, wait/snapshot, and click the option element.
-- `scroll`: Scrolls the viewport by `scrollDeltaY` pixels (e.g. `300` to scroll down, `-300` to scroll up) or `scrollDeltaX`.
+- `scroll` / `wheel`: Scrolls the viewport by `scrollDeltaY` pixels (e.g. `300` to scroll down, `-300` to scroll up) or `scrollDeltaX`. Use `native: true` or `native_scroll` / `native_wheel` to dispatch real macOS CoreGraphics / AppKit HID scroll events with `isTrusted: true` directly to Canvas, WebGL, and map viewports.
 - `drag`: Dispatches standard HTML5 drag-and-drop sequence (`dragstart`, `dragenter`, `dragover`, `drop`, `dragend`) AND interpolated pointer event sequence (`pointerdown`, 5 moves, `pointerup`). Operates seamlessly on modern pointer-driven sortables (SortableJS, React DnD), custom sliders, and HTML5 canvas. Supports element-to-element drag directly via `toElementId` (e.g. `{ "type": "drag", "elementId": "e3", "toElementId": "e8" }` or `toTarget`), or explicit destination pixel coordinates (`toX`, `toY`).
 - `highlight`: Briefly flashes a high-contrast visual outline over the element for visual confirmation.
 - `upload`: Programmatically injects local files into `<input type="file">`, associated `<label>`, or dropzone containers without triggering blocking macOS `NSOpenPanel` sheets (`paths: string[]`). Automatically validates file existence on disk before dispatch.
-- **Native Hardware Input (`native: true` | `isTrusted: true`)**: Pass `"native": true` (or use `native_click`, `native_right_click`, `native_type`, `native_press`, `native_drag`) on any action to bypass synthetic JS dispatch and route through macOS AppKit and CoreGraphics HID queues directly into WebKit's window event pipeline without stealing OS window focus or switching macOS spaces. Produces DOM events with `event.isTrusted === true`, which is required for Canvas-based web apps (Figma, Google Docs), WebGL 3D scenes, Monaco/VSCode web editors, and anti-bot verification sliders.
+- **Native Hardware Input (`native: true` | `isTrusted: true`)**: Pass `"native": true` (or use `native_click`, `native_dblclick`, `native_right_click`, `native_type`, `native_press`, `native_drag`, `native_scroll`, `native_wheel`) on any action to bypass synthetic JS dispatch and route through macOS AppKit and CoreGraphics HID queues directly into WebKit's window event pipeline without stealing OS window focus or switching macOS spaces. Produces DOM events with `event.isTrusted === true`, which is required for Canvas-based web apps (Figma, Google Docs, Maps), WebGL 3D scenes, Monaco/VSCode web editors, and anti-bot verification sliders.
+
+> [!TIP]
+> **Ghost Tabs & Background Execution (Phase 3 Co-Browsing):**
+> Agents can launch background tasks inside active browser windows without disturbing the user's workflow:
+> - **Zero-Focus Ghost Tabs:** Pass `isGhost: true` to `nomad_new_tab` (or `POST /tabs/new`) to run tasks in an invisible background tab. Ghost tabs do not appear in the user's tab strip and are excluded from disk session persistence.
+> - **In-App Co-Browsing Indicator:** When ghost tabs are active, a purple `sparkles` badge appears in Nomad's navigation bar showing the active ghost tab count.
+> - **Picture-in-Picture (PiP) Viewer:** Call `POST /tabs/pip` (or click PiP on the pill popover) to lift the agent's ghost tab into a floating, borderless always-on-top window so the user can observe live automation.
+> - **Side-by-Side Split View:** Call `POST /tabs/split` (or click Split on the pill popover) to tile the agent ghost tab side-by-side with the user's current browsing tab.
+> - **Tab Promotion:** Call `POST /tabs/promote` (or click Promote) to instantly convert an agent ghost tab into a standard visible tab in the human workspace.
 
 > [!TIP]
 > **Cross-Origin Sub-Frame Piercing (Stripe, OAuth, reCAPTCHA):**

@@ -113,6 +113,11 @@ struct NavigationControls: View {
                 }
             }
 
+            // Agent Co-Browsing Indicator (appears when background ghost tabs are running)
+            if !store.ghostTabs.isEmpty {
+                AgentGhostTabsPill(store: store)
+            }
+
             let urlString = tab.url?.absoluteString ?? ""
             let canBookmark = !tab.isBlank && !tab.isInternalPage && !urlString.isEmpty && urlString != "about:blank"
             let isBookmarked = canBookmark && settings.isBookmarked(urlString)
@@ -210,4 +215,155 @@ struct NavigationControls: View {
         .foregroundStyle(.primary)
     }
 }
+
+// MARK: - Agent Ghost Tabs Indicator & Popover
+
+struct AgentGhostTabsPill: View {
+    @ObservedObject var store: BrowserStore
+    @State private var isShowingPopover: Bool = false
+    @State private var isHovered: Bool = false
+
+    var body: some View {
+        Button(action: { isShowingPopover.toggle() }) {
+            HStack(spacing: 4) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.purple)
+                Text("\(store.ghostTabs.count)")
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .foregroundStyle(.primary)
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(
+                isHovered || isShowingPopover
+                    ? Color.purple.opacity(0.18)
+                    : Color.purple.opacity(0.10),
+                in: Capsule()
+            )
+            .overlay(
+                Capsule().strokeBorder(Color.purple.opacity(0.35), lineWidth: 1)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .help("Agent background tabs active (\(store.ghostTabs.count))")
+        .popover(isPresented: $isShowingPopover, arrowEdge: .bottom) {
+            AgentGhostTabsPopover(store: store, isPresented: $isShowingPopover)
+        }
+    }
+}
+
+struct AgentGhostTabsPopover: View {
+    @ObservedObject var store: BrowserStore
+    @Binding var isPresented: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                HStack(spacing: 4) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.purple)
+                    Text("Agent Background Tabs")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                Spacer()
+                Text("\(store.ghostTabs.count) running")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.bottom, 2)
+
+            Divider()
+
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(spacing: 6) {
+                    ForEach(store.ghostTabs) { ghostTab in
+                        HStack(spacing: 8) {
+                            Image(systemName: "globe")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 16, height: 16)
+
+                            VStack(alignment: .leading, spacing: 1) {
+                                let title = ghostTab.title.isEmpty ? (ghostTab.url?.host ?? "Automating...") : ghostTab.title
+                                Text(title)
+                                    .font(.system(size: 11, weight: .medium))
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+
+                                if let host = ghostTab.url?.host {
+                                    Text(host)
+                                        .font(.system(size: 9))
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                            }
+
+                            Spacer(minLength: 4)
+
+                            HStack(spacing: 3) {
+                                Button(action: {
+                                    AgentPiPManager.shared.toggle(tab: ghostTab, store: store)
+                                    isPresented = false
+                                }) {
+                                    Image(systemName: "pip.enter")
+                                        .font(.system(size: 10, weight: .medium))
+                                        .frame(width: 20, height: 20)
+                                        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                                }
+                                .buttonStyle(.plain)
+                                .help("Watch in Picture-in-Picture")
+
+                                Button(action: {
+                                    store.splitGhostTab(id: ghostTab.id)
+                                    isPresented = false
+                                }) {
+                                    Image(systemName: "rectangle.split.2x1")
+                                        .font(.system(size: 10, weight: .medium))
+                                        .frame(width: 20, height: 20)
+                                        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                                }
+                                .buttonStyle(.plain)
+                                .help("Open side-by-side in Split View")
+
+                                Button(action: {
+                                    store.promoteGhostTab(id: ghostTab.id)
+                                    isPresented = false
+                                }) {
+                                    Image(systemName: "arrow.up.right.square")
+                                        .font(.system(size: 10, weight: .medium))
+                                        .frame(width: 20, height: 20)
+                                        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                                }
+                                .buttonStyle(.plain)
+                                .help("Promote to regular tab")
+
+                                Button(action: {
+                                    store.closeTab(id: ghostTab.id)
+                                }) {
+                                    Image(systemName: "xmark")
+                                        .font(.system(size: 9, weight: .medium))
+                                        .frame(width: 20, height: 20)
+                                        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                                }
+                                .buttonStyle(.plain)
+                                .help("Stop and close ghost tab")
+                            }
+                        }
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 4)
+                        .background(Color.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    }
+                }
+            }
+            .frame(maxHeight: 180)
+        }
+        .padding(10)
+        .frame(width: 320)
+    }
+}
+
 

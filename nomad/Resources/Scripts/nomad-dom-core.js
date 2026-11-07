@@ -2712,7 +2712,7 @@
             },
 
             // 4. Overlays indexed visual badges [e1], [e2] and obscures sensitive values for Vision Model Screenshots
-            showBadges: function() {
+            showBadges: function(filterRect) {
                 this.hideBadges();
                 this.blurSensitiveInputs();
 
@@ -2752,6 +2752,13 @@
                     var b = item.bounds;
                     if (b.width <= 0 || b.height <= 0) continue;
                     if (b.y + b.height < 0 || b.y > vpH || b.x + b.width < 0 || b.x > vpW) continue;
+
+                    // Filter by Set-of-Marks container crop rect if provided
+                    if (filterRect) {
+                        var inFilter = (b.x + b.width >= filterRect.x && b.x <= filterRect.x + filterRect.width &&
+                                        b.y + b.height >= filterRect.y && b.y <= filterRect.y + filterRect.height);
+                        if (!inFilter) continue;
+                    }
 
                     var badgeLeft = Math.max(0, Math.min(vpW - 60, b.x));
                     var badgeTop = (b.y >= 14) ? (b.y - 12) : Math.max(0, b.y + 2);

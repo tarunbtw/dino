@@ -47,6 +47,7 @@ extension NomadAgentServer {
                     "title": title,
                     "url": urlStr,
                     "isIncognito": tab.isIncognito,
+                    "isGhost": tab.isGhost,
                     "active": isActive,
                     "isActive": isActive,
                     "isLoading": tab.isLoading,
@@ -62,6 +63,7 @@ extension NomadAgentServer {
                 "tabs": tabsList,
                 "tabsCount": store.tabs.count,
                 "tabCount": store.tabs.count,
+                "ghostTabsCount": store.ghostTabs.count,
                 "tabVirtualization": [
                     "hot": hotCount,
                     "warm": warmCount,
@@ -75,6 +77,7 @@ extension NomadAgentServer {
             var targetURL: URL? = nil
             var select = true
             var isIncognito = false
+            var isGhost = false
 
             if let bodyData = bodyData,
                let json = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any] {
@@ -83,9 +86,11 @@ extension NomadAgentServer {
                 }
                 if let sel = json["select"] as? Bool { select = sel }
                 if let inc = json["isIncognito"] as? Bool { isIncognito = inc }
+                if let gh = json["isGhost"] as? Bool { isGhost = gh } else if let gh = json["ghost"] as? Bool { isGhost = gh }
+                if isGhost && json["select"] == nil { select = false }
             }
 
-            let newTab = store.newTab(url: targetURL, isIncognito: isIncognito, select: select)
+            let newTab = store.newTab(url: targetURL, isIncognito: isIncognito, isGhost: isGhost, select: select)
             NomadCDPSessionManager.shared.notifyTargetCreated(tab: newTab, serverPort: self.port)
             let newTitle = (newTab.webView.title?.isEmpty == false ? newTab.webView.title : newTab.title) ?? ""
             let newURL = (newTab.webView.url?.absoluteString ?? newTab.url?.absoluteString) ?? ""
@@ -94,8 +99,10 @@ extension NomadAgentServer {
                 "tabId": newTab.id.uuidString,
                 "title": newTitle,
                 "url": newURL,
+                "isGhost": newTab.isGhost,
                 "tabsCount": store.tabs.count,
-                "tabCount": store.tabs.count
+                "tabCount": store.tabs.count,
+                "ghostTabsCount": store.ghostTabs.count
             ], origin: origin)
             return true
 
@@ -152,6 +159,77 @@ extension NomadAgentServer {
             }
             tab.tier = newTier
             sendJSON(connection: connection, object: ["success": true, "tabId": tab.id.uuidString, "tier": newTier.rawValue], origin: origin)
+            return true
+
+        case ("POST", "/tabs/split"):
+            var json: [String: Any]? = nil
+            if let bodyData = bodyData {
+                json = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any]
+            }
+            let targetTabId = extractTargetTabId(json: json)
+            let targetTab = targetTabId.flatMap { self.resolveTab(id: $0) } ?? store.ghostTabs.first
+            guard let tab = targetTab else {
+                sendResponse(connection: connection, status: "404 Not Found", body: "{\"error\":\"No tab found to split: \(targetTabId ?? "unknown")\",\"code\":\"TAB_NOT_FOUND\",\"success\":false}", origin: origin)
+                return true
+            }
+            let ratio = (json?["ratio"] as? Double) ?? 0.5
+            store.splitGhostTab(id: tab.id, ratio: ratio)
+            sendJSON(connection: connection, object: [
+                "success": true,
+                "splitTabId": tab.id.uuidString,
+                "activeTabId": store.activeTabId?.uuidString ?? "",
+                "isSplitActive": store.activeSplitPair != nil
+            ], origin: origin)
+            return true
+
+        case ("POST", "/tabs/promote"):
+            var json: [String: Any]? = nil
+            if let bodyData = bodyData {
+                json = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any]
+            }
+            let targetTabId = extractTargetTabId(json: json)
+            let targetTab = targetTabId.flatMap { self.resolveTab(id: $0) } ?? store.ghostTabs.first
+            guard let tab = targetTab else {
+                sendResponse(connection: connection, status: "404 Not Found", body: "{\"error\":\"No ghost tab found to promote: \(targetTabId ?? "unknown")\",\"code\":\"TAB_NOT_FOUND\",\"success\":false}", origin: origin)
+                return true
+            }
+            store.promoteGhostTab(id: tab.id)
+            sendJSON(connection: connection, object: [
+                "success": true,
+                "tabId": tab.id.uuidString,
+                "isGhost": false,
+                "tabsCount": store.tabs.count,
+                "ghostTabsCount": store.ghostTabs.count
+            ], origin: origin)
+            return true
+
+        case ("POST", "/tabs/pip"), ("POST", "/agent/pip"):
+            var json: [String: Any]? = nil
+            if let bodyData = bodyData {
+                json = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any]
+            }
+            let actionStr = (json?["action"] as? String)?.lowercased() ?? "toggle"
+            if actionStr == "dismiss" || actionStr == "close" {
+                AgentPiPManager.shared.dismiss()
+                sendJSON(connection: connection, object: ["success": true, "isFloating": false], origin: origin)
+                return true
+            }
+            let targetTabId = extractTargetTabId(json: json)
+            let targetTab = targetTabId.flatMap { self.resolveTab(id: $0) } ?? store.ghostTabs.first ?? store.activeTab
+            guard let tab = targetTab else {
+                sendResponse(connection: connection, status: "404 Not Found", body: "{\"error\":\"No tab found for PiP: \(targetTabId ?? "unknown")\",\"code\":\"TAB_NOT_FOUND\",\"success\":false}", origin: origin)
+                return true
+            }
+            if actionStr == "present" {
+                AgentPiPManager.shared.present(tab: tab, store: store)
+            } else {
+                AgentPiPManager.shared.toggle(tab: tab, store: store)
+            }
+            sendJSON(connection: connection, object: [
+                "success": true,
+                "tabId": tab.id.uuidString,
+                "isFloating": AgentPiPManager.shared.isFloating
+            ], origin: origin)
             return true
 
         case ("GET", "/extensions"):

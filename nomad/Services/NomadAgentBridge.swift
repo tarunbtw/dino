@@ -151,8 +151,8 @@ struct NomadAction: Codable {
         }
         let validActions: Set<String> = [
             "click", "dblclick", "double_click", "doubleclick", "right_click", "rightclick", "context_menu", "contextmenu",
-            "hover", "type", "clear", "press", "selectoption", "scroll", "drag", "highlight", "upload",
-            "native_click", "native_dblclick", "native_double_click", "native_right_click", "native_context_menu", "native_hover", "native_type", "native_press", "native_drag"
+            "hover", "type", "clear", "press", "selectoption", "scroll", "wheel", "scrollwheel", "drag", "highlight", "upload",
+            "native_click", "native_dblclick", "native_double_click", "native_right_click", "native_context_menu", "native_hover", "native_type", "native_press", "native_drag", "native_scroll", "native_wheel"
         ]
         guard validActions.contains(rawAction.lowercased()) else {
             throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Unknown action type '\(rawAction)'"))
@@ -785,6 +785,7 @@ extension Tab {
                 }
             }
             if let up = upEvent { webView.mouseUp(with: up) }
+            _ = try? await webView.evaluateJavaScript("if (window.__nomad && window.__nomad.updateVirtualCursor) window.__nomad.updateVirtualCursor(\(pt.x), \(pt.y));")
             try? await Task.sleep(nanoseconds: 30_000_000)
 
             return NomadActionResult(
@@ -850,6 +851,7 @@ extension Tab {
             if let up2 = NSEvent.mouseEvent(with: .leftMouseUp, location: winPoint, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: windowNumber, context: nil, eventNumber: 0, clickCount: 2, pressure: 0.0) {
                 webView.mouseUp(with: up2)
             }
+            _ = try? await webView.evaluateJavaScript("if (window.__nomad && window.__nomad.updateVirtualCursor) window.__nomad.updateVirtualCursor(\(pt.x), \(pt.y));")
             try? await Task.sleep(nanoseconds: 30_000_000)
 
             return NomadActionResult(
@@ -910,6 +912,7 @@ extension Tab {
                 }
             }
             if let up = upEvent { webView.rightMouseUp(with: up) }
+            _ = try? await webView.evaluateJavaScript("if (window.__nomad && window.__nomad.updateVirtualCursor) window.__nomad.updateVirtualCursor(\(pt.x), \(pt.y));")
             try? await Task.sleep(nanoseconds: 30_000_000)
 
             return NomadActionResult(
@@ -1067,6 +1070,7 @@ extension Tab {
                 if let drag = NSEvent.mouseEvent(with: .leftMouseDragged, location: intermediateWin, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1.0) {
                     webView.mouseDragged(with: drag)
                 }
+                _ = try? await webView.evaluateJavaScript("if (window.__nomad && window.__nomad.updateVirtualCursor) window.__nomad.updateVirtualCursor(\(intermediate.x), \(intermediate.y));")
                 try? await Task.sleep(nanoseconds: 15_000_000)
             }
 
@@ -1224,6 +1228,75 @@ extension Tab {
                 _ = try? await webView.evaluateJavaScript(stepScript)
             }
             return NomadActionResult(success: true, message: "Native keypress '\(rawChord)' dispatched with isTrusted: true", elementId: action.target, code: "SUCCESS", native: true, isTrusted: true)
+
+        case "scroll", "wheel", "scrollwheel", "native_scroll", "native_wheel":
+            var rawDeltaX = action.scrollDeltaX ?? 0
+            var rawDeltaY = action.scrollDeltaY ?? 0
+
+            if action.scrollDeltaX == nil && action.scrollDeltaY == nil {
+                let amount = action.amount ?? 120
+                let dir = (action.direction ?? "down").lowercased()
+                switch dir {
+                case "up":
+                    rawDeltaY = -amount
+                case "down":
+                    rawDeltaY = amount
+                case "left":
+                    rawDeltaX = -amount
+                case "right":
+                    rawDeltaX = amount
+                default:
+                    rawDeltaY = amount
+                }
+            }
+
+            let pt = targetPoint ?? CGPoint(x: webView.bounds.midX, y: webView.bounds.midY)
+            let winPoint = webView.convert(pt, to: nil)
+            let screenPoint = webView.window?.convertPoint(toScreen: winPoint) ?? winPoint
+            let primaryScreenH = NSScreen.screens.first?.frame.height ?? 1080
+            let cgPos = CGPoint(x: screenPoint.x, y: primaryScreenH - screenPoint.y)
+
+            // 1. Low-level CoreGraphics HID scroll wheel event for hardware queue (Canvas / WebGL / maps)
+            if !NomadHeadlessManager.isHeadless {
+                if let cgScroll = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2, wheel1: Int32(-rawDeltaY), wheel2: Int32(-rawDeltaX), wheel3: 0) {
+                    cgScroll.location = cgPos
+                    cgScroll.postToPid(ProcessInfo.processInfo.processIdentifier)
+                }
+            }
+
+            // 2. High-fidelity AppKit NSEvent dispatched directly to webView
+            if let cgScroll = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2, wheel1: Int32(-rawDeltaY), wheel2: Int32(-rawDeltaX), wheel3: 0) {
+                cgScroll.location = cgPos
+                if let nsScroll = NSEvent(cgEvent: cgScroll) {
+                    webView.scrollWheel(with: nsScroll)
+                }
+            }
+
+            // 3. Fallback DOM scroll & in-app virtual cursor tracking
+            let jsScroll = """
+            (function() {
+                try {
+                    window.scrollBy(\(rawDeltaX), \(rawDeltaY));
+                    if (window.__nomad && window.__nomad.updateVirtualCursor) {
+                        window.__nomad.updateVirtualCursor(\(pt.x), \(pt.y));
+                    }
+                } catch(e) {}
+            })()
+            """
+            _ = try? await webView.evaluateJavaScript(jsScroll)
+            try? await Task.sleep(nanoseconds: 20_000_000)
+
+            return NomadActionResult(
+                success: true,
+                message: "Native scroll dispatched (deltaX: \(Int(rawDeltaX)), deltaY: \(Int(rawDeltaY))) at (\(Int(pt.x)), \(Int(pt.y))) with isTrusted: true",
+                elementId: action.target,
+                centerCoordinates: ["x": pt.x, "y": pt.y],
+                code: "SUCCESS",
+                native: true,
+                isTrusted: true,
+                lastDialog: self.lastDialog,
+                hasPendingDialog: self.pendingDialog != nil
+            )
 
         default:
             return NomadActionResult(success: false, message: "Native mode not supported for action type '\(action.action)'", elementId: action.target, code: "UNSUPPORTED_NATIVE_ACTION")

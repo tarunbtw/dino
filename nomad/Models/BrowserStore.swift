@@ -92,19 +92,23 @@ final class BrowserStore: ObservableObject {
         spaces.first { $0.id == activeSpaceId } ?? spaces[0]
     }
 
-    /// Tabs visible in the current view context: all pinned tabs + unpinned tabs belonging to the active space.
+    /// Tabs visible in the current view context: all pinned tabs + unpinned tabs belonging to the active space (excluding background ghost tabs).
     var visibleTabs: [Tab] {
         tabs.filter { tab in
-            tab.isPinned || tab.spaceId == activeSpaceId || tab.spaceId == nil
+            !tab.isGhost && (tab.isPinned || tab.spaceId == activeSpaceId || tab.spaceId == nil)
         }
     }
 
     var pinnedTabs: [Tab] {
-        tabs.filter { $0.isPinned }
+        tabs.filter { $0.isPinned && !$0.isGhost }
     }
 
     var unpinnedTabsForActiveSpace: [Tab] {
-        tabs.filter { !$0.isPinned && ($0.spaceId == activeSpaceId || $0.spaceId == nil) }
+        tabs.filter { !$0.isPinned && !$0.isGhost && ($0.spaceId == activeSpaceId || $0.spaceId == nil) }
+    }
+
+    var ghostTabs: [Tab] {
+        tabs.filter { $0.isGhost }
     }
 
     init() {
@@ -132,20 +136,21 @@ final class BrowserStore: ObservableObject {
         }
     }
 
-    /// Persists open session tabs to disk.
+    /// Persists open session tabs to disk (excluding background ghost tabs and incognito tabs).
     private func persistSession() {
-        SessionManager.shared.save(tabs: tabs, activeTabId: activeTabId)
+        let persistentTabs = tabs.filter { !$0.isGhost && !$0.isIncognito }
+        SessionManager.shared.save(tabs: persistentTabs, activeTabId: activeTabId)
     }
 
     /// Creates and appends a new tab.
     @discardableResult
-    func newTab(url: URL? = nil, configuration: WKWebViewConfiguration? = nil, isIncognito: Bool = false, select: Bool = true, lazy: Bool = false) -> Tab {
-        // Prevent opening duplicate empty blank tabs:
+    func newTab(url: URL? = nil, configuration: WKWebViewConfiguration? = nil, isIncognito: Bool = false, isGhost: Bool = false, select: Bool = true, lazy: Bool = false) -> Tab {
+        // Prevent opening duplicate empty blank tabs (non-ghost only):
         // If requesting a blank new tab (url == nil) and a blank tab already exists, select it instead of duplicating.
-        if url == nil && configuration == nil {
-            if let active = activeTab, active.isBlank && active.isIncognito == isIncognito {
+        if url == nil && configuration == nil && !isGhost {
+            if let active = activeTab, active.isBlank && active.isIncognito == isIncognito && !active.isGhost {
                 return active
-            } else if let existingBlank = tabs.first(where: { $0.isBlank && $0.isIncognito == isIncognito }) {
+            } else if let existingBlank = tabs.first(where: { $0.isBlank && $0.isIncognito == isIncognito && !$0.isGhost }) {
                 if select {
                     selectTab(id: existingBlank.id)
                 }
@@ -154,8 +159,8 @@ final class BrowserStore: ObservableObject {
         }
 
         // Prevent opening duplicate settings tabs: switch to existing settings tab if present
-        if let targetURL = url, targetURL.scheme == "nomad", targetURL.host == "settings" {
-            if let existingSettings = tabs.first(where: { $0.isInternalPage }) {
+        if let targetURL = url, targetURL.scheme == "nomad", targetURL.host == "settings", !isGhost {
+            if let existingSettings = tabs.first(where: { $0.isInternalPage && !$0.isGhost }) {
                 if select {
                     selectTab(id: existingSettings.id)
                 }
@@ -163,7 +168,7 @@ final class BrowserStore: ObservableObject {
             }
         }
 
-        let tab = Tab(initialURL: url, configuration: configuration, isIncognito: isIncognito, lazy: lazy)
+        let tab = Tab(initialURL: url, configuration: configuration, isIncognito: isIncognito, isGhost: isGhost, lazy: lazy)
         tab.spaceId = activeSpaceId
         
         tab.onOpenURLInNewTab = { [weak self, weak tab] targetURL in
@@ -217,14 +222,14 @@ final class BrowserStore: ObservableObject {
 
         tab.onDidFocus = { [weak self, weak tab] in
             guard let self, let id = tab?.id else { return }
-            if self.activeTabId != id {
+            if self.activeTabId != id && !(tab?.isGhost ?? false) {
                 self.activeTabId = id
             }
         }
         
         withAnimation(.spring(response: 0.28, dampingFraction: 0.8)) {
             tabs.append(tab)
-            if select {
+            if select && !isGhost {
                 activeTabId = tab.id
             }
         }
@@ -266,7 +271,8 @@ final class BrowserStore: ObservableObject {
         
         let isClosingActive = (activeTabId == id)
         let tab = tabs[index]
-        if !tab.isIncognito && !tab.isBlank {
+        AgentPiPManager.shared.landIfTab(id: id)
+        if !tab.isGhost && !tab.isIncognito && !tab.isBlank {
             recentlyClosedTabs.insert(ClosedTabSnapshot(url: tab.url, title: tab.title, isIncognito: tab.isIncognito), at: 0)
             if recentlyClosedTabs.count > 25 {
                 recentlyClosedTabs.removeLast()
@@ -289,12 +295,15 @@ final class BrowserStore: ObservableObject {
             if isClosingActive {
                 if let partnerId = nextActiveFromSplit, tabs.contains(where: { $0.id == partnerId }) {
                     activeTabId = partnerId
-                } else if tabs.isEmpty {
-                    // Keep at least one tab open
-                    newTab(url: nil, select: true)
                 } else {
-                    let nextIndex = min(index, tabs.count - 1)
-                    activeTabId = tabs[nextIndex].id
+                    let visible = visibleTabs
+                    if visible.isEmpty {
+                        // Keep at least one visible tab open
+                        newTab(url: nil, select: true)
+                    } else {
+                        let nextIndex = min(index, visible.count - 1)
+                        activeTabId = visible[nextIndex].id
+                    }
                 }
             }
         }
@@ -498,6 +507,21 @@ final class BrowserStore: ObservableObject {
         splitTab(primaryId: currentTab.id, secondaryId: newT.id)
         selectTab(id: newT.id)
         return newT
+    }
+
+    /// Pairs an agent ghost tab side-by-side with the current active tab for live co-browsing.
+    func splitGhostTab(id: UUID, ratio: Double = 0.5) {
+        guard let currentTab = activeTab, currentTab.id != id,
+              tabs.contains(where: { $0.id == id }) else { return }
+        splitTab(primaryId: currentTab.id, secondaryId: id, ratio: ratio)
+    }
+
+    /// Promotes an agent background ghost tab to a full visible tab in the human workspace.
+    func promoteGhostTab(id: UUID) {
+        guard let tab = tabs.first(where: { $0.id == id }) else { return }
+        tab.isGhost = false
+        selectTab(id: tab.id)
+        persistSession()
     }
 
     /// Ungroups the split pair for the given tab, returning both tabs to standalone status (never closes tabs).

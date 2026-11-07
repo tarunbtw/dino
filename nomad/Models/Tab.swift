@@ -129,6 +129,7 @@ final class Tab: NSObject, Identifiable, ObservableObject {
     @Published var wantsNextNewTabInSplit: Bool = false
     @Published var wantsNextNewTabIncognito: Bool = false
     @Published var isPinned: Bool = false
+    @Published var isGhost: Bool = false
     @Published var spaceId: UUID? = nil
     @Published var profileType: NomadProfileType = NomadProfileManager.defaultProfile
     @Published var hoveredLink: String? = nil
@@ -284,10 +285,11 @@ final class Tab: NSObject, Identifiable, ObservableObject {
     private(set) var hasLoaded: Bool = false
     private var observers: [NSKeyValueObservation] = []
 
-    init(id: UUID = UUID(), initialURL: URL? = nil, configuration: WKWebViewConfiguration? = nil, profileType: NomadProfileType? = nil, isIncognito: Bool = false, lazy: Bool = false) {
+    init(id: UUID = UUID(), initialURL: URL? = nil, configuration: WKWebViewConfiguration? = nil, profileType: NomadProfileType? = nil, isIncognito: Bool = false, isGhost: Bool = false, lazy: Bool = false) {
         self.id = id
         self.url = initialURL
         self.isIncognito = isIncognito
+        self.isGhost = isGhost
         let effectiveProfile = profileType ?? NomadProfileManager.defaultProfile
         self.profileType = effectiveProfile
 
