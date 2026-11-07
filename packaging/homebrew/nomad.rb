@@ -1,6 +1,6 @@
 cask "nomad" do
-  version "0.31"
-  sha256 "26aebc264c32ef4ed372260dd9f2b82018bd4f30c311d120fcd3c2bc26e85c2d"
+  version "0.32"
+  sha256 "aa11c52b651a1941b52603cb5951fc00b31a39330dc8a0f1a4c77afc7f971f94"
 
   url "https://github.com/tarunbtw/nomad/releases/download/v#{version}/Nomad-#{version}.zip"
   name "Nomad"
