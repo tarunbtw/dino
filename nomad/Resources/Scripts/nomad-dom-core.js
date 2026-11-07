@@ -3223,9 +3223,33 @@
                     container = el.closest('dialog, [role="dialog"], [aria-modal="true"], form, [class*="modal"], [class*="popup"], [class*="overlay"], [class*="card"], [class*="panel"], main, article');
                     if (!container) container = el.parentElement;
                 } else {
+                    // 1. Active Modals & Dialogs
                     container = document.querySelector('dialog[open], [role="dialog"], [aria-modal="true"], .modal.show, .modal.active, .modal.open, .popup.show, .popup.active');
+                    // 2. Focused element container
                     if (!container && document.activeElement && document.activeElement !== document.body) {
-                        container = document.activeElement.closest('form, dialog, [role="dialog"], [class*="modal"], [class*="card"]');
+                        container = document.activeElement.closest('form, dialog, [role="dialog"], [class*="modal"], [class*="card"], [class*="panel"]');
+                    }
+                    // 3. Primary visible form / search box
+                    if (!container) {
+                        var forms = document.querySelectorAll('form:not([hidden]), [role="form"]:not([hidden]), [role="search"]:not([hidden])');
+                        for (var fi = 0; fi < forms.length; fi++) {
+                            var fr = forms[fi].getBoundingClientRect();
+                            if (fr.width >= 160 && fr.height >= 32 && fr.top < window.innerHeight && fr.bottom > 0) {
+                                container = forms[fi];
+                                break;
+                            }
+                        }
+                    }
+                    // 4. Bounded content card or region
+                    if (!container) {
+                        var mainCards = document.querySelectorAll('.card:not([hidden]), article:not([hidden]), [role="region"]:not([hidden]), [class*="content-wrapper"]:not([hidden])');
+                        for (var ci = 0; ci < mainCards.length; ci++) {
+                            var cr = mainCards[ci].getBoundingClientRect();
+                            if (cr.width >= 240 && cr.height >= 120 && cr.width <= window.innerWidth * 0.95 && cr.top < window.innerHeight && cr.bottom > 0) {
+                                container = mainCards[ci];
+                                break;
+                            }
+                        }
                     }
                 }
 

@@ -305,13 +305,13 @@ enum NomadCLIManager {
 
         // 3. Intercept browser automation driver subcommands (snap, click, type, etc.)
         let driverCommands: Set<String> = [
-            "snap", "snapshot", "open", "nav", "navigate",
+            "snap", "snapshot", "open", "nav", "navigate", "goto",
             "back", "forward", "reload", "click", "dblclick", "double-click", "type",
             "press", "drag", "hover", "select", "scroll",
             "wait", "tabs", "tab", "eval", "evaluate",
             "shot", "screenshot", "upload", "find", "dialog",
             "ext", "extensions", "storage", "console", "network",
-            "downloads", "download"
+            "downloads", "download", "token", "playbook", "hitl"
         ]
 
         var driverCmdIndex: Int? = nil
@@ -633,7 +633,7 @@ enum NomadCLIManager {
         Browser Automation Commands (Token-Optimized Driver):
           snap [options]      Capture compact semantic markdown snapshot
           find [options]      Fast element lookup returning target ref (~15 tokens)
-          open <url>          Navigate active tab to URL
+          open, goto <url>    Navigate active tab to URL
           click <ref>         Click element by reference (e.g. e5)
           dblclick <ref>      Double-click element by reference (or click --double)
           type <ref> <text>   Type text into input field (e.g. e2)
@@ -658,6 +658,9 @@ enum NomadCLIManager {
           downloads [subcmd]  List or wait for active file downloads
           back, forward       Navigate history backward or forward
           reload              Reload the current page
+          token [options]     Display agent authentication token (--header, --json)
+          playbook <subcmd>   Record or replay macro playbooks (record, stop, run, list, export, rm)
+          hitl [subcmd]       Check or resolve Human-in-the-Loop challenges (status, resolve)
 
         Driver Options:
           --gui               Route action specifically to GUI window
@@ -675,6 +678,7 @@ enum NomadCLIManager {
           --mode <mode>       Wait mode: auto, selector, text, state, networkidle
           --tab <id|idx>      Target specific tab by index or ID
           -l, --labeled       Render element ID badges on screenshot (for shot)
+          --crop              Auto-crop to active container/modal (for shot)
         """
         print(helpText)
         exit(0)

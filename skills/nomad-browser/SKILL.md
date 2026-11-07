@@ -469,7 +469,7 @@ When driving Nomad from the terminal, shell scripts, or an AI agent without MCP 
 | `curl -s -X POST http://.../action -d '{"type":"drag","elementId":"e3","toElementId":"e8"}'` | **`nomad drag <from> <to>`** | Drags element to destination element (`--native`, supports pointer sortables & canvas) |
 | `curl -s -X POST http://.../action -d '{"type":"hover","elementId":"e5"}'` | **`nomad hover <ref>`** | Hovers over element (`--native`, activates `:hover` and reveals submenus) |
 | `curl -s -X POST http://.../action -d '{"type":"selectOption","elementId":"e4","optionValue":"US"}'` | **`nomad select <ref> <val>`** | Selects dropdown option by value or text |
-| `curl -s -X POST http://.../action -d '{"type":"scroll","direction":"down","amount":300}'` | **`nomad scroll [dir] [px]`** | Scrolls active viewport (default: `down 300`) |
+| `curl -s -X POST http://.../action -d '{"type":"scroll","direction":"down","amount":300}'` | **`nomad scroll [dir] [px]`** | Scrolls active viewport (default: `down 300`, `--native` for hardware wheel) |
 | `curl -s -X POST http://.../wait` | **`nomad wait [timeout_ms]`** | Waits for auto-stability, element, or content (`--text`, `--state`, `--selector`, `--url`, `--mode`) |
 | `curl -s -X POST http://.../find -d '{"text":"..."}'` | **`nomad find <query>`** | Fast element lookup in ~15 tokens across full document tree (`--role`, `--text`, `--selector`, `--ref-only`) |
 | `curl -s -X POST http://.../storage` | **`nomad storage [get\|set\|clear]`** | Inspects, injects, or clears localStorage, sessionStorage, and cookies |
@@ -483,12 +483,17 @@ When driving Nomad from the terminal, shell scripts, or an AI agent without MCP 
 | `curl -s -X POST http://.../tabs/switch` | **`nomad tab switch <id\|idx>`** | Switches tab by 1-based index, 0-based index, or UUID prefix |
 | `curl -s -X POST http://.../tabs/close` | **`nomad tab close [id\|idx]`** | Closes tab by index or UUID (default: active tab) |
 | `curl -s -X POST http://.../evaluate` | **`nomad eval <js_code>`** | Evaluates JavaScript in isolated world by default (`--world isolated|page`) |
-| `curl -s http://127.0.0.1:9222/screenshot` | **`nomad shot [file.png]`** | Saves screenshot (`-l`/`--labeled`, `-e <ref>`, `-` for stdout pipe) |
+| `curl -s http://127.0.0.1:9222/screenshot` | **`nomad shot [file.png]`** | Saves screenshot (`-l`/`--labeled`, `--crop` for container auto-crop, `-e <ref>`, `-` for stdout pipe) |
 | `curl -s -X POST http://.../upload` | **`nomad upload <ref> <files>`** | Stages and uploads files to file input |
 | `curl -s -X POST http://.../navigate -d '{"action":"back"}'` | **`nomad back`**, **`nomad forward`**, **`nomad reload`** | History and page reload navigation |
-| `curl -s http://127.0.0.1:9222/playbook/list` | **`nomad playbook list`** | Lists saved macro playbooks |
-| `curl -s -X POST http://.../playbook/replay -d '{"name":"..."}'` | **`nomad playbook run <name>`** | Replays macro playbook deterministically with 0 tokens |
-| `curl -s http://127.0.0.1:9222/hitl/status` | **`nomad hitl`** | Checks Human-in-the-Loop challenge status |
+| `curl -s -X POST http://.../navigate -d '{"url":"..."}'` | **`nomad open <url>`**, **`nomad goto <url>`** | Navigates active tab to target URL |
+| `cat ~/.nomad/agent-token` | **`nomad token`** | Prints agent Bearer token (`--header` for curl string, `--json`) |
+| `curl -s http://127.0.0.1:9222/playbook/list` | **`nomad playbook list`** | Lists saved macro playbooks in `~/.nomad/playbooks/` |
+| `curl -s -X POST http://.../playbook/record` | **`nomad playbook record <name>`** | Starts recording sequential actions into macro playbook |
+| `curl -s -X POST http://.../playbook/stop` | **`nomad playbook stop`** | Stops recording and persists playbook to disk |
+| `curl -s -X POST http://.../playbook/replay -d '{"name":"..."}'` | **`nomad playbook run <name>`** | Replays macro playbook deterministically with **0 LLM tokens** |
+| `curl -s http://127.0.0.1:9222/hitl/status` | **`nomad hitl`**, **`nomad hitl status`** | Inspects Human-in-the-Loop challenge status |
+| `curl -s -X POST http://.../hitl/resolve` | **`nomad hitl resolve`** | Clears challenge and unblocks paused automation |
 
 ---
 

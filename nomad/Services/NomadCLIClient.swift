@@ -73,7 +73,7 @@ enum NomadCLIClient {
         "--element", "-e", "--world", "--port", "--socket", "--policy",
         "--press", "-p", "--wait", "-w", "--url", "--to-target", "--to-selector",
         "--to-x", "--to-y", "--output", "-o", "--pixels", "--modifiers", "--value",
-        "--state", "--response", "--timeout"
+        "--state", "--response", "--timeout", "--name"
     ]
 
     private static let allowedCommandOptions: [String: Set<String>] = [
@@ -82,6 +82,7 @@ enum NomadCLIClient {
         "open": ["--allow-local-files", "--local", "-l", "--wait", "-w", "--tab"],
         "nav": ["--allow-local-files", "--local", "-l", "--wait", "-w", "--tab"],
         "navigate": ["--allow-local-files", "--local", "-l", "--wait", "-w", "--tab"],
+        "goto": ["--allow-local-files", "--local", "-l", "--wait", "-w", "--tab"],
         "back": ["--wait", "-w", "--tab"],
         "forward": ["--wait", "-w", "--tab"],
         "reload": ["--wait", "-w", "--tab"],
@@ -93,7 +94,7 @@ enum NomadCLIClient {
         "drag": ["--native", "--to-target", "--to-selector", "--to-x", "--to-y", "--wait", "-w", "--tab"],
         "hover": ["--tab"],
         "select": ["--text", "--value", "--wait", "-w", "--tab"],
-        "scroll": ["--up", "--down", "--left", "--right", "--top", "--bottom", "--pixels", "--tab"],
+        "scroll": ["--up", "--down", "--left", "--right", "--top", "--bottom", "--pixels", "--tab", "--native", "-n"],
         "wait": ["--mode", "-m", "--duration", "--timeout", "--selector", "-s", "--target", "-t", "--url", "--text", "--state", "--tab"],
         "find": ["--role", "-r", "--text", "--selector", "-s", "--viewport", "-v", "--viewportOnly", "--ref-only", "--tab"],
         "dialog": ["--policy", "--response", "--tab"],
@@ -103,13 +104,16 @@ enum NomadCLIClient {
         "tabs": ["--close", "--new", "--switch", "--wait", "-w", "--incognito"],
         "eval": ["--world", "--tab"],
         "evaluate": ["--world", "--tab"],
-        "shot": ["--clip", "-c", "--element", "-e", "--labeled", "-l", "--output", "-o", "--tab"],
-        "screenshot": ["--clip", "-c", "--element", "-e", "--labeled", "-l", "--output", "-o", "--tab"],
+        "shot": ["--clip", "-c", "--element", "-e", "--labeled", "-l", "--output", "-o", "--tab", "--crop", "--som-crop"],
+        "screenshot": ["--clip", "-c", "--element", "-e", "--labeled", "-l", "--output", "-o", "--tab", "--crop", "--som-crop"],
         "upload": ["--tab"],
         "storage": ["--tab", "--json", "-j"],
         "console": ["--tab", "--level", "-l", "--clear", "-c", "--json", "-j"],
         "network": ["--tab", "--filter", "-f", "--clear", "-c", "--json", "-j"],
-        "downloads": ["--wait", "-w", "--timeout", "-t", "--delete", "-d", "--clear", "--json", "-j"]
+        "downloads": ["--wait", "-w", "--timeout", "-t", "--delete", "-d", "--clear", "--json", "-j"],
+        "token": ["--header", "-H", "--json", "-j"],
+        "playbook": ["--tab", "--wait", "-w", "--name"],
+        "hitl": ["--tab"]
     ]
 
     private static func valueOptionKeys(for command: String) -> Set<String> {
@@ -471,7 +475,7 @@ enum NomadCLIClient {
             handleSnap(args: args, port: activePort, socketPath: activeSocket)
             return true
 
-        case "open", "nav", "navigate":
+        case "open", "nav", "navigate", "goto":
             handleOpen(args: args, port: activePort, socketPath: activeSocket)
             return true
 
@@ -565,6 +569,18 @@ enum NomadCLIClient {
 
         case "downloads", "download":
             handleDownloads(args: args, port: activePort, socketPath: activeSocket)
+            return true
+
+        case "token":
+            handleToken(args: args)
+            return true
+
+        case "playbook":
+            handlePlaybook(args: args, port: activePort, socketPath: activeSocket)
+            return true
+
+        case "hitl":
+            handleHitl(args: args, port: activePort, socketPath: activeSocket)
             return true
 
         default:
@@ -1384,10 +1400,13 @@ enum NomadCLIClient {
             }
         }
 
+        let isNative = args.boolFlag(["--native", "-n"])
+
         var bodyObj: [String: Any] = [
             "type": "scroll",
             "direction": direction,
-            "amount": amount
+            "amount": amount,
+            "native": isNative
         ]
         if let tabArg = args.stringOption(["--tab"]),
            let tid = resolveTabId(tabArg, port: port, socketPath: socketPath) {
@@ -1402,7 +1421,7 @@ enum NomadCLIClient {
         let resp = request(method: "POST", path: "/action", body: bodyData, socketPath: socketPath, port: port)
         _ = validateActionResponse(resp, command: "scroll")
 
-        emitOutput("Scrolled \(direction) \(Int(amount))px")
+        emitOutput("Scrolled \(direction) \(Int(amount))px\(isNative ? " (native)" : "")")
         exit(0)
     }
 
@@ -1803,6 +1822,10 @@ enum NomadCLIClient {
         if isLabeled {
             queryItems.append("labeled=true")
         }
+        let isCrop = args.boolFlag(["--crop", "--som-crop"])
+        if isCrop {
+            queryItems.append("somCrop=true")
+        }
         if let el = args.stringOption(["--element", "-e"]) {
             queryItems.append("elementId=\(el)")
         }
@@ -2110,5 +2133,185 @@ enum NomadCLIClient {
             emitOutput("- \(filename) (\(size) bytes) -> \(path)")
         }
         exit(0)
+    }
+
+    private static func handleToken(args: ParsedArgs) {
+        let token = NomadAgentServer.loadOrCreateAgentToken()
+        if args.boolFlag(["--header", "-H"]) {
+            emitOutput("Authorization: Bearer \(token)")
+        } else if args.boolFlag(["--json", "-j"]) {
+            let obj: [String: Any] = [
+                "token": token,
+                "header": "Authorization: Bearer \(token)",
+                "path": "~/.nomad/agent-token"
+            ]
+            if let data = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted]),
+               let s = String(data: data, encoding: .utf8) {
+                emitOutput(s)
+            } else {
+                emitOutput("{\"token\":\"\(token)\"}")
+            }
+        } else {
+            emitOutput(token)
+        }
+        exit(0)
+    }
+
+    private static func handlePlaybook(args: ParsedArgs, port: UInt16?, socketPath: String?) {
+        guard let sub = args.positionals.first?.lowercased() else {
+            emitError("nomad playbook: subcommand required (record, stop, run, replay, list, export, delete)")
+            exit(1)
+        }
+
+        switch sub {
+        case "record":
+            var name = "playbook"
+            if args.positionals.count > 1 {
+                name = args.positionals[1]
+            } else if let n = args.stringOption(["--name"]) {
+                name = n
+            }
+            var bodyObj: [String: Any] = ["name": name]
+            if let tabArg = args.stringOption(["--tab"]),
+               let tid = resolveTabId(tabArg, port: port, socketPath: socketPath) {
+                bodyObj["tabId"] = tid
+            }
+            guard let bodyData = try? JSONSerialization.data(withJSONObject: bodyObj) else {
+                emitError("nomad playbook record: failed to encode request")
+                exit(1)
+            }
+            let resp = request(method: "POST", path: "/playbook/record", body: bodyData, socketPath: socketPath, port: port)
+            _ = validateActionResponse(resp, command: "playbook record")
+            emitOutput("Started recording playbook '\(name)'")
+            exit(0)
+
+        case "stop":
+            let resp = request(method: "POST", path: "/playbook/stop", socketPath: socketPath, port: port)
+            _ = validateActionResponse(resp, command: "playbook stop")
+            if let json = resp.jsonObject,
+               let name = json["name"] as? String,
+               let count = json["actionCount"] as? Int {
+                emitOutput("Stopped recording. Saved playbook '\(name)' with \(count) action(s).")
+            } else {
+                emitOutput("Playbook recording stopped.")
+            }
+            exit(0)
+
+        case "run", "replay":
+            guard args.positionals.count > 1 || args.stringOption(["--name"]) != nil else {
+                emitError("nomad playbook run: playbook name required (e.g. 'nomad playbook run checkout')")
+                exit(1)
+            }
+            let name = args.positionals.count > 1 ? args.positionals[1] : args.stringOption(["--name"])!
+            var bodyObj: [String: Any] = ["name": name]
+            if let tabArg = args.stringOption(["--tab"]),
+               let tid = resolveTabId(tabArg, port: port, socketPath: socketPath) {
+                bodyObj["tabId"] = tid
+            }
+            guard let bodyData = try? JSONSerialization.data(withJSONObject: bodyObj) else {
+                emitError("nomad playbook run: failed to encode request")
+                exit(1)
+            }
+            let resp = request(method: "POST", path: "/playbook/replay", body: bodyData, timeoutSeconds: 60, socketPath: socketPath, port: port)
+            _ = validateActionResponse(resp, command: "playbook run")
+            if let json = resp.jsonObject,
+               let total = json["total"] as? Int,
+               let executed = json["executed"] as? Int {
+                emitOutput("Replayed '\(name)': \(executed)/\(total) step(s) executed successfully (0 tokens).")
+            } else {
+                emitOutput("Playbook '\(name)' replayed successfully.")
+            }
+            exit(0)
+
+        case "list":
+            let resp = request(method: "GET", path: "/playbook/list", socketPath: socketPath, port: port)
+            guard resp.statusCode == 200, let json = resp.jsonObject else {
+                emitError("nomad playbook list: failed to fetch playbooks")
+                exit(1)
+            }
+            let playbooks = json["playbooks"] as? [String] ?? []
+            if playbooks.isEmpty {
+                emitOutput("No saved playbooks found in ~/.nomad/playbooks/")
+            } else {
+                emitOutput("Saved Playbooks (\(playbooks.count)):")
+                for pb in playbooks {
+                    emitOutput("  - \(pb)")
+                }
+            }
+            exit(0)
+
+        case "export":
+            guard args.positionals.count > 1 || args.stringOption(["--name"]) != nil else {
+                emitError("nomad playbook export: playbook name required (e.g. 'nomad playbook export checkout')")
+                exit(1)
+            }
+            let name = args.positionals.count > 1 ? args.positionals[1] : args.stringOption(["--name"])!
+            let path = "/playbook/export?name=\(name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? name)"
+            let resp = request(method: "GET", path: path, socketPath: socketPath, port: port)
+            guard resp.statusCode == 200 else {
+                emitError("nomad playbook export: playbook '\(name)' not found")
+                exit(1)
+            }
+            emitOutput(resp.bodyString)
+            exit(0)
+
+        case "delete", "rm":
+            guard args.positionals.count > 1 || args.stringOption(["--name"]) != nil else {
+                emitError("nomad playbook delete: playbook name required (e.g. 'nomad playbook delete checkout')")
+                exit(1)
+            }
+            let name = args.positionals.count > 1 ? args.positionals[1] : args.stringOption(["--name"])!
+            let path = "/playbook?name=\(name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? name)"
+            let resp = request(method: "DELETE", path: path, socketPath: socketPath, port: port)
+            _ = validateActionResponse(resp, command: "playbook delete")
+            emitOutput("Deleted playbook '\(name)'")
+            exit(0)
+
+        default:
+            emitError("nomad playbook: unknown subcommand '\(sub)'. Expected record, stop, run, list, export, or delete.")
+            exit(1)
+        }
+    }
+
+    private static func handleHitl(args: ParsedArgs, port: UInt16?, socketPath: String?) {
+        let sub = args.positionals.first?.lowercased() ?? "status"
+        switch sub {
+        case "status":
+            var query = ""
+            if let tabArg = args.stringOption(["--tab"]),
+               let tid = resolveTabId(tabArg, port: port, socketPath: socketPath) {
+                query = "?tabId=\(tid)"
+            }
+            let resp = request(method: "GET", path: "/hitl/status\(query)", socketPath: socketPath, port: port)
+            guard resp.statusCode == 200, let json = resp.jsonObject else {
+                emitError("nomad hitl: failed to get HITL status")
+                exit(1)
+            }
+            let isActive = json["isHitlActive"] as? Bool ?? false
+            let challengeType = json["challengeType"] as? String ?? "none"
+            let resolved = json["resolved"] as? Bool ?? true
+            if isActive {
+                emitOutput("HITL Guard: Security challenge ACTIVE [\(challengeType)]. Human completion required.")
+            } else {
+                emitOutput("HITL Guard: Normal (no challenge active, resolved=\(resolved)).")
+            }
+            exit(0)
+
+        case "resolve":
+            var bodyObj: [String: Any] = [:]
+            if let tabArg = args.stringOption(["--tab"]),
+               let tid = resolveTabId(tabArg, port: port, socketPath: socketPath) {
+                bodyObj["tabId"] = tid
+            }
+            let bodyData = try? JSONSerialization.data(withJSONObject: bodyObj)
+            let resp = request(method: "POST", path: "/hitl/resolve", body: bodyData, socketPath: socketPath, port: port)
+            _ = validateActionResponse(resp, command: "hitl resolve")
+            emitOutput("HITL challenge resolved. Automation unblocked.")
+            exit(0)
+
+        default:
+            emitError("nomad hitl: unknown subcommand '\(sub)'. Expected 'status' or 'resolve'.")
+            exit(1)
+        }
     }
 }

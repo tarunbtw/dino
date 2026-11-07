@@ -530,7 +530,14 @@ final class NomadAgentServer: ObservableObject {
                     return
                 }
             } else {
-                sendResponse(connection: connection, status: "401 Unauthorized", body: "{\"error\":\"Unauthorized: valid Bearer token required in Authorization header or ~/.nomad/agent-token\",\"code\":\"UNAUTHORIZED\",\"success\":false}", origin: origin)
+                let authErrorObj: [String: Any] = [
+                    "error": "Unauthorized: valid Bearer token required in 'Authorization: Bearer <token>' or 'X-Nomad-Token: <token>' header.",
+                    "code": "UNAUTHORIZED",
+                    "success": false,
+                    "tokenPath": "~/.nomad/agent-token",
+                    "hint": "Read token from ~/.nomad/agent-token, run 'nomad token --header' via CLI, or set NOMAD_DISABLE_AUTH=1 in your environment for local development."
+                ]
+                sendJSON(connection: connection, status: "401 Unauthorized", object: authErrorObj, origin: origin)
                 return
             }
         }
