@@ -508,6 +508,60 @@ extension NomadAgentServer {
             sendJSON(connection: connection, object: ["success": true, "cleared": true], origin: origin)
             return true
 
+        case ("POST", "/route"), ("POST", "/network/route"):
+            guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin) else { return true }
+            guard let bodyData = bodyData,
+                  let routeObj = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any] else {
+                sendResponse(connection: connection, status: "400 Bad Request", body: "{\"error\":\"Missing or invalid JSON body in /route\",\"code\":\"INVALID_PAYLOAD\",\"success\":false}", origin: origin)
+                return true
+            }
+            let pattern = (routeObj["pattern"] as? String) ?? (routeObj["url"] as? String) ?? ""
+            guard !pattern.isEmpty else {
+                sendResponse(connection: connection, status: "400 Bad Request", body: "{\"error\":\"Missing required 'pattern' or 'url' in /route\",\"code\":\"MISSING_PATTERN\",\"success\":false}", origin: origin)
+                return true
+            }
+            let action = ((routeObj["action"] as? String) ?? (routeObj["type"] as? String) ?? "").lowercased()
+            let isBlock = (action == "abort" || action == "block") || (routeObj["block"] as? Bool ?? false)
+            if isBlock {
+                if !activeTab.blockedURLPatterns.contains(pattern) {
+                    activeTab.blockedURLPatterns.append(pattern)
+                }
+                activeTab.mockRoutes.removeAll(where: { ($0["url"] as? String) == pattern })
+                activeTab.mockRoutes.append(["url": pattern, "block": true])
+                activeTab.syncMockRoutes()
+                sendJSON(connection: connection, object: ["success": true, "routed": true, "action": "block", "pattern": pattern], origin: origin)
+                return true
+            } else {
+                var mockObj = routeObj
+                mockObj["url"] = pattern
+                let method = (mockObj["method"] as? String)?.uppercased()
+                activeTab.mockRoutes.removeAll(where: {
+                    ($0["url"] as? String) == pattern &&
+                    (($0["method"] as? String)?.uppercased() == method)
+                })
+                activeTab.mockRoutes.append(mockObj)
+                activeTab.syncMockRoutes()
+                sendJSON(connection: connection, object: ["success": true, "routed": true, "action": "mock", "pattern": pattern], origin: origin)
+                return true
+            }
+
+        case ("GET", "/route"), ("GET", "/route/list"):
+            guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin) else { return true }
+            sendJSON(connection: connection, object: [
+                "success": true,
+                "routes": activeTab.mockRoutes,
+                "blockedPatterns": activeTab.blockedURLPatterns
+            ], origin: origin)
+            return true
+
+        case ("DELETE", "/route"):
+            guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin) else { return true }
+            activeTab.blockedURLPatterns.removeAll()
+            activeTab.mockRoutes.removeAll()
+            activeTab.syncMockRoutes()
+            sendJSON(connection: connection, object: ["success": true, "cleared": true], origin: origin)
+            return true
+
         case ("POST", "/network/mock"):
             guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin) else { return true }
             guard let bodyData = bodyData,

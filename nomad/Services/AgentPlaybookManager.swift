@@ -80,11 +80,12 @@ final class AgentPlaybookManager: ObservableObject {
         refreshSavedList()
     }
 
-    /// Deterministically replays an action trajectory on the target tab.
-    func replay(actions: [NomadAction], on tab: Tab) async throws -> (success: Bool, executed: Int, error: String?) {
+    /// Deterministically replays an action trajectory on the target tab with optional parameter interpolation.
+    func replay(actions: [NomadAction], variables: [String: String] = [:], on tab: Tab) async throws -> (success: Bool, executed: Int, error: String?) {
         var count = 0
         for action in actions {
-            let res = try await tab.performAction(action)
+            let activeAction = action.interpolated(with: variables)
+            let res = try await tab.performAction(activeAction)
             if !res.success {
                 return (false, count, res.message)
             }

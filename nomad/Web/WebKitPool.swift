@@ -74,6 +74,81 @@ enum WebKitPool {
         let userScript = WKUserScript(source: globalFixes, injectionTime: .atDocumentStart, forMainFrameOnly: false)
         ucc.addUserScript(userScript)
 
+        // Nomad Stealth & Anti-Bot Engine Script
+        // Injected at .atDocumentStart across all frames (including challenge iframes)
+        let stealthScript = """
+        (function() {
+            if (window.__nomad_stealth_hooked) return;
+            window.__nomad_stealth_hooked = true;
+
+            // 1. Mask navigator.webdriver (returns undefined instead of true)
+            try {
+                Object.defineProperty(navigator, 'webdriver', {
+                    get: function() { return undefined; },
+                    configurable: true,
+                    enumerable: true
+                });
+            } catch(e) {}
+
+            // 2. Mock authentic Safari plugins & mimeTypes
+            try {
+                const fakePlugins = [
+                    { name: "WebKit built-in PDF", filename: "internal-pdf-viewer", description: "Portable Document Format" }
+                ];
+                Object.defineProperty(navigator, 'plugins', {
+                    get: function() { return fakePlugins; },
+                    configurable: true
+                });
+                Object.defineProperty(navigator, 'mimeTypes', {
+                    get: function() {
+                        return [{ type: "application/pdf", suffixes: "pdf", description: "Portable Document Format", enabledPlugin: fakePlugins[0] }];
+                    },
+                    configurable: true
+                });
+            } catch(e) {}
+
+            // 3. Synthetic window.chrome runtime & client hints for Google Workspace compatibility
+            try {
+                if (!window.chrome) {
+                    window.chrome = {
+                        runtime: { id: "nomad-runtime", connect: function() {}, sendMessage: function() {} },
+                        app: { isInstalled: false, InstallState: { DISABLED: "disabled" } }
+                    };
+                }
+                if (!navigator.userAgentData) {
+                    navigator.userAgentData = {
+                        brands: [
+                            { brand: "Chromium", version: "131" },
+                            { brand: "Google Chrome", version: "131" },
+                            { brand: "Not_A Brand", version: "24" }
+                        ],
+                        mobile: false,
+                        platform: "macOS"
+                    };
+                }
+            } catch(e) {}
+
+            // 4. WebGL Vendor & Renderer Hardware Mask (Apple Silicon GPU)
+            try {
+                function maskWebGL(proto) {
+                    if (!proto || !proto.getParameter) return;
+                    const origGetParam = proto.getParameter;
+                    proto.getParameter = function(param) {
+                        if (param === 37445) return "Apple Inc."; // UNMASKED_VENDOR_WEBGL
+                        if (param === 37446) return "Apple M3 Max"; // UNMASKED_RENDERER_WEBGL
+                        return origGetParam.apply(this, arguments);
+                    };
+                    try {
+                        Object.defineProperty(proto.getParameter, 'name', { value: 'getParameter', configurable: true });
+                    } catch(e) {}
+                }
+                if (typeof WebGLRenderingContext !== 'undefined') maskWebGL(WebGLRenderingContext.prototype);
+                if (typeof WebGL2RenderingContext !== 'undefined') maskWebGL(WebGL2RenderingContext.prototype);
+            } catch(e) {}
+        })();
+        """
+        ucc.addUserScript(WKUserScript(source: stealthScript, injectionTime: .atDocumentStart, forMainFrameOnly: false))
+
         // Capture console output for Nomad DevX Console
         let consoleInterceptor = """
         (function() {

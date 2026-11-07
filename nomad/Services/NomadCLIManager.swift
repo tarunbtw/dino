@@ -311,7 +311,7 @@ enum NomadCLIManager {
             "wait", "tabs", "tab", "eval", "evaluate",
             "shot", "screenshot", "upload", "find", "dialog",
             "ext", "extensions", "storage", "console", "network",
-            "downloads", "download", "token", "playbook", "hitl"
+            "downloads", "download", "token", "playbook", "hitl", "route"
         ]
 
         var driverCmdIndex: Int? = nil
@@ -659,7 +659,8 @@ enum NomadCLIManager {
           back, forward       Navigate history backward or forward
           reload              Reload the current page
           token [options]     Display agent authentication token (--header, --json)
-          playbook <subcmd>   Record or replay macro playbooks (record, stop, run, list, export, rm)
+          playbook <subcmd>   Record or replay macro playbooks (record, stop, run, list, export, rm, --var)
+          route <subcmd>      Intercept, block, or mock network requests (block, mock, list, clear)
           hitl [subcmd]       Check or resolve Human-in-the-Loop challenges (status, resolve)
 
         Driver Options:

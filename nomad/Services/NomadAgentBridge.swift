@@ -104,6 +104,30 @@ struct NomadAction: Codable {
         paths ?? []
     }
 
+    /// Returns a copy of this action with template variables (e.g. {{query}}) dynamically interpolated.
+    func interpolated(with variables: [String: String]) -> NomadAction {
+        guard !variables.isEmpty else { return self }
+        var copy = self
+        func replaceVars(_ str: String?) -> String? {
+            guard let s = str, s.contains("{{") else { return str }
+            var result = s
+            for (k, v) in variables {
+                result = result.replacingOccurrences(of: "{{\(k)}}", with: v)
+                result = result.replacingOccurrences(of: "{{ \(k) }}", with: v)
+            }
+            return result
+        }
+        copy.text = replaceVars(copy.text)
+        copy.target = replaceVars(copy.target)
+        copy.selector = replaceVars(copy.selector)
+        copy.elementId = replaceVars(copy.elementId)
+        copy.toTarget = replaceVars(copy.toTarget)
+        copy.optionValue = replaceVars(copy.optionValue)
+        copy.optionText = replaceVars(copy.optionText)
+        copy.dialogResponse = replaceVars(copy.dialogResponse)
+        return copy
+    }
+
     init(action: String = "click", target: String? = nil, selector: String? = nil, elementId: String? = nil, toTarget: String? = nil, toElementId: String? = nil, toSelector: String? = nil, text: String? = nil, key: String? = nil, direction: String? = nil, amount: CGFloat? = nil, submit: Bool? = nil, blur: Bool? = nil, change: Bool? = nil, clear: Bool? = nil, force: Bool? = nil, native: Bool? = nil, x: CGFloat? = nil, y: CGFloat? = nil, toX: CGFloat? = nil, toY: CGFloat? = nil, scrollDeltaY: CGFloat? = nil, scrollDeltaX: CGFloat? = nil, optionValue: String? = nil, optionText: String? = nil, modifiers: [String]? = nil, paths: [String]? = nil, dialogPolicy: String? = nil, dialogResponse: String? = nil) {
         self.action = action
         self.target = target ?? elementId ?? selector

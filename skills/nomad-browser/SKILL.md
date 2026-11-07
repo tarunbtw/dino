@@ -491,7 +491,10 @@ When driving Nomad from the terminal, shell scripts, or an AI agent without MCP 
 | `curl -s http://127.0.0.1:9222/playbook/list` | **`nomad playbook list`** | Lists saved macro playbooks in `~/.nomad/playbooks/` |
 | `curl -s -X POST http://.../playbook/record` | **`nomad playbook record <name>`** | Starts recording sequential actions into macro playbook |
 | `curl -s -X POST http://.../playbook/stop` | **`nomad playbook stop`** | Stops recording and persists playbook to disk |
-| `curl -s -X POST http://.../playbook/replay -d '{"name":"..."}'` | **`nomad playbook run <name>`** | Replays macro playbook deterministically with **0 LLM tokens** |
+| `curl -s -X POST http://.../playbook/replay -d '{"name":"...","variables":{...}}'` | **`nomad playbook run <name> [--var k=v]`** | Replays macro playbook with dynamic variable interpolation and **0 LLM tokens** |
+| `curl -s -X POST http://.../route -d '{"pattern":"...","action":"abort"}'` | **`nomad route block <pattern>`** | Blocks matching network requests instantly |
+| `curl -s -X POST http://.../route -d '{"pattern":"...","action":"mock"}'` | **`nomad route mock <pat> [body]`** | Mocks matching API responses with synthetic JSON without touching network |
+| `curl -s http://127.0.0.1:9222/route` | **`nomad route list`**, **`nomad route clear`** | Inspects or clears active network intercept rules |
 | `curl -s http://127.0.0.1:9222/hitl/status` | **`nomad hitl`**, **`nomad hitl status`** | Inspects Human-in-the-Loop challenge status |
 | `curl -s -X POST http://.../hitl/resolve` | **`nomad hitl resolve`** | Clears challenge and unblocks paused automation |
 

@@ -50,6 +50,7 @@ enum NomadCLIClient {
         var positionals: [String] = []
         var flags: Set<String> = []
         var options: [String: String] = [:]
+        var multiOptions: [String: [String]] = [:]
 
         func stringOption(_ keys: [String]) -> String? {
             for k in keys {
@@ -112,7 +113,8 @@ enum NomadCLIClient {
         "network": ["--tab", "--filter", "-f", "--clear", "-c", "--json", "-j"],
         "downloads": ["--wait", "-w", "--timeout", "-t", "--delete", "-d", "--clear", "--json", "-j"],
         "token": ["--header", "-H", "--json", "-j"],
-        "playbook": ["--tab", "--wait", "-w", "--name"],
+        "playbook": ["--tab", "--wait", "-w", "--name", "--var", "-V", "--param"],
+        "route": ["--tab", "--status", "--body", "--header", "--exact", "--method"],
         "hitl": ["--tab"]
     ]
 
@@ -155,6 +157,10 @@ enum NomadCLIClient {
             return ["--timeout", "-t", "--delete", "-d", "--wait", "-w", "--port", "--socket"]
         case "storage":
             return ["--tab", "--port", "--socket"]
+        case "playbook":
+            return ["--name", "--tab", "--wait", "-w", "--var", "-V", "--param", "--port", "--socket"]
+        case "route":
+            return ["--status", "--body", "--header", "--method", "--tab", "--port", "--socket"]
         default:
             return valueOptionKeys
         }
@@ -173,13 +179,16 @@ enum NomadCLIClient {
                     let key = String(token[..<eqIdx])
                     let val = String(token[token.index(after: eqIdx)...])
                     parsed.options[key] = val
+                    parsed.multiOptions[key, default: []].append(val)
                     i += 1
                     continue
                 }
 
                 if activeValueKeys.contains(token) {
                     if i + 1 < args.count && !args[i + 1].hasPrefix("-") {
-                        parsed.options[token] = args[i + 1]
+                        let val = args[i + 1]
+                        parsed.options[token] = val
+                        parsed.multiOptions[token, default: []].append(val)
                         i += 2
                         continue
                     }
@@ -577,6 +586,10 @@ enum NomadCLIClient {
 
         case "playbook":
             handlePlaybook(args: args, port: activePort, socketPath: activeSocket)
+            return true
+
+        case "route":
+            handleRoute(args: args, port: activePort, socketPath: activeSocket)
             return true
 
         case "hitl":
@@ -2204,6 +2217,28 @@ enum NomadCLIClient {
             }
             let name = args.positionals.count > 1 ? args.positionals[1] : args.stringOption(["--name"])!
             var bodyObj: [String: Any] = ["name": name]
+
+            var variables: [String: String] = [:]
+            let varList = (args.multiOptions["--var"] ?? []) + (args.multiOptions["-V"] ?? []) + (args.multiOptions["--param"] ?? [])
+            if !varList.isEmpty {
+                for item in varList {
+                    if let eq = item.firstIndex(of: "=") {
+                        let k = String(item[..<eq]).trimmingCharacters(in: .whitespaces)
+                        let v = String(item[item.index(after: eq)...]).trimmingCharacters(in: .whitespaces)
+                        variables[k] = v
+                    }
+                }
+            } else if let single = args.stringOption(["--var", "-V", "--param"]) {
+                if let eq = single.firstIndex(of: "=") {
+                    let k = String(single[..<eq]).trimmingCharacters(in: .whitespaces)
+                    let v = String(single[single.index(after: eq)...]).trimmingCharacters(in: .whitespaces)
+                    variables[k] = v
+                }
+            }
+            if !variables.isEmpty {
+                bodyObj["variables"] = variables
+            }
+
             if let tabArg = args.stringOption(["--tab"]),
                let tid = resolveTabId(tabArg, port: port, socketPath: socketPath) {
                 bodyObj["tabId"] = tid
@@ -2311,6 +2346,128 @@ enum NomadCLIClient {
 
         default:
             emitError("nomad hitl: unknown subcommand '\(sub)'. Expected 'status' or 'resolve'.")
+            exit(1)
+        }
+    }
+
+    private static func handleRoute(args: ParsedArgs, port: UInt16?, socketPath: String?) {
+        guard let sub = args.positionals.first?.lowercased() else {
+            emitError("nomad route: subcommand required (block, mock, list, clear)")
+            exit(1)
+        }
+
+        switch sub {
+        case "block", "abort":
+            guard args.positionals.count > 1 else {
+                emitError("nomad route block: pattern required (e.g. 'nomad route block *://*.doubleclick.net/**')")
+                exit(1)
+            }
+            let pattern = args.positionals[1]
+            var bodyObj: [String: Any] = ["pattern": pattern, "action": "abort"]
+            if let tabArg = args.stringOption(["--tab"]),
+               let tid = resolveTabId(tabArg, port: port, socketPath: socketPath) {
+                bodyObj["tabId"] = tid
+            }
+            guard let bodyData = try? JSONSerialization.data(withJSONObject: bodyObj) else {
+                emitError("nomad route block: serialization failed")
+                exit(1)
+            }
+            let resp = request(method: "POST", path: "/route", body: bodyData, socketPath: socketPath, port: port)
+            _ = validateActionResponse(resp, command: "route block")
+            emitOutput("Blocked network pattern: \(pattern)")
+            exit(0)
+
+        case "mock":
+            guard args.positionals.count > 1 else {
+                emitError("nomad route mock: pattern required (e.g. 'nomad route mock */api/user')")
+                exit(1)
+            }
+            let pattern = args.positionals[1]
+            var bodyObj: [String: Any] = [
+                "pattern": pattern,
+                "action": "mock",
+                "status": Int(args.stringOption(["--status"]) ?? "200") ?? 200
+            ]
+            if let customBody = args.stringOption(["--body"]) {
+                if let data = customBody.data(using: .utf8),
+                   let json = try? JSONSerialization.jsonObject(with: data) {
+                    bodyObj["body"] = json
+                } else {
+                    bodyObj["body"] = customBody
+                }
+            } else if args.positionals.count > 2 {
+                let rest = args.positionals.dropFirst(2).joined(separator: " ")
+                if let data = rest.data(using: .utf8),
+                   let json = try? JSONSerialization.jsonObject(with: data) {
+                    bodyObj["body"] = json
+                } else {
+                    bodyObj["body"] = rest
+                }
+            }
+            if let tabArg = args.stringOption(["--tab"]),
+               let tid = resolveTabId(tabArg, port: port, socketPath: socketPath) {
+                bodyObj["tabId"] = tid
+            }
+            guard let bodyData = try? JSONSerialization.data(withJSONObject: bodyObj) else {
+                emitError("nomad route mock: serialization failed")
+                exit(1)
+            }
+            let resp = request(method: "POST", path: "/route", body: bodyData, socketPath: socketPath, port: port)
+            _ = validateActionResponse(resp, command: "route mock")
+            emitOutput("Mocked network pattern: \(pattern)")
+            exit(0)
+
+        case "list":
+            var query = ""
+            if let tabArg = args.stringOption(["--tab"]),
+               let tid = resolveTabId(tabArg, port: port, socketPath: socketPath) {
+                query = "?tabId=\(tid)"
+            }
+            let resp = request(method: "GET", path: "/route\(query)", socketPath: socketPath, port: port)
+            guard resp.statusCode == 200, let json = resp.jsonObject else {
+                emitError("nomad route list: failed to fetch routes")
+                exit(1)
+            }
+            var hasRules = false
+            if let blocked = json["blockedPatterns"] as? [String], !blocked.isEmpty {
+                hasRules = true
+                emitOutput("Blocked Patterns (\(blocked.count)):")
+                for p in blocked {
+                    emitOutput("  - [BLOCK] \(p)")
+                }
+            }
+            if let routes = json["routes"] as? [[String: Any]], !routes.isEmpty {
+                hasRules = true
+                emitOutput("Active Routes (\(routes.count)):")
+                for r in routes {
+                    let u = (r["url"] as? String) ?? "*"
+                    let isBlock = r["block"] as? Bool ?? false
+                    let status = (r["status"] as? Int) ?? 200
+                    if isBlock {
+                        emitOutput("  - [BLOCK] \(u)")
+                    } else {
+                        emitOutput("  - [MOCK \(status)] \(u)")
+                    }
+                }
+            }
+            if !hasRules {
+                emitOutput("No active network routes configured.")
+            }
+            exit(0)
+
+        case "clear":
+            var query = ""
+            if let tabArg = args.stringOption(["--tab"]),
+               let tid = resolveTabId(tabArg, port: port, socketPath: socketPath) {
+                query = "?tabId=\(tid)"
+            }
+            let resp = request(method: "DELETE", path: "/route\(query)", socketPath: socketPath, port: port)
+            _ = validateActionResponse(resp, command: "route clear")
+            emitOutput("All network routes cleared.")
+            exit(0)
+
+        default:
+            emitError("nomad route: unknown subcommand '\(sub)'. Expected block, mock, list, or clear.")
             exit(1)
         }
     }

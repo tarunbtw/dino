@@ -46,9 +46,13 @@ extension NomadAgentServer {
         case ("POST", "/playbook/replay"):
             guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin) else { return true }
             var actionsToReplay: [NomadAction]? = nil
+            var variables: [String: String] = [:]
 
             if let bodyData = bodyData,
                let json = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any] {
+                if let vars = json["variables"] as? [String: String] ?? json["params"] as? [String: String] {
+                    variables = vars
+                }
                 if let actionsArr = json["actions"] as? [[String: Any]],
                    let actData = try? JSONSerialization.data(withJSONObject: actionsArr) {
                     actionsToReplay = try? JSONDecoder().decode([NomadAction].self, from: actData)
@@ -65,7 +69,7 @@ extension NomadAgentServer {
             }
 
             do {
-                let replayResult = try await manager.replay(actions: actions, on: activeTab)
+                let replayResult = try await manager.replay(actions: actions, variables: variables, on: activeTab)
                 sendJSON(connection: connection, object: [
                     "success": replayResult.success,
                     "executed": replayResult.executed,
