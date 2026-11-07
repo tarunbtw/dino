@@ -2937,6 +2937,408 @@
                 }
 
                 return res;
+            },
+
+            // Computes compact DOM mutation diff between sequential actions
+            getDiff: function(options) {
+                options = options || {};
+                var snap = this.getSemanticTree({
+                    limit: -1,
+                    viewportOnly: options.viewportOnly || false,
+                    includeText: true
+                });
+                var currentElements = (snap && snap.elements) ? snap.elements : [];
+                var currentMap = {};
+                for (var i = 0; i < currentElements.length; i++) {
+                    var el = currentElements[i];
+                    if (el && el.id) {
+                        currentMap[el.id] = {
+                            id: el.id,
+                            tag: el.tag,
+                            role: el.role,
+                            text: (el.text || '').trim(),
+                            value: (el.value || '').trim(),
+                            type: el.type,
+                            disabled: Boolean(el.disabled),
+                            checked: Boolean(el.checked),
+                            selected: Boolean(el.selected),
+                            domId: el.domId,
+                            href: el.href,
+                            bounds: el.bounds
+                        };
+                    }
+                }
+
+                var prevMap = this._lastSnapshotMap;
+                var hasBaseline = Boolean(prevMap);
+                var added = [];
+                var removed = [];
+                var changed = [];
+
+                if (prevMap) {
+                    for (var curId in currentMap) {
+                        var cur = currentMap[curId];
+                        var prev = prevMap[curId];
+                        if (!prev) {
+                            added.push(cur);
+                        } else {
+                            var textDiff = cur.text !== prev.text;
+                            var valDiff = cur.value !== prev.value;
+                            var stateDiff = cur.disabled !== prev.disabled || cur.checked !== prev.checked || cur.selected !== prev.selected;
+                            if (textDiff || valDiff || stateDiff) {
+                                changed.push({
+                                    id: cur.id,
+                                    tag: cur.tag,
+                                    role: cur.role,
+                                    domId: cur.domId,
+                                    current: cur,
+                                    previous: prev,
+                                    changes: {
+                                        text: textDiff ? { from: prev.text, to: cur.text } : null,
+                                        value: valDiff ? { from: prev.value, to: cur.value } : null,
+                                        disabled: cur.disabled !== prev.disabled ? cur.disabled : null,
+                                        checked: cur.checked !== prev.checked ? cur.checked : null,
+                                        selected: cur.selected !== prev.selected ? cur.selected : null
+                                    }
+                                });
+                            }
+                        }
+                    }
+                    for (var oldId in prevMap) {
+                        if (!currentMap[oldId]) {
+                            removed.push(prevMap[oldId]);
+                        }
+                    }
+                } else {
+                    added = currentElements.slice(0, Math.min(25, currentElements.length));
+                }
+
+                this._lastSnapshotMap = currentMap;
+
+                var lines = [];
+                var displayUrl = window.location.href;
+                if (displayUrl.length > 80) displayUrl = displayUrl.substring(0, 77) + '...';
+
+                lines.push('=== Nomad DOM Mutation Diff ===');
+                lines.push('URL: ' + displayUrl);
+
+                var totalMutations = added.length + removed.length + changed.length;
+                if (!hasBaseline) {
+                    lines.push('Status: Baseline established (' + currentElements.length + ' elements total) | Next call returns diffs');
+                    for (var b = 0; b < added.length; b++) {
+                        var bItem = added[b];
+                        lines.push('[*] [' + bItem.id + '] <' + bItem.tag + (bItem.role ? ' role="' + bItem.role + '"' : '') + (bItem.text ? ' "' + bItem.text.substring(0, 50) + '"' : '') + '>');
+                    }
+                } else if (totalMutations === 0) {
+                    lines.push('Changes: 0 mutations (DOM stable)');
+                } else {
+                    lines.push('Changes: +' + added.length + ' added, -' + removed.length + ' removed, ~' + changed.length + ' changed:');
+                    for (var a = 0; a < added.length; a++) {
+                        var aItem = added[a];
+                        var aText = aItem.text ? ' "' + aItem.text.substring(0, 60) + '"' : (aItem.value ? ' value="' + aItem.value.substring(0, 40) + '"' : '');
+                        lines.push('[+] [' + aItem.id + '] <' + aItem.tag + (aItem.role ? ' role="' + aItem.role + '"' : '') + aText + '>');
+                    }
+                    for (var r = 0; r < removed.length; r++) {
+                        var rItem = removed[r];
+                        var rText = rItem.text ? ' "' + rItem.text.substring(0, 40) + '"' : '';
+                        lines.push('[-] [' + rItem.id + '] <' + rItem.tag + rText + '>');
+                    }
+                    for (var c = 0; c < changed.length; c++) {
+                        var cItem = changed[c];
+                        var details = [];
+                        if (cItem.changes.text) details.push('text: "' + cItem.changes.text.from.substring(0, 30) + '" -> "' + cItem.changes.text.to.substring(0, 30) + '"');
+                        if (cItem.changes.value) details.push('value: "' + cItem.changes.value.from.substring(0, 20) + '" -> "' + cItem.changes.value.to.substring(0, 20) + '"');
+                        if (cItem.changes.disabled !== null) details.push(cItem.changes.disabled ? 'disabled' : 'enabled');
+                        if (cItem.changes.checked !== null) details.push(cItem.changes.checked ? 'checked' : 'unchecked');
+                        lines.push('[~] [' + cItem.id + '] <' + cItem.tag + '> (' + details.join(', ') + ')');
+                    }
+                }
+
+                var diffText = lines.join('\n');
+                var tokens = Math.max(1, Math.ceil(diffText.length / 4.0));
+
+                return {
+                    success: true,
+                    hasBaseline: hasBaseline,
+                    totalMutations: totalMutations,
+                    addedCount: added.length,
+                    removedCount: removed.length,
+                    changedCount: changed.length,
+                    added: added,
+                    removed: removed,
+                    changed: changed,
+                    summary: diffText,
+                    tokenEstimate: tokens,
+                    url: window.location.href,
+                    title: document.title || ''
+                };
+            },
+
+            // Natural language semantic element locator with heuristic scoring
+            findSemantic: function(query, options) {
+                if (!query || typeof query !== 'string' || !query.trim()) {
+                    return { success: false, code: "MISSING_QUERY", message: "Query string is required" };
+                }
+                options = options || {};
+                var rawQuery = query.trim().toLowerCase();
+                var queryTokens = rawQuery.split(/[\s_\-\/\.,]+/).filter(function(t) { return t.length > 1; });
+
+                var roleHints = {
+                    'button': ['button', 'submit', 'reset'],
+                    'btn': ['button', 'submit'],
+                    'link': ['link', 'a'],
+                    'input': ['textbox', 'searchbox', 'input'],
+                    'text': ['textbox', 'searchbox'],
+                    'search': ['searchbox', 'textbox'],
+                    'checkbox': ['checkbox'],
+                    'check': ['checkbox'],
+                    'radio': ['radio'],
+                    'select': ['combobox', 'select', 'listbox'],
+                    'dropdown': ['combobox', 'select', 'menu'],
+                    'tab': ['tab'],
+                    'heading': ['heading', 'h1', 'h2', 'h3'],
+                    'image': ['img', 'image'],
+                    'img': ['img', 'image']
+                };
+
+                var expectedRoles = [];
+                for (var q = 0; q < queryTokens.length; q++) {
+                    var token = queryTokens[q];
+                    if (roleHints[token]) {
+                        expectedRoles = expectedRoles.concat(roleHints[token]);
+                    }
+                }
+
+                var snap = this.getSemanticTree({
+                    limit: -1,
+                    viewportOnly: options.viewportOnly || false,
+                    includeText: true
+                });
+                var elements = (snap && snap.elements) ? snap.elements : [];
+                var candidates = [];
+
+                for (var i = 0; i < elements.length; i++) {
+                    var el = elements[i];
+                    if (options.viewportOnly && !el.inViewport) continue;
+                    if (options.role && (el.role || '').toLowerCase() !== options.role.toLowerCase()) continue;
+
+                    var score = 0;
+                    var textStr = ((el.text || '') + ' ' + (el.value || '')).toLowerCase();
+                    var ariaStr = '';
+                    var domNode = this.elements && this.elements[el.id];
+                    if (domNode) {
+                        ariaStr = ((domNode.getAttribute('aria-label') || '') + ' ' +
+                                   (domNode.getAttribute('title') || '') + ' ' +
+                                   (domNode.getAttribute('placeholder') || '') + ' ' +
+                                   (domNode.id || '') + ' ' +
+                                   (domNode.className || '')).toLowerCase();
+                    }
+
+                    var elRole = (el.role || el.tag || '').toLowerCase();
+
+                    // 1. Exact full query match in text or aria
+                    if (textStr === rawQuery) {
+                        score += 0.85;
+                    } else if (textStr.indexOf(rawQuery) !== -1) {
+                        score += 0.65;
+                    } else if (ariaStr.indexOf(rawQuery) !== -1) {
+                        score += 0.55;
+                    }
+
+                    // 2. Token overlap score
+                    var matchedTokens = 0;
+                    for (var t = 0; t < queryTokens.length; t++) {
+                        var tk = queryTokens[t];
+                        if (textStr.indexOf(tk) !== -1) {
+                            matchedTokens++;
+                            score += 0.20;
+                        } else if (ariaStr.indexOf(tk) !== -1) {
+                            matchedTokens++;
+                            score += 0.15;
+                        }
+                    }
+
+                    // 3. Expected role bonus
+                    if (expectedRoles.length > 0) {
+                        for (var er = 0; er < expectedRoles.length; er++) {
+                            if (elRole === expectedRoles[er] || (el.tag && el.tag.toLowerCase() === expectedRoles[er])) {
+                                score += 0.25;
+                                break;
+                            }
+                        }
+                    }
+
+                    // 4. Viewport visibility bonus
+                    if (el.inViewport) score += 0.10;
+                    if (!el.isObscured) score += 0.05;
+
+                    var finalScore = Math.min(1.0, Math.round(score * 100) / 100);
+
+                    if (finalScore >= 0.30 || matchedTokens > 0) {
+                        candidates.push({
+                            id: el.id,
+                            tag: el.tag,
+                            role: el.role,
+                            text: el.text || el.value || '',
+                            domId: el.domId,
+                            score: finalScore,
+                            inViewport: el.inViewport,
+                            bounds: el.bounds
+                        });
+                    }
+                }
+
+                candidates.sort(function(a, b) { return b.score - a.score; });
+
+                if (candidates.length === 0) {
+                    return { success: false, code: "SEMANTIC_MATCH_NOT_FOUND", message: "No element matching semantic query '" + query + "'" };
+                }
+
+                var bestMatch = candidates[0];
+                var alternatives = candidates.slice(1, 4);
+
+                return {
+                    success: true,
+                    query: query,
+                    bestMatch: bestMatch,
+                    matchCount: candidates.length,
+                    alternatives: alternatives
+                };
+            },
+
+            // Resolves bounding rectangle for Set-of-Marks (SoM) dynamic container cropping
+            getSomContainerRect: function(elementId) {
+                var container = null;
+                var el = null;
+
+                if (elementId) {
+                    if (this.elements && this.elements[elementId]) {
+                        el = this.elements[elementId];
+                    } else {
+                        el = this.findInTree(document, elementId);
+                    }
+                }
+
+                if (el) {
+                    container = el.closest('dialog, [role="dialog"], [aria-modal="true"], form, [class*="modal"], [class*="popup"], [class*="overlay"], [class*="card"], [class*="panel"], main, article');
+                    if (!container) container = el.parentElement;
+                } else {
+                    container = document.querySelector('dialog[open], [role="dialog"], [aria-modal="true"], .modal.show, .modal.active, .modal.open, .popup.show, .popup.active');
+                    if (!container && document.activeElement && document.activeElement !== document.body) {
+                        container = document.activeElement.closest('form, dialog, [role="dialog"], [class*="modal"], [class*="card"]');
+                    }
+                }
+
+                if (container) {
+                    var r = container.getBoundingClientRect();
+                    if (r && r.width > 30 && r.height > 30) {
+                        var pad = 16;
+                        var left = Math.max(0, r.left - pad);
+                        var top = Math.max(0, r.top - pad);
+                        var right = Math.min(window.innerWidth, r.right + pad);
+                        var bottom = Math.min(window.innerHeight, r.bottom + pad);
+                        return {
+                            x: Math.round(left),
+                            y: Math.round(top),
+                            width: Math.round(right - left),
+                            height: Math.round(bottom - top),
+                            containerTag: container.tagName ? container.tagName.toLowerCase() : 'container',
+                            isModal: Boolean(container.matches && container.matches('dialog, [role="dialog"], [aria-modal="true"], [class*="modal"]'))
+                        };
+                    }
+                }
+
+                if (el) {
+                    var er = el.getBoundingClientRect();
+                    if (er && er.width > 0 && er.height > 0) {
+                        var epad = 40;
+                        var eleft = Math.max(0, er.left - epad);
+                        var etop = Math.max(0, er.top - epad);
+                        var eright = Math.min(window.innerWidth, er.right + epad);
+                        var ebottom = Math.min(window.innerHeight, er.bottom + epad);
+                        return {
+                            x: Math.round(eleft),
+                            y: Math.round(etop),
+                            width: Math.round(eright - eleft),
+                            height: Math.round(ebottom - etop),
+                            containerTag: el.tagName ? el.tagName.toLowerCase() : 'element',
+                            isModal: false
+                        };
+                    }
+                }
+
+                return null;
+            },
+
+            // Anti-bot gate and 2FA challenge detection for minimal Human-in-the-Loop
+            detectChallenge: function() {
+                // 1. Cloudflare Turnstile / Under Attack
+                var cfIframe = document.querySelector('iframe[src*="challenges.cloudflare.com"], iframe[src*="cloudflare.com/cdn-cgi/challenge"]');
+                var cfInput = document.querySelector('input[name="cf-turnstile-response"]');
+                var cfForm = document.querySelector('#challenge-form, #cf-challenge-running, .cf-turnstile');
+                if (cfIframe || (cfInput && !cfInput.value) || cfForm) {
+                    var resolved = Boolean(cfInput && cfInput.value && cfInput.value.length > 5);
+                    return {
+                        detected: true,
+                        type: 'Cloudflare Turnstile',
+                        resolved: resolved,
+                        selector: 'iframe[src*="challenges.cloudflare.com"]'
+                    };
+                }
+
+                // 2. Google reCAPTCHA
+                var rcIframe = document.querySelector('iframe[src*="recaptcha"]');
+                var rcResp = document.querySelector('textarea[name="g-recaptcha-response"], input[name="g-recaptcha-response"]');
+                if (rcIframe || rcResp) {
+                    var rcResolved = Boolean(rcResp && rcResp.value && rcResp.value.trim().length > 5);
+                    if (!rcResolved && typeof window.grecaptcha !== 'undefined' && window.grecaptcha.getResponse) {
+                        try { rcResolved = Boolean(window.grecaptcha.getResponse().length > 0); } catch(e) {}
+                    }
+                    return {
+                        detected: true,
+                        type: 'Google reCAPTCHA',
+                        resolved: rcResolved,
+                        selector: 'iframe[src*="recaptcha"]'
+                    };
+                }
+
+                // 3. hCaptcha
+                var hIframe = document.querySelector('iframe[src*="hcaptcha.com"]');
+                var hResp = document.querySelector('textarea[name="h-captcha-response"], input[name="h-captcha-response"]');
+                if (hIframe || hResp) {
+                    var hResolved = Boolean(hResp && hResp.value && hResp.value.trim().length > 5);
+                    return {
+                        detected: true,
+                        type: 'hCaptcha',
+                        resolved: hResolved,
+                        selector: 'iframe[src*="hcaptcha.com"]'
+                    };
+                }
+
+                // 4. Arkose Labs / FunCaptcha
+                var arkIframe = document.querySelector('iframe[src*="arkoselabs"], iframe[src*="funcaptcha"]');
+                if (arkIframe) {
+                    return {
+                        detected: true,
+                        type: 'Arkose Challenge',
+                        resolved: false,
+                        selector: 'iframe[src*="arkoselabs"]'
+                    };
+                }
+
+                // 5. 2FA / One-Time Passcode Gate
+                var otpInput = document.querySelector('input[autocomplete="one-time-code"], input[name*="otp" i], input[name*="2fa" i], input[id*="otp" i], input[id*="2fa" i]');
+                if (otpInput && !otpInput.disabled && !otpInput.readOnly) {
+                    var otpFilled = Boolean(otpInput.value && otpInput.value.length >= 4);
+                    return {
+                        detected: true,
+                        type: 'Two-Factor Authentication (2FA)',
+                        resolved: otpFilled,
+                        selector: 'input[autocomplete="one-time-code"]'
+                    };
+                }
+
+                return { detected: false, type: null, resolved: true };
             }
         };
 

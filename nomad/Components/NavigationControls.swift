@@ -159,6 +159,24 @@ struct NavigationControls: View {
             .opacity(canInspect ? 1.0 : 0.35)
             .help("Developer Tools (⌘⌥I)")
 
+            Button(action: {
+                withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
+                    store.isAutopilotRailVisible.toggle()
+                }
+            }) {
+                Image(systemName: store.isAutopilotRailVisible ? "sparkles.rectangle.stack.fill" : "sparkles")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(store.isAutopilotRailVisible ? settings.accentColor : Color.secondary)
+                    .frame(width: 24, height: 24)
+                    .background(
+                        store.isAutopilotRailVisible ? settings.accentColor.opacity(0.12) : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    )
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Autopilot Rail (⌘⇧A)")
+
             if !settings.isVerticalTabs {
                 let isSettingsActive = tab.isInternalPage
 

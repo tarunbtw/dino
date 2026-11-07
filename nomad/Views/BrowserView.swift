@@ -49,6 +49,12 @@ struct BrowserView: View {
                         Color.clear
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
+
+                    if store.isAutopilotRailVisible {
+                        AutopilotRailView(store: store)
+                            .transition(.move(edge: .trailing))
+                            .zIndex(60)
+                    }
                 }
             }
 
@@ -141,6 +147,11 @@ struct BrowserView: View {
             Button("Space 1") { store.switchSpace(at: 0) }.keyboardShortcut("1", modifiers: .control)
             Button("Space 2") { store.switchSpace(at: 1) }.keyboardShortcut("2", modifiers: .control)
             Button("Space 3") { store.switchSpace(at: 2) }.keyboardShortcut("3", modifiers: .control)
+            Button("Toggle Autopilot") {
+                withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
+                    store.isAutopilotRailVisible.toggle()
+                }
+            }.keyboardShortcut("a", modifiers: [.command, .shift])
         }
         .opacity(0)
         .allowsHitTesting(false)
@@ -204,6 +215,11 @@ private struct TabStageView: View {
                 .transition(.opacity)
             } else {
                 VStack(spacing: 0) {
+                    if tab.isHitlActive {
+                        HitlBannerView(tab: tab)
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                    }
+
                     WebStage(tab: tab)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -213,6 +229,7 @@ private struct TabStageView: View {
                     }
                 }
                 .animation(.spring(response: 0.26, dampingFraction: 0.86), value: tab.isDevDrawerVisible)
+                .animation(.spring(response: 0.24, dampingFraction: 0.88), value: tab.isHitlActive)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
 

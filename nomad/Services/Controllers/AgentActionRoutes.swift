@@ -30,6 +30,7 @@ extension NomadAgentServer {
                 let resData = try JSONEncoder().encode(result)
                 let status: String
                 if result.success {
+                    AgentPlaybookManager.shared.record(action: action)
                     status = "200 OK"
                 } else {
                     switch result.code {
@@ -96,6 +97,9 @@ extension NomadAgentServer {
             do {
                 let action = NomadAction(action: "upload", target: targetId, paths: paths)
                 let result = try await activeTab.performAction(action)
+                if result.success {
+                    AgentPlaybookManager.shared.record(action: action)
+                }
                 let resData = try JSONEncoder().encode(result)
                 let status: String = result.success ? "200 OK" : ((result.code == "STALE_REF" || result.code == "SELECTOR_NOT_FOUND" || result.code == "ELEMENT_NOT_FOUND") ? "404 Not Found" : "400 Bad Request")
                 sendRaw(connection: connection, status: status, contentType: "application/json; charset=utf-8", data: resData, origin: origin)

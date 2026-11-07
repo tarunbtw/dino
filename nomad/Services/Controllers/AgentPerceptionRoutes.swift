@@ -221,6 +221,76 @@ extension NomadAgentServer {
             }
             return true
 
+        case ("GET", "/find/semantic"), ("POST", "/find/semantic"):
+            guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin) else { return true }
+            var query = queryItem("query")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? queryItem("q")?.trimmingCharacters(in: .whitespacesAndNewlines)
+            var role = queryItem("role")?.trimmingCharacters(in: .whitespacesAndNewlines)
+            var vpOnly = queryBool("viewportOnly") || queryBool("viewport")
+
+            if method == "POST", let bodyData = bodyData, !bodyData.isEmpty,
+               let json = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any] {
+                if let q = json["query"] as? String ?? json["q"] as? String { query = q.trimmingCharacters(in: .whitespacesAndNewlines) }
+                if let r = json["role"] as? String { role = r.trimmingCharacters(in: .whitespacesAndNewlines) }
+                if let v = json["viewportOnly"] as? Bool { vpOnly = v }
+            }
+
+            guard let cleanQuery = query, !cleanQuery.isEmpty else {
+                sendResponse(connection: connection, status: "400 Bad Request", body: "{\"error\":\"Missing required 'query' parameter\",\"code\":\"MISSING_QUERY\",\"success\":false}", origin: origin)
+                return true
+            }
+
+            do {
+                let result = try await activeTab.findSemantic(query: cleanQuery, role: role, viewportOnly: vpOnly)
+                let success = result["success"] as? Bool ?? false
+                if success {
+                    sendJSON(connection: connection, object: result, origin: origin)
+                } else {
+                    let code = (result["code"] as? String) ?? "SEMANTIC_MATCH_NOT_FOUND"
+                    let msg = (result["message"] as? String) ?? "No element found matching semantic query"
+                    sendResponse(connection: connection, status: "404 Not Found", body: "{\"success\":false,\"code\":\"\(code)\",\"message\":\"\(msg)\"}", origin: origin)
+                }
+            } catch {
+                sendResponse(connection: connection, status: "500 Internal Server Error", body: "{\"error\":\"\(error.localizedDescription)\",\"code\":\"SEMANTIC_FIND_ERROR\",\"success\":false}", origin: origin)
+            }
+            return true
+
+        case ("GET", "/diff"), ("POST", "/diff"):
+            guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin) else { return true }
+            var vpOnly = queryBool("viewportOnly") || queryBool("viewport")
+            var mode = queryItem("mode")?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+            if method == "POST", let bodyData = bodyData, !bodyData.isEmpty,
+               let json = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any] {
+                if let v = json["viewportOnly"] as? Bool { vpOnly = v }
+                if let m = json["mode"] as? String { mode = m.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            }
+
+            do {
+                let diffDict = try await activeTab.getDiff(viewportOnly: vpOnly)
+                if mode == "json" || mode == "full" {
+                    sendJSON(connection: connection, object: diffDict, origin: origin)
+                } else {
+                    let summaryText = (diffDict["summary"] as? String) ?? ""
+                    let tokens = (diffDict["tokenEstimate"] as? Int) ?? max(1, Int(ceil(Double(summaryText.utf8.count) / 4.0)))
+                    let resp: [String: Any] = [
+                        "success": true,
+                        "title": diffDict["title"] ?? "",
+                        "url": diffDict["url"] ?? "",
+                        "summary": summaryText,
+                        "tokenEstimate": tokens,
+                        "hasBaseline": diffDict["hasBaseline"] ?? false,
+                        "totalMutations": diffDict["totalMutations"] ?? 0,
+                        "addedCount": diffDict["addedCount"] ?? 0,
+                        "removedCount": diffDict["removedCount"] ?? 0,
+                        "changedCount": diffDict["changedCount"] ?? 0
+                    ]
+                    sendJSON(connection: connection, object: resp, origin: origin)
+                }
+            } catch {
+                sendJSON(connection: connection, object: ["success": false, "error": error.localizedDescription, "code": "DIFF_ERROR"], origin: origin)
+            }
+            return true
+
         case ("GET", "/dialog"), ("POST", "/dialog"):
             var targetTabId = queryItem("tabId")
             var bodyJson: [String: Any]? = nil
@@ -306,6 +376,7 @@ extension NomadAgentServer {
         case ("GET", "/screenshot"), ("POST", "/screenshot"):
             guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin) else { return true }
             var isLabeled = queryBool("labeled")
+            var isSomCrop = queryBool("somCrop") || queryBool("container") || queryBool("cropContainer")
             var elementId: String? = queryItem("elementId") ?? queryItem("ref")
             var clipRect: CGRect? = nil
             if let clipStr = queryItem("clip") {
@@ -322,6 +393,7 @@ extension NomadAgentServer {
                     return true
                 }
                 if let labeledBool = json["labeled"] as? Bool { isLabeled = labeledBool }
+                if let somBool = json["somCrop"] as? Bool ?? json["container"] as? Bool ?? json["cropContainer"] as? Bool { isSomCrop = somBool }
                 if let elId = json["elementId"] as? String { elementId = elId }
                 if let clipRaw = json["clip"] {
                     if let clipDict = clipRaw as? [String: Any],
@@ -345,7 +417,7 @@ extension NomadAgentServer {
                 }
             }
             do {
-                let image = try await activeTab.captureScreenshot(labeled: isLabeled, elementId: elementId, clip: clipRect)
+                let image = try await activeTab.captureScreenshot(labeled: isLabeled, elementId: elementId, clip: clipRect, somCrop: isSomCrop)
                 if let png = image.pngData {
                     sendRaw(connection: connection, contentType: "image/png", data: png, origin: origin)
                 } else {

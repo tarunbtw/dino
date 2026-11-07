@@ -348,6 +348,39 @@ extension Tab {
         }
     }
 
+    /// Evaluates in-page anti-bot challenge and 2FA status for Human-in-the-Loop guardrails.
+    @MainActor
+    func checkHitlStatus() async -> (detected: Bool, type: String?, resolved: Bool) {
+        await ensureNomadScriptInjected()
+        let script = "JSON.stringify(window.__nomad && window.__nomad.detectChallenge ? window.__nomad.detectChallenge() : { detected: false, resolved: true })"
+        if let jsonStr = try? await webView.evaluateJavaScript(script) as? String,
+           let data = jsonStr.data(using: .utf8),
+           let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let detected = dict["detected"] as? Bool {
+            let type = dict["type"] as? String
+            let resolved = dict["resolved"] as? Bool ?? true
+            return (detected, type, resolved)
+        }
+        return (false, nil, true)
+    }
+
+    /// Checks and synchronizes HITL state on the tab (triggering the in-app banner if active).
+    @MainActor
+    @discardableResult
+    func updateHitlState() async -> Bool {
+        let (detected, type, resolved) = await checkHitlStatus()
+        if detected && !resolved {
+            self.isHitlActive = true
+            self.hitlChallengeType = type
+            return true
+        } else if resolved && self.isHitlActive {
+            self.isHitlActive = false
+            self.hitlChallengeType = nil
+            return false
+        }
+        return self.isHitlActive
+    }
+
     /// Waits for in-flight web view navigation to settle up to a given timeout.
     @MainActor
     func waitForNavigationSettled(timeout: TimeInterval = 0.5, pollIntervalMs: UInt64 = 30) async {
@@ -430,6 +463,45 @@ extension Tab {
         return snapshot
     }
 
+    /// Computes compact DOM mutation diff between sequential actions (<80 tokens).
+    @MainActor
+    func getDiff(viewportOnly: Bool = false) async throws -> [String: Any] {
+        await waitForNavigationSettled(timeout: 0.3)
+        await ensureNomadScriptInjected()
+
+        let opts: [String: Any] = ["viewportOnly": viewportOnly]
+        let optsData = (try? JSONSerialization.data(withJSONObject: opts)) ?? Data()
+        let optsJSON = String(data: optsData, encoding: .utf8) ?? "{}"
+        let script = "JSON.stringify(window.__nomad.getDiff(\(optsJSON)))"
+        guard let jsonString = try await webView.evaluateJavaScript(script) as? String,
+              let data = jsonString.data(using: .utf8),
+              let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw NSError(domain: "NomadAgent", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to compute DOM diff"])
+        }
+        return dict
+    }
+
+    /// Fast, intent-driven semantic natural language element finder with heuristic scoring.
+    @MainActor
+    func findSemantic(query: String, role: String? = nil, viewportOnly: Bool = false) async throws -> [String: Any] {
+        await ensureNomadScriptInjected()
+
+        var opts: [String: Any] = ["viewportOnly": viewportOnly]
+        if let r = role, !r.isEmpty { opts["role"] = r }
+        let optsData = (try? JSONSerialization.data(withJSONObject: opts)) ?? Data()
+        let optsJSON = String(data: optsData, encoding: .utf8) ?? "{}"
+        let queryData = (try? JSONSerialization.data(withJSONObject: [query])) ?? Data("[\"\"]".utf8)
+        let queryArray = String(data: queryData, encoding: .utf8) ?? "[\"\"]"
+
+        let script = "JSON.stringify(window.__nomad.findSemantic((\(queryArray))[0], \(optsJSON)))"
+        guard let jsonString = try await webView.evaluateJavaScript(script) as? String,
+              let data = jsonString.data(using: .utf8),
+              let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw NSError(domain: "NomadAgent", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to perform semantic element find"])
+        }
+        return dict
+    }
+
     /// Dispatches a browser action (click, hover, type, clear, scroll, keypress, select, highlight) on the active page.
     @MainActor
     func performAction(_ action: NomadAction) async throws -> NomadActionResult {
@@ -459,6 +531,18 @@ extension Tab {
 
         // Ensure Nomad core perception & action scripts are always injected before any action runs
         await ensureNomadScriptInjected()
+
+        // Minimal Human-in-the-Loop check: pause automation if an unsolved security challenge or 2FA gate is active
+        if await updateHitlState() {
+            return NomadActionResult(
+                success: false,
+                message: "A security check [\(self.hitlChallengeType ?? "Security Verification")] is active on this page. Complete the challenge in the browser to resume.",
+                elementId: action.target,
+                code: "HITL_REQUIRED",
+                lastDialog: self.lastDialog,
+                hasPendingDialog: false
+            )
+        }
 
         // Native AppKit & CoreGraphics hardware input dispatch (isTrusted: true)
         let isNative = (action.native == true) || action.action.lowercased().hasPrefix("native_")
@@ -1406,8 +1490,9 @@ extension Tab {
     /// Captures a crisp screenshot directly from WebKit's in-memory compositing buffer (GPU RAM).
     /// If `labeled` is true, temporary visual index badges are overlaid to ground Vision LLMs.
     /// If `elementId` or `clip` is provided, captures only the cropped element/region.
+    /// If `somCrop` is true, automatically identifies the active interaction container (modal, form, card) for high-res cropping.
     @MainActor
-    func captureScreenshot(labeled: Bool = false, elementId: String? = nil, clip: CGRect? = nil) async throws -> NSImage {
+    func captureScreenshot(labeled: Bool = false, elementId: String? = nil, clip: CGRect? = nil, somCrop: Bool = false) async throws -> NSImage {
         await ensureNomadScriptInjected()
 
         if labeled || (elementId != nil && elementId?.contains("f") == true) {
@@ -1424,27 +1509,34 @@ extension Tab {
             }
         }
 
-        // Flush layout and apply sensitive input blurring (plus visual badges if labeled == true)
-        let prepScript = """
-        (function() {
-            try {
-                if (window.__nomad) {
-                    window.__nomad.blurSensitiveInputs();
-                    if (\(labeled ? "true" : "false")) {
-                        window.__nomad.getSemanticTree();
-                        window.__nomad.showBadges();
-                    }
-                }
-                if (document.body) { void document.body.offsetHeight; }
-                return true;
-            } catch(e) {
-                return false;
-            }
-        })()
-        """
-        _ = try? await webView.evaluateJavaScript(prepScript)
-
         var targetRect: CGRect? = clip
+
+        // Set-of-Marks (SoM) Dynamic Container Cropping
+        if targetRect == nil && somCrop {
+            let safeEl = elementId ?? ""
+            let safeElData = (try? JSONSerialization.data(withJSONObject: [safeEl])) ?? Data("[\"\"]".utf8)
+            let safeElArray = String(data: safeElData, encoding: .utf8) ?? "[\"\"]"
+            let somScript = """
+            (function() {
+                if (window.__nomad && window.__nomad.getSomContainerRect) {
+                    var r = window.__nomad.getSomContainerRect((\(safeElArray))[0]);
+                    return r ? JSON.stringify(r) : null;
+                }
+                return null;
+            })()
+            """
+            if let dictStr = try? await webView.evaluateJavaScript(somScript) as? String,
+               let dictData = dictStr.data(using: .utf8),
+               let rectDict = try? JSONSerialization.jsonObject(with: dictData) as? [String: Any],
+               let x = (rectDict["x"] as? NSNumber)?.doubleValue,
+               let y = (rectDict["y"] as? NSNumber)?.doubleValue,
+               let w = (rectDict["width"] as? NSNumber)?.doubleValue,
+               let h = (rectDict["height"] as? NSNumber)?.doubleValue,
+               w > 0 && h > 0 {
+                targetRect = CGRect(x: x, y: y, width: w, height: h)
+            }
+        }
+
         if targetRect == nil, let elId = elementId {
             let safeElIdData = (try? JSONSerialization.data(withJSONObject: [elId])) ?? Data("[\"\"]".utf8)
             let safeElIdArray = String(data: safeElIdData, encoding: .utf8) ?? "[\"\"]"
@@ -1522,6 +1614,27 @@ extension Tab {
                 throw NSError(domain: "NomadAgent", code: -5, userInfo: [NSLocalizedDescriptionKey: "Element '\(elId)' not found or has zero dimensions for screenshot crop"])
             }
         }
+
+        // Flush layout and apply sensitive input blurring (plus visual badges if labeled == true)
+        let badgeRectArg = targetRect.map { "{ x: \($0.origin.x), y: \($0.origin.y), width: \($0.size.width), height: \($0.size.height) }" } ?? "null"
+        let prepScript = """
+        (function() {
+            try {
+                if (window.__nomad) {
+                    window.__nomad.blurSensitiveInputs();
+                    if (\(labeled ? "true" : "false")) {
+                        window.__nomad.getSemanticTree();
+                        window.__nomad.showBadges(\(badgeRectArg));
+                    }
+                }
+                if (document.body) { void document.body.offsetHeight; }
+                return true;
+            } catch(e) {
+                return false;
+            }
+        })()
+        """
+        _ = try? await webView.evaluateJavaScript(prepScript)
 
         let config = WKSnapshotConfiguration()
         if let rect = targetRect {

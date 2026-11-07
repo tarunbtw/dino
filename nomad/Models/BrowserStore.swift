@@ -70,6 +70,7 @@ final class BrowserStore: ObservableObject {
     @Published var activeSpaceId: UUID = Space.defaultFirstID
     @Published var peekTab: Tab? = nil
     @Published var peekFromTabId: UUID? = nil
+    @Published var isAutopilotRailVisible: Bool = false
 
     struct ClosedTabSnapshot {
         let url: URL?

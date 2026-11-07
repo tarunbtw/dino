@@ -29,6 +29,14 @@ Nomad is an ultra-lightweight, native macOS WebKit browser engine featuring an e
 | `nomad_navigate` | Navigate active tab to URL, or go back, forward, reload (`action: 'back'|'forward'|'reload'|'url'`, optional `allowLocalFiles: true` for `file://` URLs) | ~50 tokens |
 | `nomad_wait` | Wait for page settlement (`mode: 'auto'` default: checks navigation, inflight requests, selector, and DOM stability), or specific mode (`stability`, `selector`, `networkidle`, `url`, `timeout`, `text`) | ~40 tokens |
 | `nomad_find` | Fast element lookup matching role, text query, or selector across entire document tree | ~15 tokens |
+| `nomad_find_semantic` | Intent-driven natural language element locator with heuristic scoring (`query: "login button"`) | ~20 tokens |
+| `nomad_diff` | **Token-optimized differential perception:** Returns compact DOM mutations between sequential steps (+added, -removed, ~changed) | ~20–80 tokens |
+| `nomad_hitl_status` | Inspect Human-in-the-Loop guardrail state (`detected`, `type`, `resolved`, `isHitlActive`) | ~20 tokens |
+| `nomad_hitl_resolve` | Manually clear HITL challenge and resume paused automation | ~20 tokens |
+| `nomad_playbook_record`| Begin recording deterministic sequential browser actions | ~20 tokens |
+| `nomad_playbook_stop`  | Stop recording and save playbook to `~/.nomad/playbooks/<name>.json` | ~30 tokens |
+| `nomad_playbook_replay`| Replay macro playbook on active tab with zero token consumption | **0 LLM tokens** |
+| `nomad_playbook_list`  | List saved playbooks stored in `~/.nomad/playbooks/` | ~30 tokens |
 | `nomad_cookies` | Inspect, inject, or clear session cookies for authentication and state (`action: 'get'|'set'|'clear'`, optional `allDomains: true`). Acts on active tab's store (profile vs ephemeral incognito). | ~80 tokens |
 | `nomad_storage` | Inspect, inject, or clear `localStorage`, `sessionStorage`, and WKHTTPCookieStore state (`action: 'get'|'set'|'clear'`) with automatic credential token redaction | ~80 tokens |
 | `nomad_snapshot` | **Primary perception:** Dense semantic markdown of interactive & text elements (`li`, `p`, `td`, `th`), deterministic IDs, cross-origin iframe piercing (`f1:e1`), prompt-injection boundaries, redaction, pagination, and JSON mode | ~400–2,000 tokens |
@@ -95,6 +103,26 @@ nomad_snapshot({ "mode": "json" })
 > [!NOTE]
 > **URL Display & Filter Totals in Header:** Snapshot headers echo the current page URL for context grounding. `totalElements` (and `filteredTotal`) reflects the count of elements matching any active filters (`role`, `text`, `viewportOnly`), while `unfilteredTotal` returns the raw element count on the page.
 > Page accessibility text inside markdown snapshots is securely wrapped within prompt-injection boundary tags: `<!-- BEGIN UNTRUSTED WEB CONTENT (origin: ...) --> ... <!-- END UNTRUSTED WEB CONTENT -->`.
+
+### 2.1 Differential Perception (`nomad_diff`) (~20–80 tokens)
+Instead of re-snapshotting the entire page after each action, call `nomad_diff` (or `GET /diff`). It outputs only the mutations between sequential actions:
+```markdown
+=== Nomad DOM Mutation Diff ===
+URL: https://example.com/checkout
+Changes: +1 added, -0 removed, ~0 changed:
+[+] [e8] <button role="button" "Proceed to Checkout">
+```
+- **93% token reduction**: Delivers high-signal state diffs in 20–80 tokens instead of 1,200+ tokens.
+- **Auto-baseline**: First call establishes the baseline; subsequent calls return delta changes (+added, -removed, ~changed).
+
+### 2.2 Intent-Driven Semantic Finder (`nomad_find_semantic`)
+Locate elements with fuzzy natural language queries without needing exact CSS selectors or exact string matches:
+```json
+// Locates `<button id="proceed-btn">Proceed to Checkout</button>`
+nomad_find_semantic({ "query": "checkout button" })
+```
+- Heuristically scores elements across visible text, placeholder, ARIA role, and context tags.
+- Returns `bestMatch` with reference ID (`id`), confidence `score` (0.0–1.0), and top `alternatives`.
 
 ### 3. Precision Action Dispatch
 Interact with elements directly by reference:
@@ -169,6 +197,18 @@ When visual spatial layout is required, capture a vision-grounded screenshot:
 nomad_screenshot({ "labeled": true })
 ```
 This renders numbered visual badges matching the snapshot references (`[1]`, `[2]`, ...) directly on the WebKit GPU frame before capturing the PNG, giving vision models exact pixel grounding.
+
+#### Set-of-Marks (SoM) Dynamic Container Cropping
+To avoid expensive 4K fullscreen screenshots and token waste (~1,600 tokens/image down to ~250 tokens), pass `somCrop: true`:
+```json
+// Auto-crops around the active modal, form, or card, and renders badges only inside it:
+nomad_screenshot({ "labeled": true, "somCrop": true })
+
+// Or crop around the container enclosing a specific element:
+nomad_screenshot({ "labeled": true, "somCrop": true, "elementId": "e8" })
+```
+- **85% vision token reduction**: Concentrates vision resolution on the active interaction container rather than dead whitespace.
+- **Badge isolation**: Restricts Set-of-Marks visual index badges strictly to elements within the cropped region.
 
 > [!TIP]
 > **Animated SPAs & Entrance Transitions (Framer, WebGL, Canvas):**
@@ -446,6 +486,42 @@ When driving Nomad from the terminal, shell scripts, or an AI agent without MCP 
 | `curl -s http://127.0.0.1:9222/screenshot` | **`nomad shot [file.png]`** | Saves screenshot (`-l`/`--labeled`, `-e <ref>`, `-` for stdout pipe) |
 | `curl -s -X POST http://.../upload` | **`nomad upload <ref> <files>`** | Stages and uploads files to file input |
 | `curl -s -X POST http://.../navigate -d '{"action":"back"}'` | **`nomad back`**, **`nomad forward`**, **`nomad reload`** | History and page reload navigation |
+| `curl -s http://127.0.0.1:9222/playbook/list` | **`nomad playbook list`** | Lists saved macro playbooks |
+| `curl -s -X POST http://.../playbook/replay -d '{"name":"..."}'` | **`nomad playbook run <name>`** | Replays macro playbook deterministically with 0 tokens |
+| `curl -s http://127.0.0.1:9222/hitl/status` | **`nomad hitl`** | Checks Human-in-the-Loop challenge status |
+
+---
+
+## Nomad Autopilot & Human-in-the-Loop Guardrails
+
+### 1. In-App Autopilot Rail (`⌘⇧A`)
+A native slide-over assistant drawer built directly into `BrowserView.swift`.
+- **Trigger**: `⌘⇧A` keyboard shortcut or the Sparkles button in the top navigation bar.
+- **Intent Actions**: Natural language instructions (e.g. "Click checkout button") resolved into immediate DOM interactions via the semantic finder without manual DOM inspection.
+- **Visual Feedback**: Real-time activity log displaying action execution, timing, and error handling.
+
+### 2. Frictionless Human-in-the-Loop (HITL) Intercept
+Automated challenge solving or proof-of-work bypassing is strictly avoided to comply with platform guidelines. Nomad implements an automated, frictionless **Human-in-the-Loop** interception system:
+- **Challenge Detection**: Automatically detects Cloudflare Turnstile, Google reCAPTCHA, hCaptcha, Arkose Labs challenges, and 2FA/OTP verification inputs.
+- **Safe Automation Pause**: Agent actions immediately halt with code `"HITL_REQUIRED"` when a challenge is active:
+  ```json
+  {
+    "success": false,
+    "code": "HITL_REQUIRED",
+    "message": "Security check (Cloudflare Turnstile) detected. User completion required.",
+    "challengeType": "Cloudflare Turnstile"
+  }
+  ```
+- **In-Browser Glass Banner**: Displays a floating banner (`HitlBannerView`) informing the user to complete the check directly in the page.
+- **Frictionless Auto-Resume**: The banner automatically polls the DOM every 0.6 seconds. The instant the challenge is solved (e.g., Turnstile response token or reCAPTCHA response textarea is populated, or the iframe disappears), the banner automatically dismisses and pending agent tasks resume immediately with zero human friction.
+
+### 3. Zero-Token Macro Playbooks & Trajectory Replay
+Repetitive workflows (e.g., checkout flows, form fills, navigation paths) can be recorded and replayed without consuming LLM tokens:
+- **Record**: `POST /playbook/record {"name": "checkout_flow"}`
+- **Execute Routine Actions**: Actions performed via `POST /action` or `POST /upload` are recorded into the active playbook.
+- **Stop & Persist**: `POST /playbook/stop` saves the trajectory to `~/.nomad/playbooks/<name>.json`.
+- **Zero-Token Replay**: `POST /playbook/replay {"name": "checkout_flow"}` executes each step deterministically through native WebKit with natural 120ms settlement pauses—consuming **0 LLM tokens**.
+- **Management**: `GET /playbook/list`, `GET /playbook/export?name=...`, `DELETE /playbook?name=...`.
 
 ### Options & Subcommand Help
 

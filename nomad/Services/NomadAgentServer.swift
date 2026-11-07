@@ -668,7 +668,7 @@ final class NomadAgentServer: ObservableObject {
                 "network": ["fetch", "xhr", "status", "timing"],
                 "networkInterception": ["mock", "block"],
                 "tabVirtualization": ["hot", "warm", "cold"],
-                "agenticRuntime": ["route_cache", "trajectory_trace", "headless_daemon", "socket_rebind"],
+                "agenticRuntime": ["route_cache", "trajectory_trace", "headless_daemon", "socket_rebind", "playbooks", "hitl_guardrails"],
                 "updater": ["status", "check", "version", "build"],
                 "dialogPolicies": ["accept", "dismiss", "wait"]
             ]
@@ -730,7 +730,7 @@ final class NomadAgentServer: ObservableObject {
                 "network": ["fetch", "xhr", "status", "timing"],
                 "networkInterception": ["mock", "block"],
                 "tabVirtualization": ["hot", "warm", "cold"],
-                "agenticRuntime": ["route_cache", "trajectory_trace", "headless_daemon", "socket_rebind"],
+                "agenticRuntime": ["route_cache", "trajectory_trace", "headless_daemon", "socket_rebind", "playbooks", "hitl_guardrails"],
                 "updater": ["status", "check", "version", "build"],
                 "dialogPolicies": ["accept", "dismiss", "wait"],
                 "extensions": ["list", "toggle", "enable", "disable"]
@@ -927,6 +927,9 @@ final class NomadAgentServer: ObservableObject {
             return
         }
         if await handleActionRoute(method: method, cleanPath: cleanPath, bodyData: bodyData, connection: connection, origin: origin) {
+            return
+        }
+        if await handlePlaybookRoute(method: method, cleanPath: cleanPath, bodyData: bodyData, queryItem: queryItem, connection: connection, origin: origin) {
             return
         }
         if await handleTelemetryRoute(method: method, cleanPath: cleanPath, bodyData: bodyData, queryItem: queryItem, connection: connection, origin: origin) {

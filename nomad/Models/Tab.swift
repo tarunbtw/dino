@@ -130,6 +130,8 @@ final class Tab: NSObject, Identifiable, ObservableObject {
     @Published var wantsNextNewTabIncognito: Bool = false
     @Published var isPinned: Bool = false
     @Published var isGhost: Bool = false
+    @Published var isHitlActive: Bool = false
+    @Published var hitlChallengeType: String? = nil
     @Published var spaceId: UUID? = nil
     @Published var profileType: NomadProfileType = NomadProfileManager.defaultProfile
     @Published var hoveredLink: String? = nil
