@@ -17,12 +17,14 @@ struct BrowserView: View {
     var body: some View {
         ZStack(alignment: .top) {
             VStack(spacing: 0) {
-                // Top browser chrome (includes bottom progress bar overlay)
-                TopBarView(store: store, settings: settings)
-                    .frame(height: 50)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .layoutPriority(1)
-                    .zIndex(100)
+                if !settings.isVerticalTabs {
+                    // Top browser chrome (horizontal tabs mode)
+                    TopBarView(store: store, settings: settings)
+                        .frame(height: Metrics.strip)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .layoutPriority(1)
+                        .zIndex(100)
+                }
 
                 HStack(spacing: 0) {
                     if settings.isVerticalTabs {
@@ -31,24 +33,24 @@ struct BrowserView: View {
                     }
 
                     // Tab Stage (observes activeTab or activeSplitPair directly)
-                    if let split = store.activeSplitPair,
-                       let leftTab = store.tabs.first(where: { $0.id == split.leftTabId }),
-                       let rightTab = store.tabs.first(where: { $0.id == split.rightTabId }) {
-                        SplitStageView(store: store, split: split, leftTab: leftTab, rightTab: rightTab, settings: settings)
-                            .id(split.id)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .clipped()
-                            .zIndex(0)
-                    } else if let activeTab = store.activeTab {
-                        TabStageView(store: store, tab: activeTab, settings: settings)
-                            .id(activeTab.id)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .clipped()
-                            .zIndex(0)
-                    } else {
-                        Color.clear
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    Group {
+                        if let split = store.activeSplitPair,
+                           let leftTab = store.tabs.first(where: { $0.id == split.leftTabId }),
+                           let rightTab = store.tabs.first(where: { $0.id == split.rightTabId }) {
+                            SplitStageView(store: store, split: split, leftTab: leftTab, rightTab: rightTab, settings: settings)
+                                .id(split.id)
+                        } else if let activeTab = store.activeTab {
+                            TabStageView(store: store, tab: activeTab, settings: settings)
+                                .id(activeTab.id)
+                        } else {
+                            Color.clear
+                        }
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .modifier(CardEdge(on: settings.isVerticalTabs))
+                    .padding(settings.isVerticalTabs ? [.top, .trailing, .bottom] : [], settings.isVerticalTabs ? Metrics.cardGap : 0)
+                    .clipped()
+                    .zIndex(0)
 
                     if store.isAutopilotRailVisible {
                         AutopilotRailView(store: store)
@@ -68,16 +70,10 @@ struct BrowserView: View {
                 .zIndex(300)
             }
 
-            // Floating Suggestions Dropdown for top bar Omnibox (rendered at root window level above all webviews)
-            if store.isOmniboxEditing && !store.omniboxText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                OmniboxSuggestionsView(query: store.omniboxText, width: 520) { selectedURL in
-                    store.activeTab?.load(url: selectedURL)
-                    store.isOmniboxEditing = false
-                }
-                .padding(.leading, 172)
-                .padding(.top, 42)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .zIndex(250)
+            // Modal Centered Floating Omnibox Plate
+            if store.isAddressBarFocused {
+                OmniboxModalView(store: store, isPresented: $store.isAddressBarFocused)
+                    .zIndex(350)
             }
 
             // Arc-style Floating Link Peek Preview (Shift-click on links)
@@ -95,7 +91,7 @@ struct BrowserView: View {
                     .zIndex(401)
             }
         }
-        .background(Color(nsColor: .windowBackgroundColor).ignoresSafeArea())
+        .background((settings.isVerticalTabs ? Palette.frame : Palette.ground).ignoresSafeArea())
         .preferredColorScheme(settings.colorScheme)
         .tint(settings.accentColor)
         .onExitCommand {
@@ -545,23 +541,25 @@ private struct EmptyStateView: View {
                         .buttonStyle(.plain)
                     }
                 }
-                .padding(.horizontal, 16)
-                .frame(width: 480, height: 40)
+                .padding(.horizontal, 18)
+                .frame(width: Metrics.fieldWidth, height: 48)
                 .background(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(Color(nsColor: .controlBackgroundColor).opacity(0.85))
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Palette.ground)
                 )
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .strokeBorder(isFocused ? settings.accentColor.opacity(0.5) : Color.primary.opacity(0.12), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(Palette.hairline, lineWidth: 1)
                 )
+                .shadow(color: Color.black.opacity(0.12), radius: 28, x: 0, y: 8)
                 .overlay(alignment: .top) {
                     // Floating autocomplete suggestions dropdown directly beneath the field without jumping layout
                     if isFocused && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        OmniboxSuggestionsView(query: text, width: 480) { url in
+                        OmniboxSuggestionsView(query: text, width: Metrics.fieldWidth) { url in
                             tab.load(url: url)
                         }
-                        .offset(y: 46)
+                        .offset(y: 56)
                         .zIndex(100)
                     }
                 }

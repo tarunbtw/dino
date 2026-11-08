@@ -132,12 +132,7 @@ struct VerticalSidebarView: View {
                 NSApp.keyWindow?.makeFirstResponder(nil)
             }
         )
-        .background(Color(nsColor: .windowBackgroundColor).ignoresSafeArea())
-        .overlay(alignment: .trailing) {
-            Rectangle()
-                .fill(Color(nsColor: .separatorColor).opacity(0.35))
-                .frame(width: 1)
-        }
+        .background(Palette.frame.ignoresSafeArea())
         .overlay(alignment: .trailing) {
             if !isCollapsed {
                 sidebarResizeHandle
@@ -152,53 +147,85 @@ struct VerticalSidebarView: View {
     @ViewBuilder
     private var headerSection: some View {
         if isCollapsed {
-            Button(action: {
-                settings.toggleSidebarCollapsed()
-            }) {
-                Image(systemName: "sidebar.left")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Color.primary)
-                    .frame(width: 34, height: 34)
-                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    .contentShape(Rectangle())
+            VStack(spacing: 4) {
+                // Window drag area for traffic lights
+                WindowDragArea()
+                    .frame(width: sidebarWidth, height: 28)
+
+                Button(action: {
+                    settings.toggleSidebarCollapsed()
+                }) {
+                    Image(systemName: "sidebar.left")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Palette.ink)
+                        .frame(width: 34, height: 34)
+                        .background(Palette.sideWash, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Expand Sidebar (⇧⌘S)")
             }
-            .buttonStyle(.plain)
-            .help("Expand Sidebar (⇧⌘S)")
-            .frame(width: sidebarWidth, height: 42)
+            .frame(width: sidebarWidth, height: 68)
         } else {
-            HStack(spacing: 6) {
+            HStack(spacing: 4) {
+                // Traffic lights safe drag area (80pt clearance)
+                WindowDragArea()
+                    .frame(width: Metrics.sideLights, height: 44)
+
+                // Navigation doors: Back, Forward, Reload
+                if let activeTab = store.activeTab {
+                    Button(action: { activeTab.goBack() }) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(activeTab.canGoBack ? Palette.ink : Palette.faint)
+                            .frame(width: 22, height: 22)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!activeTab.canGoBack)
+                    .help("Back (⌘[)")
+
+                    Button(action: { activeTab.goForward() }) {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(activeTab.canGoForward ? Palette.ink : Palette.faint)
+                            .frame(width: 22, height: 22)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!activeTab.canGoForward)
+                    .help("Forward (⌘])")
+
+                    Button(action: {
+                        if activeTab.isLoading { activeTab.stopLoading() } else { activeTab.reload() }
+                    }) {
+                        Image(systemName: activeTab.isLoading ? "xmark" : "arrow.clockwise")
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundStyle(Palette.ink)
+                            .frame(width: 22, height: 22)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(activeTab.isLoading ? "Stop Loading" : "Reload (⌘R)")
+                }
+
+                Spacer()
+
                 // Toggle Sidebar Collapse Button
                 Button(action: {
                     settings.toggleSidebarCollapsed()
                 }) {
                     Image(systemName: "sidebar.left")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 28, height: 28)
-                        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Palette.muted)
+                        .frame(width: 24, height: 24)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help("Collapse Sidebar (⇧⌘S)")
-
-                // Switch back to Horizontal Top Tabs
-                Button(action: {
-                    settings.toggleTabLayout()
-                }) {
-                    Image(systemName: "rectangle.topthird.inset.filled")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 28, height: 28)
-                        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("Switch to Top Tab Strip (⌥⌘T)")
-
-                Spacer()
             }
-            .padding(.horizontal, 10)
-            .frame(height: 42)
+            .padding(.horizontal, 8)
+            .frame(height: 48)
         }
     }
 
@@ -601,11 +628,7 @@ private struct VerticalTabRowView: View {
                 .frame(height: 28)
                 .background(
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(isActive ? Color.primary.opacity(0.12) : (isHovered ? Color.primary.opacity(0.04) : Color.clear))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .strokeBorder(isActive ? Color.primary.opacity(0.10) : Color.clear, lineWidth: 1)
+                        .fill(isActive ? Palette.sideWash : (isHovered ? Palette.sideHover : Color.clear))
                 )
                 .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
             }
@@ -686,17 +709,17 @@ private struct VerticalTabRowView: View {
     private var expandedContent: some View {
         // Tab Title
         Text(displayTitle)
-            .font(.system(size: 11.5, weight: isActive ? .semibold : .regular))
+            .font(.system(size: 11.5, weight: isActive ? .medium : .regular))
             .lineLimit(1)
             .truncationMode(.tail)
-            .foregroundStyle(isActive ? Color.primary : Color.secondary)
+            .foregroundStyle(isActive ? Palette.ink : Palette.muted)
             .frame(maxWidth: .infinity, alignment: .leading)
 
         // Split View Indicator
         if store.splitPairs.contains(where: { $0.contains(tab.id) }) {
             Image(systemName: "square.split.2x1")
                 .font(.system(size: 8.5))
-                .foregroundStyle(isActive ? Color.primary : Color.secondary)
+                .foregroundStyle(isActive ? Palette.ink : Palette.muted)
         }
 
         // Close / Ungroup Buttons (visible on hover or when active)

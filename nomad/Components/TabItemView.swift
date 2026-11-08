@@ -9,9 +9,9 @@ import SwiftUI
 import AppKit
 import WebKit
 
-/// An individual tab pill in the tab bar.
-/// Double-clicking expands the tab pill into an inline URL/search field.
-/// Immediate sliding tab drag on any tab (active or inactive) without moving the window.
+/// An individual tab pill in the horizontal tab strip.
+/// Resting tabs have zero borders and zero backgrounds.
+/// Active tab sits on the shared matched-geometry sliding wash pill.
 struct TabItemView: View {
     @ObservedObject var store: BrowserStore
     @ObservedObject var tab: Tab
@@ -22,130 +22,92 @@ struct TabItemView: View {
     let count: Int
     let step: CGFloat
     let offsetX: CGFloat
+    let pillNamespace: Namespace.ID
     let onDragChanged: (CGFloat) -> Void
     let onDragEnded: (CGFloat) -> Void
 
     @State private var isHovered: Bool = false
-    @State private var isEditing: Bool = false
-    @State private var editText: String = ""
     @State private var lastClickTime: TimeInterval = 0
-    @FocusState private var isFieldFocused: Bool
 
     var body: some View {
-
         HStack(spacing: 0) {
-            if isEditing {
-                // Expanded URL Editing Mode
-                HStack(spacing: 6) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                        .padding(.leading, 6)
-
-                    TextField("Enter a web address", text: $editText)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 11, weight: .regular))
-                        .focused($isFieldFocused)
-                        .onSubmit {
-                            submitEdit()
+            if tabWidth < 50 {
+                // Compact favicon-only mode
+                ZStack {
+                    if isHovered {
+                        Button(action: { store.closeTab(id: tab.id) }) {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 8.5, weight: .semibold))
+                                .foregroundStyle(Palette.muted)
+                                .frame(width: 18, height: 18)
+                                .contentShape(Rectangle())
                         }
-                        .onExitCommand {
-                            cancelEdit()
-                        }
-
-                    Button(action: { cancelEdit() }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.tertiary)
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.trailing, 6)
-                }
-            } else {
-                // Standard Tab Pill Content
-                HStack(spacing: 0) {
-                    if tabWidth < 50 {
-                        // Compact favicon-only mode (Close button when hovered)
-                        ZStack {
-                            if isHovered {
-                                Button(action: { store.closeTab(id: tab.id) }) {
-                                    Image(systemName: "xmark")
-                                        .font(.system(size: 9, weight: .semibold))
-                                        .foregroundStyle(.secondary)
-                                        .frame(width: 18, height: 18)
-                                        .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                                .help("Close Tab (⌘W)")
-                            } else {
-                                tabIconView
-                            }
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .buttonStyle(.plain)
+                        .help("Close Tab (⌘W)")
                     } else {
-                        // Standard & Medium width mode
-                        HStack(spacing: 6) {
-                            tabIconView
-                            tabTitleView
-                        }
-                        .padding(.leading, 8)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: tabWidth < 70 ? .center : .leading)
-
-                        // Trailing controls (Ungroup button when split + Close button)
-                        if isHovered || isActive {
-                            HStack(spacing: 2) {
-                                if isTabSplit {
-                                    Button(action: {
-                                        store.closeSplit(for: tab.id)
-                                    }) {
-                                        Image(systemName: "arrow.up.left.and.arrow.down.right")
-                                            .font(.system(size: 8, weight: .semibold))
-                                            .foregroundStyle(.secondary)
-                                            .frame(width: 14, height: 16)
-                                            .contentShape(Rectangle())
-                                    }
-                                    .buttonStyle(.plain)
-                                    .help("Separate Tabs (Ungroup)")
-                                }
-
-                                Button(action: {
-                                    store.closeTab(id: tab.id)
-                                }) {
-                                    Image(systemName: "xmark")
-                                        .font(.system(size: 9, weight: .semibold))
-                                        .foregroundStyle(.secondary)
-                                        .frame(width: 16, height: 16)
-                                        .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                                .help("Close Tab (⌘W)")
-                            }
-                            .padding(.trailing, 6)
-                        } else if tabWidth >= 70 {
-                            Spacer().frame(width: 14)
-                        }
+                        tabIconView
                     }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                // Standard mode: Icon + Title + Close button
+                HStack(spacing: 6) {
+                    tabIconView
+                    tabTitleView
+                }
+                .padding(.leading, 8)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+
+                if isHovered || isActive {
+                    HStack(spacing: 2) {
+                        if isTabSplit {
+                            Button(action: {
+                                store.closeSplit(for: tab.id)
+                            }) {
+                                Image(systemName: "rectangle.split.2x1")
+                                    .font(.system(size: 8.5))
+                                    .foregroundStyle(Palette.muted)
+                                    .frame(width: 16, height: 16)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Separate Tabs")
+                        }
+
+                        Button(action: {
+                            store.closeTab(id: tab.id)
+                        }) {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 8.5, weight: .semibold))
+                                .foregroundStyle(Palette.muted)
+                                .frame(width: 16, height: 16)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("Close Tab (⌘W)")
+                    }
+                    .padding(.trailing, 6)
+                } else if tabWidth >= 70 {
+                    Spacer().frame(width: 14)
                 }
             }
         }
-        .frame(height: 30)
-        .frame(width: isEditing ? max(tabWidth, 280) : tabWidth)
-        .background(
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(isActive ? Color.primary.opacity(0.08) : (isHovered ? Color.primary.opacity(0.04) : Color.clear))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .strokeBorder(isEditing ? Color.primary.opacity(0.4) : (isActive ? Color.primary.opacity(0.06) : Color.clear), lineWidth: 1)
-        )
+        .frame(height: 28)
+        .frame(width: tabWidth)
+        .background {
+            if isActive {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(Palette.wash)
+                    .matchedGeometryEffect(id: "slidingTabPill", in: pillNamespace)
+            } else if isHovered {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(Palette.hover)
+            }
+        }
         .contentShape(RoundedRectangle(cornerRadius: 7))
         .onHover { isHovered = $0 }
         .offset(x: offsetX, y: 0)
         .zIndex(isDragging ? 100 : (isActive ? 1 : 0))
-        .shadow(color: .black.opacity(isDragging ? 0.16 : 0), radius: 8, y: 2)
-        .scaleEffect(isDragging ? 1.02 : 1.0)
         .gesture(
-            isEditing ? nil :
             DragGesture(minimumDistance: 3, coordinateSpace: .named("TabStripSpace"))
                 .onChanged { value in
                     onDragChanged(value.translation.width)
@@ -155,10 +117,10 @@ struct TabItemView: View {
                 }
         )
         .onTapGesture {
-            guard !isEditing else { return }
             let now = ProcessInfo.processInfo.systemUptime
             if now - lastClickTime < 0.35 {
-                startEditing()
+                // Double click opens the centered Omnibox
+                store.isAddressBarFocused = true
             } else {
                 store.selectTab(id: tab.id)
             }
@@ -209,33 +171,6 @@ struct TabItemView: View {
                 store.closeTab(id: tab.id)
             }
         }
-
-        .overlay(alignment: .topLeading) {
-            if isEditing && !editText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                OmniboxSuggestionsView(query: editText, width: min(max(tabWidth, 280), 380)) { selectedURL in
-                    tab.load(url: selectedURL)
-                    cancelEdit()
-                }
-                .offset(y: 36)
-                .zIndex(300)
-            }
-        }
-        .onChange(of: isActive) { _, active in
-            if !active && isEditing {
-                cancelEdit()
-            }
-        }
-        .onChange(of: isFieldFocused) { _, focused in
-            if !focused && isEditing {
-                cancelEdit()
-            }
-        }
-        .onChange(of: store.isAddressBarFocused) { _, focused in
-            if focused && isActive && !tab.isBlank {
-                startEditing()
-                store.isAddressBarFocused = false
-            }
-        }
     }
 
     private var isTabSplit: Bool {
@@ -246,16 +181,16 @@ struct TabItemView: View {
     private var tabTitleView: some View {
         if tabWidth >= 70 {
             Text(displayTitle)
-                .font(.system(size: 11, weight: isActive ? .medium : .regular))
+                .font(.system(size: 11.5, weight: isActive ? .medium : .regular))
                 .lineLimit(1)
                 .truncationMode(.tail)
-                .foregroundStyle(isActive ? .primary : .secondary)
+                .foregroundStyle(isActive ? Palette.ink : Palette.muted)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             if isTabSplit {
                 Image(systemName: "square.split.2x1")
                     .font(.system(size: 8.5))
-                    .foregroundStyle(isActive ? .primary : .secondary)
+                    .foregroundStyle(isActive ? Palette.ink : Palette.muted)
             }
         }
     }
@@ -291,7 +226,7 @@ struct TabItemView: View {
         } else {
             Image(systemName: iconName)
                 .font(.system(size: 10, weight: .regular))
-                .foregroundStyle(isActive ? .primary : .secondary)
+                .foregroundStyle(isActive ? Palette.ink : Palette.muted)
                 .frame(width: 14, height: 14)
         }
     }
@@ -330,30 +265,5 @@ struct TabItemView: View {
             return host
         }
         return tab.isBlank ? "New Tab" : (trimmedTitle.isEmpty ? "New Tab" : trimmedTitle)
-    }
-
-    private func startEditing() {
-        editText = tab.url?.absoluteString ?? (tab.title == "New Tab" ? "" : tab.title)
-        isEditing = true
-        DispatchQueue.main.async {
-            isFieldFocused = true
-        }
-    }
-
-    private func submitEdit() {
-        let trimmed = editText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmed.isEmpty {
-            let parsed = URLParser.parse(trimmed)
-            if parsed.scheme == "nomad" && parsed.host == "settings" {
-                store.openSettings()
-            } else {
-                tab.load(text: trimmed)
-            }
-        }
-        isEditing = false
-    }
-
-    private func cancelEdit() {
-        isEditing = false
     }
 }

@@ -9,15 +9,16 @@ import SwiftUI
 import AppKit
 
 /// Horizontal tab strip housing all open tabs and the new tab button.
-/// Supports dynamic resizing down to favicon-only mode and silky-smooth visual offset tab rearranging.
+/// Features a single matched-geometry sliding pill that glides between tabs.
 struct TabStripView: View {
     @ObservedObject var store: BrowserStore
 
-    private let minTabWidth: CGFloat = 36
-    private let maxTabWidth: CGFloat = 180
-    private let plusButtonWidth: CGFloat = 26
-    private let tabSpacing: CGFloat = 4
+    private let minTabWidth: CGFloat = Metrics.tabMinWidth
+    private let maxTabWidth: CGFloat = Metrics.tabWidth
+    private let plusButtonWidth: CGFloat = Metrics.plusWidth
+    private let tabSpacing: CGFloat = Metrics.tabGap
 
+    @Namespace private var slidingPill
     @State private var draggingTabId: UUID? = nil
     @State private var dragOffset: CGFloat = 0
     @State private var isSettling: Bool = false
@@ -28,7 +29,7 @@ struct TabStripView: View {
             let visible = store.visibleTabs
             let pinnedCount = visible.filter { $0.isPinned }.count
             let unpinnedCount = max(1, visible.count - pinnedCount)
-            let pinnedWidth = CGFloat(pinnedCount) * (34.0 + tabSpacing)
+            let pinnedWidth = CGFloat(pinnedCount) * (Metrics.pinWidth + tabSpacing)
             let totalSpacing = CGFloat(visible.count) * tabSpacing
             let availableForTabs = max(minTabWidth, availableWidth - plusButtonWidth - pinnedWidth - totalSpacing - 8)
             let naturalWidth = availableForTabs / CGFloat(unpinnedCount)
@@ -63,7 +64,7 @@ struct TabStripView: View {
         HStack(spacing: tabSpacing) {
             ForEach(Array(visibleTabs.enumerated()), id: \.element.id) { index, tab in
                 let isDragging = draggingTabId == tab.id
-                let tabW: CGFloat = tab.isPinned ? 34.0 : computedTabWidth
+                let tabW: CGFloat = tab.isPinned ? Metrics.pinWidth : computedTabWidth
                 let offset = tabOffset(for: tab, index: index, step: step)
 
                 TabItemView(
@@ -76,6 +77,7 @@ struct TabStripView: View {
                     count: count,
                     step: step,
                     offsetX: offset,
+                    pillNamespace: slidingPill,
                     onDragChanged: { translation in
                         handleDragChanged(tabId: tab.id, translation: translation)
                     },
@@ -92,7 +94,7 @@ struct TabStripView: View {
             }) {
                 Image(systemName: "plus")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Palette.muted)
                     .frame(width: 24, height: 24)
                     .contentShape(Rectangle())
             }
@@ -103,6 +105,7 @@ struct TabStripView: View {
         .padding(.leading, 2)
         .padding(.trailing, 4)
         .coordinateSpace(name: "TabStripSpace")
+        .animation(.spring(response: 0.28, dampingFraction: 0.86), value: store.activeTabId)
         .animation(.spring(response: 0.25, dampingFraction: 0.90), value: computedTabWidth)
     }
 
@@ -118,16 +121,16 @@ struct TabStripView: View {
 
         let count = store.tabs.count
         let rawShift = Int((dragOffset / step).rounded())
-        let targetIndex = min(max(0, draggingIndex + rawShift), count - 1)
+        let maxAllowedLeft = -draggingIndex
+        let maxAllowedRight = (count - 1) - draggingIndex
+        let targetIndexOffset = max(maxAllowedLeft, min(maxAllowedRight, rawShift))
 
-        if draggingIndex < targetIndex {
-            // Dragging to the right: tabs between (draggingIndex + 1) and targetIndex shift left
-            if index > draggingIndex && index <= targetIndex {
+        if targetIndexOffset > 0 {
+            if index > draggingIndex && index <= draggingIndex + targetIndexOffset {
                 return -step
             }
-        } else if draggingIndex > targetIndex {
-            // Dragging to the left: tabs between targetIndex and (draggingIndex - 1) shift right
-            if index >= targetIndex && index < draggingIndex {
+        } else if targetIndexOffset < 0 {
+            if index < draggingIndex && index >= draggingIndex + targetIndexOffset {
                 return step
             }
         }
@@ -136,59 +139,46 @@ struct TabStripView: View {
     }
 
     private func handleDragChanged(tabId: UUID, translation: CGFloat) {
-        guard !isSettling else { return }
         if draggingTabId == nil {
             draggingTabId = tabId
-            if store.activeTabId != tabId {
-                store.selectTab(id: tabId)
-            }
+            isSettling = false
         }
         dragOffset = translation
     }
 
     private func handleDragEnded(tabId: UUID, translation: CGFloat, step: CGFloat) {
-        guard !isSettling,
-              let draggingIndex = store.tabs.firstIndex(where: { $0.id == tabId }) else {
+        guard let fromIndex = store.tabs.firstIndex(where: { $0.id == tabId }) else {
             draggingTabId = nil
             dragOffset = 0
-            isSettling = false
             return
         }
 
         let count = store.tabs.count
         let rawShift = Int((translation / step).rounded())
-        let targetIndex = min(max(0, draggingIndex + rawShift), count - 1)
+        let maxAllowedLeft = -fromIndex
+        let maxAllowedRight = (count - 1) - fromIndex
+        let shift = max(maxAllowedLeft, min(maxAllowedRight, rawShift))
 
-        isSettling = true
-
-        if targetIndex != draggingIndex {
-            let targetOffset = CGFloat(targetIndex - draggingIndex) * step
-            withAnimation(.spring(response: 0.18, dampingFraction: 0.95)) {
-                dragOffset = targetOffset
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
-                var transaction = Transaction()
-                transaction.disablesAnimations = true
-                withTransaction(transaction) {
-                    store.moveTab(from: draggingIndex, to: targetIndex)
-                    draggingTabId = nil
-                    dragOffset = 0
-                    isSettling = false
-                }
-            }
-        } else {
-            withAnimation(.spring(response: 0.18, dampingFraction: 0.95)) {
+        let toIndex = fromIndex + shift
+        if shift != 0 && toIndex >= 0 && toIndex < count {
+            isSettling = true
+            withAnimation(.spring(response: 0.20, dampingFraction: 0.92)) {
+                store.moveTab(from: fromIndex, to: toIndex)
                 dragOffset = 0
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
-                var transaction = Transaction()
-                transaction.disablesAnimations = true
-                withTransaction(transaction) {
-                    draggingTabId = nil
-                    isSettling = false
-                }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
+                self.draggingTabId = nil
+                self.isSettling = false
+            }
+        } else {
+            isSettling = true
+            withAnimation(.spring(response: 0.20, dampingFraction: 0.92)) {
+                dragOffset = 0
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
+                self.draggingTabId = nil
+                self.isSettling = false
             }
         }
     }
 }
-
