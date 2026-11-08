@@ -47,8 +47,6 @@ struct BrowserView: View {
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .modifier(CardEdge(on: settings.isVerticalTabs))
-                    .padding(settings.isVerticalTabs ? [.top, .trailing, .bottom] : [], settings.isVerticalTabs ? Metrics.cardGap : 0)
                     .clipped()
                     .zIndex(0)
 
