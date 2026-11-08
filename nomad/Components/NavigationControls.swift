@@ -208,7 +208,7 @@ struct NavigationControls: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help(settings.isVerticalTabs ? "Switch to Top Tab Strip (⌥⌘T)" : "Switch to Vertical Sidebar (⌥⌘T)")
+                .help(settings.isVerticalTabs ? "Switch to Top Tab Strip (⇧⌘S)" : "Switch to Vertical Sidebar (⇧⌘S)")
             }
 
             if case .ready(let release) = updater.stage {

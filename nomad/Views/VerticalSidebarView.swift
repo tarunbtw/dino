@@ -35,9 +35,8 @@ struct VerticalSidebarView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header: Collapse toggle
+            // Header: Traffic lights & Back/Forward/Reload / Collapse/Expand
             headerSection
-                .frame(height: 42)
 
             // Spaces Switcher Bar
             spacesBarSection
@@ -50,7 +49,9 @@ struct VerticalSidebarView: View {
                     .padding(.horizontal, isCollapsed ? 6 : 10)
                     .padding(.bottom, 6)
 
-                Divider()
+                Rectangle()
+                    .fill(Palette.hairline)
+                    .frame(height: 1)
                     .padding(.horizontal, 10)
                     .padding(.bottom, 6)
             }
@@ -121,12 +122,8 @@ struct VerticalSidebarView: View {
             .coordinateSpace(name: "VerticalSidebarSpace")
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            Divider()
-                .padding(.horizontal, 10)
-
-            // Footer Section (Settings)
+            // Search-style SideFoot Section
             footerSection
-                .frame(height: 44)
                 .padding(.horizontal, isCollapsed ? 6 : 10)
         }
         .frame(width: sidebarWidth)
@@ -142,9 +139,7 @@ struct VerticalSidebarView: View {
                 .frame(width: 1)
         }
         .overlay(alignment: .trailing) {
-            if !isCollapsed {
-                sidebarResizeHandle
-            }
+            sidebarResizeHandle
         }
         .sheet(isPresented: $isShowingNewSpaceSheet) {
             newSpaceSheetView
@@ -154,51 +149,53 @@ struct VerticalSidebarView: View {
     // MARK: - Header Section
     @ViewBuilder
     private var headerSection: some View {
-        HStack(spacing: 4) {
-            // Traffic lights safe drag area (80pt clearance in both expanded and collapsed mode!)
-            WindowDragArea()
-                .frame(width: isCollapsed ? 80 : Metrics.sideLights, height: 44)
+        if isCollapsed {
+            VStack(spacing: 2) {
+                // Window drag area for traffic lights (80pt width, 44pt height)
+                WindowDragArea()
+                    .frame(width: 80, height: 44)
 
-            if !isCollapsed, let activeTab = store.activeTab {
-                Button(action: { activeTab.goBack() }) {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(activeTab.canGoBack ? Palette.ink : Palette.faint)
-                        .frame(width: 22, height: 22)
-                        .contentShape(Rectangle())
+                // Expand Sidebar Door right at top below traffic lights
+                Door(icon: "sidebar.right", help: "Expand Sidebar (⌘S)") {
+                    withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
+                        settings.toggleSidebarCollapsed()
+                    }
                 }
-                .buttonStyle(.plain)
-                .disabled(!activeTab.canGoBack)
-                .help("Back (⌘[)")
-
-                Button(action: { activeTab.goForward() }) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(activeTab.canGoForward ? Palette.ink : Palette.faint)
-                        .frame(width: 22, height: 22)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .disabled(!activeTab.canGoForward)
-                .help("Forward (⌘])")
-
-                Button(action: {
-                    if activeTab.isLoading { activeTab.stopLoading() } else { activeTab.reload() }
-                }) {
-                    Image(systemName: activeTab.isLoading ? "xmark" : "arrow.clockwise")
-                        .font(.system(size: 10.5, weight: .medium))
-                        .foregroundStyle(Palette.ink)
-                        .frame(width: 22, height: 22)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help(activeTab.isLoading ? "Stop Loading" : "Reload (⌘R)")
             }
+            .frame(width: 80)
+            .padding(.bottom, 4)
+        } else {
+            HStack(spacing: 4) {
+                // Traffic lights safe drag area (80pt clearance)
+                WindowDragArea()
+                    .frame(width: Metrics.sideLights, height: 44)
 
-            Spacer()
+                if let activeTab = store.activeTab {
+                    Door(icon: "chevron.left", help: "Back (⌘[)") { activeTab.goBack() }
+                        .disabled(!activeTab.canGoBack)
+                        .opacity(activeTab.canGoBack ? 1.0 : 0.35)
+
+                    Door(icon: "chevron.right", help: "Forward (⌘])") { activeTab.goForward() }
+                        .disabled(!activeTab.canGoForward)
+                        .opacity(activeTab.canGoForward ? 1.0 : 0.35)
+
+                    Door(icon: activeTab.isLoading ? "xmark" : "arrow.clockwise", help: activeTab.isLoading ? "Stop Loading" : "Reload (⌘R)") {
+                        if activeTab.isLoading { activeTab.stopLoading() } else { activeTab.reload() }
+                    }
+                }
+
+                Spacer()
+
+                // Collapse Sidebar Door
+                Door(icon: "sidebar.left", help: "Collapse Sidebar (⌘S)") {
+                    withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
+                        settings.toggleSidebarCollapsed()
+                    }
+                }
+            }
+            .padding(.horizontal, 8)
+            .frame(height: 44)
         }
-        .padding(.horizontal, isCollapsed ? 0 : 8)
-        .frame(height: 44)
     }
 
     // MARK: - Spaces Bar Section
@@ -306,7 +303,7 @@ struct VerticalSidebarView: View {
                 }
             }
         } else {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 32, maximum: 40), spacing: 6)], spacing: 6) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 34, maximum: 44), spacing: 4)], spacing: 4) {
                 ForEach(pinned) { tab in
                     pinnedSquare(tab: tab, size: 34)
                 }
@@ -319,13 +316,8 @@ struct VerticalSidebarView: View {
         let isFocused = tab.id == store.activeTabId
         Button(action: { store.selectTab(id: tab.id) }) {
             ZStack {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(isFocused ? Color.primary.opacity(0.16) : Color.primary.opacity(0.04))
-
-                if isFocused {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .strokeBorder(settings.accentColor, lineWidth: 1.5)
-                }
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(isFocused ? Palette.wash : Color.primary.opacity(0.04))
 
                 if let favicon = tab.favicon {
                     Image(nsImage: favicon)
@@ -335,20 +327,14 @@ struct VerticalSidebarView: View {
                         .frame(width: 16, height: 16)
                         .clipShape(RoundedRectangle(cornerRadius: 3))
                 } else {
-                    Image(systemName: tab.isBlank ? "sparkles" : "globe")
-                        .font(.system(size: 12))
-                        .foregroundStyle(isFocused ? Color.primary : Color.secondary)
+                    let letter = tab.title.isEmpty ? (tab.url?.host?.prefix(1).uppercased() ?? "T") : String(tab.title.prefix(1)).uppercased()
+                    Text(letter)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(isFocused ? Palette.ink : Palette.muted)
                 }
             }
             .frame(width: size, height: size)
-            .overlay(alignment: .leading) {
-                if isFocused && isCollapsed {
-                    Capsule()
-                        .fill(settings.accentColor)
-                        .frame(width: 3, height: 16)
-                        .offset(x: -8)
-                }
-            }
+            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         }
         .buttonStyle(.plain)
         .help(tab.title.isEmpty ? (tab.url?.host ?? "Pinned Tab") : tab.title)
@@ -362,22 +348,16 @@ struct VerticalSidebarView: View {
         }
     }
 
-    // MARK: - Footer Section
+    // MARK: - Search-style SideFoot Section
     @ViewBuilder
     private var footerSection: some View {
         if isCollapsed {
             VStack(spacing: 6) {
                 // Extensions
-                Button(action: { isShowingExtensionsMenu.toggle() }) {
-                    Image(systemName: "puzzlepiece.extension")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(isShowingExtensionsMenu ? Palette.ink : Palette.muted)
-                        .frame(width: 32, height: 28)
-                        .background(isShowingExtensionsMenu ? Palette.sideWash : Color.clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                        .contentShape(Rectangle())
+                Door(icon: "puzzlepiece.extension", on: isShowingExtensionsMenu, help: "Extensions") {
+                    isShowingExtensionsMenu.toggle()
                 }
-                .buttonStyle(.plain)
-                .help("Extensions")
+                .background(ExtensionAnchor(id: "extensions_menu_anchor_sidebar_collapsed"))
                 .popover(isPresented: $isShowingExtensionsMenu, arrowEdge: .trailing) {
                     if let activeTab = store.activeTab {
                         ExtensionsMenuPopover(tab: activeTab, store: store, isPresented: $isShowingExtensionsMenu)
@@ -386,26 +366,9 @@ struct VerticalSidebarView: View {
 
                 // Downloads (if any)
                 if !downloadManager.downloads.isEmpty {
-                    Button(action: { isShowingDownloadsMenu.toggle() }) {
-                        ZStack {
-                            Image(systemName: "arrow.down.circle")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(downloadManager.hasActiveDownloads ? Palette.ink : Palette.muted)
-
-                            if downloadManager.hasActiveDownloads {
-                                Circle()
-                                    .trim(from: 0, to: downloadManager.overallProgress)
-                                    .stroke(Palette.ink, lineWidth: 1.5)
-                                    .frame(width: 16, height: 16)
-                                    .rotationEffect(.degrees(-90))
-                            }
-                        }
-                        .frame(width: 32, height: 28)
-                        .background(isShowingDownloadsMenu ? Palette.sideWash : Color.clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                        .contentShape(Rectangle())
+                    Door(icon: "arrow.down.circle", on: isShowingDownloadsMenu, help: "Downloads") {
+                        isShowingDownloadsMenu.toggle()
                     }
-                    .buttonStyle(.plain)
-                    .help("Downloads")
                     .popover(isPresented: $isShowingDownloadsMenu, arrowEdge: .trailing) {
                         DownloadsMenuPopover(store: store, isPresented: $isShowingDownloadsMenu)
                     }
@@ -417,221 +380,105 @@ struct VerticalSidebarView: View {
                     let canBookmark = !activeTab.isBlank && !activeTab.isInternalPage && !urlString.isEmpty && urlString != "about:blank"
                     let isBookmarked = canBookmark && settings.isBookmarked(urlString)
 
-                    Button(action: { store.toggleBookmark(for: activeTab) }) {
-                        Image(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(isBookmarked ? Palette.ink : Palette.muted)
-                            .frame(width: 32, height: 28)
-                            .contentShape(Rectangle())
+                    Door(icon: isBookmarked ? "bookmark.fill" : "bookmark", on: isBookmarked, help: isBookmarked ? "Remove Bookmark (⌘D)" : "Bookmark Tab (⌘D)") {
+                        store.toggleBookmark(for: activeTab)
                     }
-                    .buttonStyle(.plain)
                     .disabled(!canBookmark)
                     .opacity(canBookmark ? 1.0 : 0.35)
-                    .help(isBookmarked ? "Remove Bookmark (⌘D)" : "Bookmark Tab (⌘D)")
                 }
 
                 // Settings
-                Button(action: { store.openSettings() }) {
-                    Image(systemName: "gearshape")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Palette.muted)
-                        .frame(width: 32, height: 28)
-                        .contentShape(Rectangle())
+                Door(icon: "gearshape", help: "Settings (nomad://settings, ⌘,)") {
+                    store.openSettings()
                 }
-                .buttonStyle(.plain)
-                .help("Settings (nomad://settings, ⌘,)")
 
-                // Switch to Horizontal Top Tabs
-                Button(action: { settings.toggleTabLayout() }) {
-                    Image(systemName: "rectangle.topthird.inset.filled")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Palette.muted)
-                        .frame(width: 32, height: 28)
-                        .contentShape(Rectangle())
+                // Tabs on Top
+                Door(icon: "rectangle.topthird.inset.filled", help: "Tabs Across Top (⇧⌘S)") {
+                    settings.toggleTabLayout()
                 }
-                .buttonStyle(.plain)
-                .help("Switch to Top Tab Strip (⌥⌘T)")
 
                 // Expand Sidebar
-                Button(action: { settings.toggleSidebarCollapsed() }) {
-                    Image(systemName: "sidebar.right")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Palette.ink)
-                        .frame(width: 32, height: 28)
-                        .background(Palette.sideWash, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                        .contentShape(Rectangle())
+                Door(icon: "sidebar.right", help: "Expand Sidebar (⌘S)") {
+                    withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
+                        settings.toggleSidebarCollapsed()
+                    }
                 }
-                .buttonStyle(.plain)
-                .help("Expand Sidebar (⇧⌘S)")
             }
             .frame(maxWidth: .infinity)
             .padding(.bottom, 8)
         } else {
-            VStack(spacing: 4) {
-                // Actions row: Extensions, Downloads, Ghost tabs, Bookmarks, DevTools, Autopilot
-                HStack(spacing: 4) {
+            // Expanded: Clean single row (Search-style SideFoot)
+            HStack(spacing: 2) {
+                // Pinned extensions & Extensions puzzle door
+                ExtensionActionBar(store: store)
+
+                Door(icon: "puzzlepiece.extension", on: isShowingExtensionsMenu, help: "Extensions") {
+                    isShowingExtensionsMenu.toggle()
+                }
+                .background(ExtensionAnchor(id: "extensions_menu_anchor_sidebar"))
+                .popover(isPresented: $isShowingExtensionsMenu, arrowEdge: .trailing) {
                     if let activeTab = store.activeTab {
-                        let urlString = activeTab.url?.absoluteString ?? ""
-                        let canBookmark = !activeTab.isBlank && !activeTab.isInternalPage && !urlString.isEmpty && urlString != "about:blank"
-                        let isBookmarked = canBookmark && settings.isBookmarked(urlString)
-
-                        Button(action: { store.toggleBookmark(for: activeTab) }) {
-                            Image(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(isBookmarked ? Palette.ink : Palette.muted)
-                                .frame(width: 24, height: 24)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(!canBookmark)
-                        .opacity(canBookmark ? 1.0 : 0.35)
-                        .help(isBookmarked ? "Remove Bookmark (⌘D)" : "Bookmark Tab (⌘D)")
-
-                        let canInspect = !activeTab.isBlank && !activeTab.isInternalPage
-                        Button(action: {
-                            withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) {
-                                activeTab.isDevDrawerVisible.toggle()
-                            }
-                        }) {
-                            Image(systemName: activeTab.isDevDrawerVisible ? "curlybraces.square.fill" : "curlybraces")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(activeTab.isDevDrawerVisible ? Palette.ink : Palette.muted)
-                                .frame(width: 24, height: 24)
-                                .background(activeTab.isDevDrawerVisible ? Palette.sideWash : Color.clear, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(!canInspect)
-                        .opacity(canInspect ? 1.0 : 0.35)
-                        .help("Developer Tools (⌘⌥I)")
+                        ExtensionsMenuPopover(tab: activeTab, store: store, isPresented: $isShowingExtensionsMenu)
                     }
-
-                    Button(action: {
-                        withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
-                            store.isAutopilotRailVisible.toggle()
-                        }
-                    }) {
-                        Image(systemName: store.isAutopilotRailVisible ? "sparkles.rectangle.stack.fill" : "sparkles")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(store.isAutopilotRailVisible ? settings.accentColor : Palette.muted)
-                            .frame(width: 24, height: 24)
-                            .background(store.isAutopilotRailVisible ? settings.accentColor.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help("Autopilot Rail (⌘⇧A)")
-
-                    ExtensionActionBar(store: store)
-
-                    Button(action: { isShowingExtensionsMenu.toggle() }) {
-                        Image(systemName: "puzzlepiece.extension")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(isShowingExtensionsMenu ? Palette.ink : Palette.muted)
-                            .frame(width: 24, height: 24)
-                            .background(isShowingExtensionsMenu ? Palette.sideWash : Color.clear, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .background(ExtensionAnchor(id: "extensions_menu_anchor_sidebar"))
-                    .help("Extensions")
-                    .popover(isPresented: $isShowingExtensionsMenu, arrowEdge: .trailing) {
-                        if let activeTab = store.activeTab {
-                            ExtensionsMenuPopover(tab: activeTab, store: store, isPresented: $isShowingExtensionsMenu)
-                        }
-                    }
-
-                    if !downloadManager.downloads.isEmpty {
-                        Button(action: { isShowingDownloadsMenu.toggle() }) {
-                            ZStack {
-                                Image(systemName: "arrow.down.circle")
-                                    .font(.system(size: 11, weight: .medium))
-                                    .foregroundStyle(downloadManager.hasActiveDownloads ? Palette.ink : Palette.muted)
-
-                                if downloadManager.hasActiveDownloads {
-                                    Circle()
-                                        .trim(from: 0, to: downloadManager.overallProgress)
-                                        .stroke(Palette.ink, lineWidth: 1.5)
-                                        .frame(width: 16, height: 16)
-                                        .rotationEffect(.degrees(-90))
-                                }
-                            }
-                            .frame(width: 24, height: 24)
-                            .background(isShowingDownloadsMenu ? Palette.sideWash : Color.clear, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .help("Downloads")
-                        .popover(isPresented: $isShowingDownloadsMenu, arrowEdge: .trailing) {
-                            DownloadsMenuPopover(store: store, isPresented: $isShowingDownloadsMenu)
-                        }
-                    }
-
-                    if !store.ghostTabs.isEmpty {
-                        AgentGhostTabsPill(store: store)
-                    }
-
-                    Spacer()
                 }
-                .padding(.horizontal, 8)
 
-                // Bottom utilities row: Settings on left, Layout switcher + Collapse on right
-                HStack(spacing: 6) {
-                    Button(action: { store.openSettings() }) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "gearshape")
-                                .font(.system(size: 11, weight: .medium))
-                            Text("Settings")
-                                .font(.system(size: 11, weight: .medium))
-                            Spacer()
-                            Text("⌘,")
-                                .font(.system(size: 10))
-                                .foregroundStyle(Palette.faint)
-                        }
-                        .foregroundStyle(Palette.muted)
-                        .padding(.horizontal, 6)
-                        .frame(height: 26)
-                        .background(isHoveringSettings ? Palette.sideHover : Color.clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .onHover { isHoveringSettings = $0 }
-                    .help("Settings (nomad://settings, ⌘,)")
+                // Bookmarks
+                if let activeTab = store.activeTab {
+                    let urlString = activeTab.url?.absoluteString ?? ""
+                    let canBookmark = !activeTab.isBlank && !activeTab.isInternalPage && !urlString.isEmpty && urlString != "about:blank"
+                    let isBookmarked = canBookmark && settings.isBookmarked(urlString)
 
-                    // Switch to Horizontal Top Tabs
-                    Button(action: { settings.toggleTabLayout() }) {
-                        Image(systemName: "rectangle.topthird.inset.filled")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(Palette.muted)
-                            .frame(width: 24, height: 26)
-                            .background(Palette.sideHover.opacity(0.6), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                            .contentShape(Rectangle())
+                    Door(icon: isBookmarked ? "bookmark.fill" : "bookmark", on: isBookmarked, help: isBookmarked ? "Remove Bookmark (⌘D)" : "Bookmark Tab (⌘D)") {
+                        store.toggleBookmark(for: activeTab)
                     }
-                    .buttonStyle(.plain)
-                    .help("Switch to Top Tab Strip (⌥⌘T)")
-
-                    // Collapse Sidebar
-                    Button(action: { settings.toggleSidebarCollapsed() }) {
-                        Image(systemName: "sidebar.left")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(Palette.muted)
-                            .frame(width: 24, height: 26)
-                            .background(Palette.sideHover.opacity(0.6), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help("Collapse Sidebar (⇧⌘S)")
+                    .disabled(!canBookmark)
+                    .opacity(canBookmark ? 1.0 : 0.35)
                 }
-                .padding(.horizontal, 8)
-                .padding(.bottom, 6)
+
+                // Downloads (ONLY if active or completed!)
+                if !downloadManager.downloads.isEmpty {
+                    Door(icon: "arrow.down.circle", on: isShowingDownloadsMenu, help: "Downloads") {
+                        isShowingDownloadsMenu.toggle()
+                    }
+                    .popover(isPresented: $isShowingDownloadsMenu, arrowEdge: .trailing) {
+                        DownloadsMenuPopover(store: store, isPresented: $isShowingDownloadsMenu)
+                    }
+                }
+
+                // Ghost tabs indicator (if active)
+                if !store.ghostTabs.isEmpty {
+                    AgentGhostTabsPill(store: store)
+                }
+
+                Spacer(minLength: 0)
+
+                // Layout Switcher: Tabs on Top (⇧⌘S)
+                Door(icon: "rectangle.topthird.inset.filled", help: "Tabs Across Top (⇧⌘S)") {
+                    settings.toggleTabLayout()
+                }
+
+                // Settings (⌘,)
+                Door(icon: "gearshape", help: "Settings (nomad://settings, ⌘,)") {
+                    store.openSettings()
+                }
+
+                // Collapse Sidebar (⌘S)
+                Door(icon: "sidebar.left", help: "Collapse Sidebar (⌘S)") {
+                    withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
+                        settings.toggleSidebarCollapsed()
+                    }
+                }
             }
+            .padding(.horizontal, 10)
+            .padding(.bottom, 8)
         }
     }
 
     // MARK: - Trailing Resize Handle
     private var sidebarResizeHandle: some View {
         Rectangle()
-            .fill(Color(nsColor: .separatorColor).opacity(0.5))
-            .frame(width: 1)
+            .fill(Color.clear)
+            .frame(width: 6)
             .contentShape(Rectangle().inset(by: -3))
             .onHover { hovering in
                 if hovering {
@@ -643,10 +490,27 @@ struct VerticalSidebarView: View {
             .gesture(
                 DragGesture(minimumDistance: 1)
                     .onChanged { value in
-                        let newW = min(340, max(160, settings.sidebarWidth + Double(value.translation.width)))
-                        settings.sidebarWidth = newW
+                        if isCollapsed {
+                            if value.translation.width > 12 {
+                                settings.isSidebarCollapsed = false
+                                settings.sidebarWidth = max(180, 80 + Double(value.translation.width))
+                            }
+                        } else {
+                            let newW = min(340, max(160, settings.sidebarWidth + Double(value.translation.width)))
+                            settings.sidebarWidth = newW
+                        }
                     }
             )
+            .onTapGesture(count: 2) {
+                withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
+                    if isCollapsed {
+                        settings.isSidebarCollapsed = false
+                        settings.sidebarWidth = 220
+                    } else {
+                        settings.sidebarWidth = 220
+                    }
+                }
+            }
     }
 
     // MARK: - New Space Creation Sheet
