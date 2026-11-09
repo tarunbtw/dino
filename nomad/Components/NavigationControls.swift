@@ -136,29 +136,6 @@ struct NavigationControls: View {
             .opacity(canBookmark ? 1.0 : 0.35)
             .help(isBookmarked ? "Remove Bookmark (⌘D)" : "Bookmark Tab (⌘D)")
 
-            let canInspect = !tab.isBlank && !tab.isInternalPage
-
-            Button(action: {
-                guard canInspect else { return }
-                withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) {
-                    tab.isDevDrawerVisible.toggle()
-                }
-            }) {
-                Image(systemName: tab.isDevDrawerVisible ? "curlybraces.square.fill" : "curlybraces")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(tab.isDevDrawerVisible ? Color.primary : Color.secondary)
-                    .frame(width: 24, height: 24)
-                    .background(
-                        tab.isDevDrawerVisible ? Color.primary.opacity(0.08) : Color.clear,
-                        in: RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    )
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(!canInspect)
-            .opacity(canInspect ? 1.0 : 0.35)
-            .help("Developer Tools (⌘⌥I)")
-
             Button(action: {
                 withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
                     store.isAutopilotRailVisible.toggle()

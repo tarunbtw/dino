@@ -7,6 +7,7 @@
 
 import AppKit
 import WebKit
+import SwiftUI
 
 /// Custom subclass of WKWebView that integrates mouse tracking and two-finger fluid swipe gestures.
 @MainActor
@@ -289,11 +290,32 @@ final class BrowserWebView: WKWebView {
         menu.insertItem(printItem, at: insertIdx)
         insertIdx += 1
 
-        // Check if there is an Inspect Element item; if so, make sure there's a separator before it
-        if let inspectIdx = menu.items.firstIndex(where: { $0.identifier?.rawValue == "WKMenuItemIdentifierInspectElement" }) {
+        // Check if there is an Inspect Element item; hook up to Nomad's developer tools drawer
+        if let inspectIdx = menu.items.firstIndex(where: {
+            $0.identifier?.rawValue == "WKMenuItemIdentifierInspectElement" ||
+            $0.title.localizedCaseInsensitiveContains("inspect")
+        }) {
+            let inspectItem = menu.items[inspectIdx]
+            inspectItem.target = self
+            inspectItem.action = #selector(handleInspectAction)
+            inspectItem.keyEquivalent = "i"
+            inspectItem.keyEquivalentModifierMask = [.command, .option]
             if inspectIdx > 0 && !menu.items[inspectIdx - 1].isSeparatorItem {
                 menu.insertItem(.separator(), at: inspectIdx)
             }
+        } else {
+            menu.addItem(.separator())
+            let inspectItem = NSMenuItem(title: "Inspect Element", action: #selector(handleInspectAction), keyEquivalent: "i")
+            inspectItem.keyEquivalentModifierMask = [.command, .option]
+            inspectItem.target = self
+            menu.addItem(inspectItem)
+        }
+    }
+
+    @objc private func handleInspectAction(_ sender: Any?) {
+        guard let tab = tab else { return }
+        withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) {
+            tab.isDevDrawerVisible.toggle()
         }
     }
 

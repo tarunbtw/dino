@@ -28,25 +28,25 @@ struct VerticalSidebarView: View {
     @ObservedObject private var downloadManager = DownloadManager.shared
     private let tabRowHeight: CGFloat = 28
     private let tabRowSpacing: CGFloat = 2
-    private var tabStep: CGFloat { isCollapsed ? (34 + tabRowSpacing) : (tabRowHeight + tabRowSpacing) }
+    private var tabStep: CGFloat { tabRowHeight + tabRowSpacing }
 
-    private var isCollapsed: Bool { settings.isSidebarCollapsed }
-    private var sidebarWidth: CGFloat { isCollapsed ? 80 : CGFloat(settings.sidebarWidth) }
+    private var isCollapsed: Bool { false }
+    private var sidebarWidth: CGFloat { CGFloat(settings.sidebarWidth) }
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header: Traffic lights & Back/Forward/Reload / Collapse/Expand
+            // Header: Traffic lights & Back/Forward/Reload
             headerSection
 
             // Spaces Switcher Bar
             spacesBarSection
-                .padding(.horizontal, isCollapsed ? 6 : 10)
+                .padding(.horizontal, 10)
                 .padding(.bottom, 6)
 
             // Pinned Tabs Shelf
             if !store.pinnedTabs.isEmpty {
                 pinnedTabsSection
-                    .padding(.horizontal, isCollapsed ? 6 : 10)
+                    .padding(.horizontal, 10)
                     .padding(.bottom, 6)
 
                 Rectangle()
@@ -124,7 +124,7 @@ struct VerticalSidebarView: View {
 
             // Search-style SideFoot Section
             footerSection
-                .padding(.horizontal, isCollapsed ? 6 : 10)
+                .padding(.horizontal, 10)
         }
         .frame(width: sidebarWidth)
         .simultaneousGesture(
@@ -149,146 +149,87 @@ struct VerticalSidebarView: View {
     // MARK: - Header Section
     @ViewBuilder
     private var headerSection: some View {
-        if isCollapsed {
-            VStack(spacing: 2) {
-                // Window drag area for traffic lights (80pt width, 44pt height)
-                WindowDragArea()
-                    .frame(width: 80, height: 44)
+        HStack(spacing: 4) {
+            // Traffic lights safe drag area (80pt clearance)
+            WindowDragArea()
+                .frame(width: Metrics.sideLights, height: 44)
 
-                // Expand Sidebar Door right at top below traffic lights
-                Door(icon: "sidebar.right", help: "Expand Sidebar (⌘S)") {
-                    withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
-                        settings.toggleSidebarCollapsed()
-                    }
+            if let activeTab = store.activeTab {
+                Door(icon: "chevron.left", help: "Back (⌘[)") { activeTab.goBack() }
+                    .disabled(!activeTab.canGoBack)
+                    .opacity(activeTab.canGoBack ? 1.0 : 0.35)
+
+                Door(icon: "chevron.right", help: "Forward (⌘])") { activeTab.goForward() }
+                    .disabled(!activeTab.canGoForward)
+                    .opacity(activeTab.canGoForward ? 1.0 : 0.35)
+
+                Door(icon: activeTab.isLoading ? "xmark" : "arrow.clockwise", help: activeTab.isLoading ? "Stop Loading" : "Reload (⌘R)") {
+                    if activeTab.isLoading { activeTab.stopLoading() } else { activeTab.reload() }
                 }
             }
-            .frame(width: 80)
-            .padding(.bottom, 4)
-        } else {
-            HStack(spacing: 4) {
-                // Traffic lights safe drag area (80pt clearance)
-                WindowDragArea()
-                    .frame(width: Metrics.sideLights, height: 44)
 
-                if let activeTab = store.activeTab {
-                    Door(icon: "chevron.left", help: "Back (⌘[)") { activeTab.goBack() }
-                        .disabled(!activeTab.canGoBack)
-                        .opacity(activeTab.canGoBack ? 1.0 : 0.35)
-
-                    Door(icon: "chevron.right", help: "Forward (⌘])") { activeTab.goForward() }
-                        .disabled(!activeTab.canGoForward)
-                        .opacity(activeTab.canGoForward ? 1.0 : 0.35)
-
-                    Door(icon: activeTab.isLoading ? "xmark" : "arrow.clockwise", help: activeTab.isLoading ? "Stop Loading" : "Reload (⌘R)") {
-                        if activeTab.isLoading { activeTab.stopLoading() } else { activeTab.reload() }
-                    }
-                }
-
-                Spacer()
-
-                // Collapse Sidebar Door
-                Door(icon: "sidebar.left", help: "Collapse Sidebar (⌘S)") {
-                    withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
-                        settings.toggleSidebarCollapsed()
-                    }
-                }
-            }
-            .padding(.horizontal, 8)
-            .frame(height: 44)
+            Spacer()
         }
+        .padding(.horizontal, 8)
+        .frame(height: 44)
     }
 
     // MARK: - Spaces Bar Section
     @ViewBuilder
     private var spacesBarSection: some View {
-        if isCollapsed {
-            // Collapsed: Clickable space color dots with comfortable hit areas
-            VStack(spacing: 4) {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 4) {
                 ForEach(store.spaces) { space in
                     let isCurrent = space.id == store.activeSpaceId
-                    let dotColor = Color(hex: space.colorHex) ?? settings.accentColor
-                    Button(action: {
-                        withAnimation(.spring(response: 0.22, dampingFraction: 0.88)) {
-                            store.switchSpace(id: space.id)
+                    let spaceColor = Color(hex: space.colorHex) ?? settings.accentColor
+
+                    Button(action: { store.switchSpace(id: space.id) }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: space.icon)
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(isCurrent ? spaceColor : Color.secondary)
+
+                            Text(space.name)
+                                .font(.system(size: 11, weight: isCurrent ? .semibold : .regular))
+                                .foregroundStyle(isCurrent ? Color.primary : Color.secondary)
+                                .lineLimit(1)
                         }
-                    }) {
-                        ZStack {
-                            if isCurrent {
-                                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                    .fill(dotColor.opacity(0.16))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                            .strokeBorder(dotColor.opacity(0.45), lineWidth: 1)
-                                    )
-                            }
-                            Circle()
-                                .fill(dotColor)
-                                .frame(width: isCurrent ? 8 : 7, height: isCurrent ? 8 : 7)
-                        }
-                        .frame(width: 38, height: 24)
-                        .contentShape(Rectangle())
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(
+                            isCurrent ? spaceColor.opacity(0.12) : Color.primary.opacity(0.04),
+                            in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .strokeBorder(isCurrent ? spaceColor.opacity(0.4) : Color.clear, lineWidth: 1)
+                        )
                     }
                     .buttonStyle(.plain)
-                    .help("Space: \(space.name)")
-                }
-            }
-            .frame(maxWidth: .infinity)
-        } else {
-            // Expanded: Horizontal scroll of space pills + add button
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 4) {
-                    ForEach(store.spaces) { space in
-                        let isCurrent = space.id == store.activeSpaceId
-                        let spaceColor = Color(hex: space.colorHex) ?? settings.accentColor
-
-                        Button(action: { store.switchSpace(id: space.id) }) {
-                            HStack(spacing: 4) {
-                                Image(systemName: space.icon)
-                                    .font(.system(size: 10, weight: .semibold))
-                                    .foregroundStyle(isCurrent ? spaceColor : Color.secondary)
-
-                                Text(space.name)
-                                    .font(.system(size: 11, weight: isCurrent ? .semibold : .regular))
-                                    .foregroundStyle(isCurrent ? Color.primary : Color.secondary)
-                                    .lineLimit(1)
-                            }
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(
-                                isCurrent ? spaceColor.opacity(0.12) : Color.primary.opacity(0.04),
-                                in: RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                    .strokeBorder(isCurrent ? spaceColor.opacity(0.4) : Color.clear, lineWidth: 1)
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .contextMenu {
-                            if store.spaces.count > 1 {
-                                Button("Delete Space", role: .destructive) {
-                                    store.deleteSpace(id: space.id)
-                                }
+                    .contextMenu {
+                        if store.spaces.count > 1 {
+                            Button("Delete Space", role: .destructive) {
+                                store.deleteSpace(id: space.id)
                             }
                         }
                     }
-
-                    // Create Space Button (+)
-                    Button(action: {
-                        newSpaceName = ""
-                        isShowingNewSpaceSheet = true
-                    }) {
-                        Image(systemName: "plus")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 20, height: 20)
-                            .background(Color.primary.opacity(0.04), in: Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .help("New Space")
                 }
-                .padding(.vertical, 2)
+
+                // Create Space Button (+)
+                Button(action: {
+                    newSpaceName = ""
+                    isShowingNewSpaceSheet = true
+                }) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 20, height: 20)
+                        .background(Color.primary.opacity(0.04), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .help("New Space")
             }
+            .padding(.vertical, 2)
         }
     }
 
@@ -296,17 +237,9 @@ struct VerticalSidebarView: View {
     @ViewBuilder
     private var pinnedTabsSection: some View {
         let pinned = store.pinnedTabs
-        if isCollapsed {
-            VStack(spacing: 4) {
-                ForEach(pinned) { tab in
-                    pinnedSquare(tab: tab, size: 34)
-                }
-            }
-        } else {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 34, maximum: 44), spacing: 4)], spacing: 4) {
-                ForEach(pinned) { tab in
-                    pinnedSquare(tab: tab, size: 34)
-                }
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 34, maximum: 44), spacing: 4)], spacing: 4) {
+            ForEach(pinned) { tab in
+                pinnedSquare(tab: tab, size: 34)
             }
         }
     }
@@ -351,127 +284,72 @@ struct VerticalSidebarView: View {
     // MARK: - Search-style SideFoot Section
     @ViewBuilder
     private var footerSection: some View {
-        if isCollapsed {
-            VStack(spacing: 6) {
-                // Extensions
-                Door(icon: "puzzlepiece.extension", on: isShowingExtensionsMenu, help: "Extensions") {
-                    isShowingExtensionsMenu.toggle()
-                }
-                .background(ExtensionAnchor(id: "extensions_menu_anchor_sidebar_collapsed"))
-                .popover(isPresented: $isShowingExtensionsMenu, arrowEdge: .trailing) {
-                    if let activeTab = store.activeTab {
-                        ExtensionsMenuPopover(tab: activeTab, store: store, isPresented: $isShowingExtensionsMenu)
-                    }
-                }
+        HStack(spacing: 2) {
+            // Profile Badge with color picker & names
+            ProfileBadgeView(settings: settings)
 
-                // Downloads (if any)
-                if !downloadManager.downloads.isEmpty {
-                    Door(icon: "arrow.down.circle", on: isShowingDownloadsMenu, help: "Downloads") {
-                        isShowingDownloadsMenu.toggle()
-                    }
-                    .popover(isPresented: $isShowingDownloadsMenu, arrowEdge: .trailing) {
-                        DownloadsMenuPopover(store: store, isPresented: $isShowingDownloadsMenu)
-                    }
-                }
+            // Pinned extensions & Extensions puzzle door
+            ExtensionActionBar(store: store)
 
-                // Bookmarks
+            Door(icon: "puzzlepiece.extension", on: isShowingExtensionsMenu, help: "Extensions") {
+                isShowingExtensionsMenu.toggle()
+            }
+            .background(ExtensionAnchor(id: "extensions_menu_anchor_sidebar"))
+            .popover(isPresented: $isShowingExtensionsMenu, arrowEdge: .trailing) {
                 if let activeTab = store.activeTab {
-                    let urlString = activeTab.url?.absoluteString ?? ""
-                    let canBookmark = !activeTab.isBlank && !activeTab.isInternalPage && !urlString.isEmpty && urlString != "about:blank"
-                    let isBookmarked = canBookmark && settings.isBookmarked(urlString)
-
-                    Door(icon: isBookmarked ? "bookmark.fill" : "bookmark", on: isBookmarked, help: isBookmarked ? "Remove Bookmark (⌘D)" : "Bookmark Tab (⌘D)") {
-                        store.toggleBookmark(for: activeTab)
-                    }
-                    .disabled(!canBookmark)
-                    .opacity(canBookmark ? 1.0 : 0.35)
-                }
-
-                // Settings
-                Door(icon: "gearshape", help: "Settings (nomad://settings, ⌘,)") {
-                    store.openSettings()
-                }
-
-                // Tabs on Top
-                Door(icon: "rectangle.topthird.inset.filled", help: "Tabs Across Top (⇧⌘S)") {
-                    settings.toggleTabLayout()
-                }
-
-                // Expand Sidebar
-                Door(icon: "sidebar.right", help: "Expand Sidebar (⌘S)") {
-                    withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
-                        settings.toggleSidebarCollapsed()
-                    }
+                    ExtensionsMenuPopover(tab: activeTab, store: store, isPresented: $isShowingExtensionsMenu)
                 }
             }
-            .frame(maxWidth: .infinity)
-            .padding(.bottom, 8)
-        } else {
-            // Expanded: Clean single row (Search-style SideFoot)
-            HStack(spacing: 2) {
-                // Pinned extensions & Extensions puzzle door
-                ExtensionActionBar(store: store)
 
-                Door(icon: "puzzlepiece.extension", on: isShowingExtensionsMenu, help: "Extensions") {
-                    isShowingExtensionsMenu.toggle()
+            // Bookmarks
+            if let activeTab = store.activeTab {
+                let urlString = activeTab.url?.absoluteString ?? ""
+                let canBookmark = !activeTab.isBlank && !activeTab.isInternalPage && !urlString.isEmpty && urlString != "about:blank"
+                let isBookmarked = canBookmark && settings.isBookmarked(urlString)
+
+                Door(icon: isBookmarked ? "bookmark.fill" : "bookmark", on: isBookmarked, help: isBookmarked ? "Remove Bookmark (⌘D)" : "Bookmark Tab (⌘D)") {
+                    store.toggleBookmark(for: activeTab)
                 }
-                .background(ExtensionAnchor(id: "extensions_menu_anchor_sidebar"))
-                .popover(isPresented: $isShowingExtensionsMenu, arrowEdge: .trailing) {
-                    if let activeTab = store.activeTab {
-                        ExtensionsMenuPopover(tab: activeTab, store: store, isPresented: $isShowingExtensionsMenu)
-                    }
+                .disabled(!canBookmark)
+                .opacity(canBookmark ? 1.0 : 0.35)
+            }
+
+            // Downloads (ONLY if active or completed!)
+            if !downloadManager.downloads.isEmpty {
+                Door(icon: "arrow.down.circle", on: isShowingDownloadsMenu, help: "Downloads") {
+                    isShowingDownloadsMenu.toggle()
                 }
-
-                // Bookmarks
-                if let activeTab = store.activeTab {
-                    let urlString = activeTab.url?.absoluteString ?? ""
-                    let canBookmark = !activeTab.isBlank && !activeTab.isInternalPage && !urlString.isEmpty && urlString != "about:blank"
-                    let isBookmarked = canBookmark && settings.isBookmarked(urlString)
-
-                    Door(icon: isBookmarked ? "bookmark.fill" : "bookmark", on: isBookmarked, help: isBookmarked ? "Remove Bookmark (⌘D)" : "Bookmark Tab (⌘D)") {
-                        store.toggleBookmark(for: activeTab)
-                    }
-                    .disabled(!canBookmark)
-                    .opacity(canBookmark ? 1.0 : 0.35)
-                }
-
-                // Downloads (ONLY if active or completed!)
-                if !downloadManager.downloads.isEmpty {
-                    Door(icon: "arrow.down.circle", on: isShowingDownloadsMenu, help: "Downloads") {
-                        isShowingDownloadsMenu.toggle()
-                    }
-                    .popover(isPresented: $isShowingDownloadsMenu, arrowEdge: .trailing) {
-                        DownloadsMenuPopover(store: store, isPresented: $isShowingDownloadsMenu)
-                    }
-                }
-
-                // Ghost tabs indicator (if active)
-                if !store.ghostTabs.isEmpty {
-                    AgentGhostTabsPill(store: store)
-                }
-
-                Spacer(minLength: 0)
-
-                // Layout Switcher: Tabs on Top (⇧⌘S)
-                Door(icon: "rectangle.topthird.inset.filled", help: "Tabs Across Top (⇧⌘S)") {
-                    settings.toggleTabLayout()
-                }
-
-                // Settings (⌘,)
-                Door(icon: "gearshape", help: "Settings (nomad://settings, ⌘,)") {
-                    store.openSettings()
-                }
-
-                // Collapse Sidebar (⌘S)
-                Door(icon: "sidebar.left", help: "Collapse Sidebar (⌘S)") {
-                    withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
-                        settings.toggleSidebarCollapsed()
-                    }
+                .popover(isPresented: $isShowingDownloadsMenu, arrowEdge: .trailing) {
+                    DownloadsMenuPopover(store: store, isPresented: $isShowingDownloadsMenu)
                 }
             }
-            .padding(.horizontal, 10)
-            .padding(.bottom, 8)
+
+            // Ghost tabs indicator (if active)
+            if !store.ghostTabs.isEmpty {
+                AgentGhostTabsPill(store: store)
+            }
+
+            Spacer(minLength: 0)
+
+            // Layout Switcher: Tabs on Top (⇧⌘S)
+            Door(icon: "rectangle.topthird.inset.filled", help: "Tabs Across Top (⇧⌘S)") {
+                settings.toggleTabLayout()
+            }
+
+            // Settings (⌘,)
+            Door(icon: "gearshape", help: "Settings (nomad://settings, ⌘,)") {
+                store.openSettings()
+            }
+
+            // Collapse Sidebar (⌘S)
+            Door(icon: "sidebar.left", help: "Collapse Sidebar (⌘S)") {
+                withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
+                    settings.toggleSidebarCollapsed()
+                }
+            }
         }
+        .padding(.horizontal, 10)
+        .padding(.bottom, 8)
     }
 
     // MARK: - Trailing Resize Handle

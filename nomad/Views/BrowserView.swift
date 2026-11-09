@@ -13,6 +13,7 @@ struct BrowserView: View {
     @ObservedObject var store: BrowserStore
     @StateObject private var settings = SettingsStore.shared
     @State private var isCommandPaletteVisible: Bool = false
+    @State private var isSidebarPeeking: Bool = false
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -26,34 +27,70 @@ struct BrowserView: View {
                         .zIndex(100)
                 }
 
-                HStack(spacing: 0) {
-                    if settings.isVerticalTabs {
-                        VerticalSidebarView(store: store, settings: settings)
-                            .zIndex(50)
-                    }
+                ZStack(alignment: .leading) {
+                    HStack(spacing: 0) {
+                        if settings.isVerticalTabs && !settings.isSidebarCollapsed {
+                            VerticalSidebarView(store: store, settings: settings)
+                                .zIndex(50)
+                                .transition(.move(edge: .leading))
+                        }
 
-                    // Tab Stage (observes activeTab or activeSplitPair directly)
-                    Group {
-                        if let split = store.activeSplitPair,
-                           let leftTab = store.tabs.first(where: { $0.id == split.leftTabId }),
-                           let rightTab = store.tabs.first(where: { $0.id == split.rightTabId }) {
-                            SplitStageView(store: store, split: split, leftTab: leftTab, rightTab: rightTab, settings: settings)
-                                .id(split.id)
-                        } else if let activeTab = store.activeTab {
-                            TabStageView(store: store, tab: activeTab, settings: settings)
-                                .id(activeTab.id)
-                        } else {
-                            Color.clear
+                        // Tab Stage (observes activeTab or activeSplitPair directly)
+                        Group {
+                            if let split = store.activeSplitPair,
+                               let leftTab = store.tabs.first(where: { $0.id == split.leftTabId }),
+                               let rightTab = store.tabs.first(where: { $0.id == split.rightTabId }) {
+                                SplitStageView(store: store, split: split, leftTab: leftTab, rightTab: rightTab, settings: settings)
+                                    .id(split.id)
+                            } else if let activeTab = store.activeTab {
+                                TabStageView(store: store, tab: activeTab, settings: settings)
+                                    .id(activeTab.id)
+                            } else {
+                                Color.clear
+                            }
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .clipped()
+                        .zIndex(0)
+
+                        if store.isAutopilotRailVisible {
+                            AutopilotRailView(store: store)
+                                .transition(.move(edge: .trailing))
+                                .zIndex(60)
                         }
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .clipped()
-                    .zIndex(0)
 
-                    if store.isAutopilotRailVisible {
-                        AutopilotRailView(store: store)
-                            .transition(.move(edge: .trailing))
-                            .zIndex(60)
+                    // Auto-hide hover peek overlay (Search & Brave flow)
+                    if settings.isVerticalTabs && settings.isSidebarCollapsed {
+                        // Invisible edge trigger strip along leading edge
+                        Color.clear
+                            .frame(width: 12)
+                            .frame(maxHeight: .infinity)
+                            .contentShape(Rectangle())
+                            .onHover { hovering in
+                                if hovering {
+                                    withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
+                                        isSidebarPeeking = true
+                                    }
+                                }
+                            }
+                            .zIndex(150)
+
+                        // Sliding sidebar overlay
+                        if isSidebarPeeking {
+                            VerticalSidebarView(store: store, settings: settings)
+                                .frame(width: CGFloat(settings.sidebarWidth))
+                                .shadow(color: Color.black.opacity(0.32), radius: 24, x: 8, y: 0)
+                                .transition(.move(edge: .leading))
+                                .zIndex(200)
+                                .onHover { inside in
+                                    if !inside {
+                                        withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
+                                            isSidebarPeeking = false
+                                        }
+                                    }
+                                }
+                        }
                     }
                 }
             }

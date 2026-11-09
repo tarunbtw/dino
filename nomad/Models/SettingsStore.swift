@@ -158,6 +158,14 @@ final class SettingsStore: ObservableObject {
         }
     }
 
+    @AppStorage("nomad.profileColorHex") var profileColorHex: String = "#007AFF" {
+        didSet { objectWillChange.send() }
+    }
+
+    @AppStorage("nomad.profileName") var profileName: String = "Personal" {
+        didSet { objectWillChange.send() }
+    }
+
     // MARK: - Navigation State
     @AppStorage("nomad.settings.activeSection") var activeSection: String = "General" {
         didSet { objectWillChange.send() }
