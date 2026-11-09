@@ -36,22 +36,45 @@ struct OmniboxModalView: View {
         let lower = trimmed.lowercased()
         var list: [CommandItem] = []
 
-        // 1. Search Query Row (Row 1, matching Firn Image 2)
+        let isDirectAddress = AddressInput.isAddress(trimmed)
         let searchURL = URL(string: "\(settings.searchEngineBaseURL)\(URLParser.encodeQueryComponent(trimmed))")
-        list.append(CommandItem(
-            id: "search:\(trimmed)",
-            kind: .search,
-            icon: "magnifyingglass",
-            title: trimmed,
-            hint: "Search \(settings.searchEngineName)",
-            action: {
-                if let u = searchURL {
-                    openURL(u)
-                }
-            }
-        ))
 
-        // 2. Settings Action Row (Row 2, matching Firn Image 2)
+        if isDirectAddress {
+            // 1. Direct URL Navigation takes priority for addresses like "google.com", "apple.com"
+            let candidate = (trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://") || trimmed.hasPrefix("nomad://")) ? trimmed : "https://\(trimmed)"
+            if let url = URL(string: candidate) {
+                list.append(CommandItem(
+                    id: "url:\(candidate)",
+                    kind: .url,
+                    icon: "globe",
+                    title: trimmed,
+                    hint: "Open Address",
+                    action: { openURL(url) }
+                ))
+            }
+
+            // 2. Fallback Search query
+            list.append(CommandItem(
+                id: "search:\(trimmed)",
+                kind: .search,
+                icon: "magnifyingglass",
+                title: trimmed,
+                hint: "Search \(settings.searchEngineName)",
+                action: { if let u = searchURL { openURL(u) } }
+            ))
+        } else {
+            // Normal keywords like "google", "apple", "news" take user to search query
+            list.append(CommandItem(
+                id: "search:\(trimmed)",
+                kind: .search,
+                icon: "magnifyingglass",
+                title: trimmed,
+                hint: "Search \(settings.searchEngineName)",
+                action: { if let u = searchURL { openURL(u) } }
+            ))
+        }
+
+        // Settings Action Row (matching Firn Image 2)
         if "settings".contains(lower) || "preferences".contains(lower) || lower.contains("setting") {
             list.append(CommandItem(
                 id: "action:settings",
@@ -65,24 +88,7 @@ struct OmniboxModalView: View {
             ))
         }
 
-        // 3. Direct URL navigation if query looks like a host/URL
-        if trimmed.contains(".") && !trimmed.contains(" ") {
-            let candidate = trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://") ? trimmed : "https://\(trimmed)"
-            if let url = URL(string: candidate) {
-                list.append(CommandItem(
-                    id: "url:\(candidate)",
-                    kind: .url,
-                    icon: "globe",
-                    title: trimmed,
-                    hint: "Open Address",
-                    action: {
-                        openURL(url)
-                    }
-                ))
-            }
-        }
-
-        // 4. Bar Actions (New Space, Reload, etc.)
+        // Bar Actions (New Space, etc.)
         if "new space".contains(lower) {
             list.append(CommandItem(
                 id: "action:new-space",
@@ -96,7 +102,7 @@ struct OmniboxModalView: View {
             ))
         }
 
-        // 5. Matching open tabs
+        // Matching open tabs
         for tab in store.tabs where !tab.isBlank && !tab.isGhost {
             if tab.title.localizedCaseInsensitiveContains(lower) || (tab.url?.absoluteString.localizedCaseInsensitiveContains(lower) ?? false) {
                 list.append(CommandItem(
@@ -239,9 +245,8 @@ struct OmniboxModalView: View {
             first.action()
         } else {
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty {
-                let parsed = URLParser.parse(trimmed)
-                openURL(parsed)
+            if let target = AddressInput.targetURL(for: trimmed, searchBase: settings.searchEngineBaseURL) {
+                openURL(target)
             }
         }
         dismiss()
@@ -258,5 +263,37 @@ struct OmniboxModalView: View {
     private func dismiss() {
         isPresented = false
         store.isAddressBarFocused = false
+    }
+}
+
+/// AddressInput helper following Firn's domain detection rules.
+enum AddressInput {
+    static func isAddress(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !trimmed.contains(" ") else { return false }
+        if trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://") || trimmed.hasPrefix("nomad://") || trimmed.hasPrefix("file://") {
+            return true
+        }
+        let hostAndPort = String(trimmed.prefix { !"/?#".contains($0) })
+        let host = hostAndPort.prefix { $0 != ":" }.lowercased()
+        if host == "localhost" || host.hasSuffix(".localhost") { return true }
+        let labels = host.split(separator: ".", omittingEmptySubsequences: false)
+        guard labels.count >= 2, let last = labels.last, last.count >= 2, last.allSatisfy({ $0.isLetter }) else {
+            return false
+        }
+        return labels.allSatisfy { label in
+            !label.isEmpty && label.allSatisfy { $0.isLetter || $0.isNumber || $0 == "-" }
+        }
+    }
+
+    static func targetURL(for text: String, searchBase: String) -> URL? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        if isAddress(trimmed) {
+            let candidate = (trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://") || trimmed.hasPrefix("nomad://")) ? trimmed : "https://\(trimmed)"
+            return URL(string: candidate)
+        }
+        let encoded = URLParser.encodeQueryComponent(trimmed)
+        return URL(string: "\(searchBase)\(encoded)")
     }
 }

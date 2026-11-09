@@ -19,16 +19,13 @@ struct WindowDragArea: NSViewRepresentable {
 
 final class DragNSView: NSView {
     private static var didApplyInitialSize = false
-    private var pressedEvent: NSEvent?
-    private var hasMoved = false
 
-    override var mouseDownCanMoveWindow: Bool { false }
+    override var mouseDownCanMoveWindow: Bool { true }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         guard let window = window else { return }
-        Lights.keep(window)
-        
+
         if !Self.didApplyInitialSize {
             Self.didApplyInitialSize = true
             window.setContentSize(NSSize(width: 1180, height: 780))
@@ -37,28 +34,22 @@ final class DragNSView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
-        window?.makeFirstResponder(nil)
-        pressedEvent = event
-        hasMoved = false
-    }
+        guard let window = window else { return }
+        if (window.firstResponder as? NSTextView)?.isFieldEditor == true {
+            window.makeFirstResponder(nil)
+        }
 
-    override func mouseDragged(with event: NSEvent) {
-        guard let window = window, let pressed = pressedEvent, !hasMoved else { return }
-        let dx = event.locationInWindow.x - pressed.locationInWindow.x
-        let dy = event.locationInWindow.y - pressed.locationInWindow.y
-        if abs(dx) < 3 && abs(dy) < 3 { return }
-        hasMoved = true
-        window.isMovable = true
-        window.performDrag(with: pressed)
-        window.isMovable = false
-    }
-
-    override func mouseUp(with event: NSEvent) {
-        guard let window = window, !hasMoved, event.clickCount == 2 else { return }
-        switch UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") {
-        case "Minimize": window.miniaturize(nil)
-        case "None": break
-        default: window.zoom(nil)
+        if event.clickCount == 2 {
+            switch UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") {
+            case "Minimize":
+                window.performMiniaturize(nil)
+            case "None":
+                break
+            default:
+                window.performZoom(nil)
+            }
+        } else {
+            window.performDrag(with: event)
         }
     }
 }

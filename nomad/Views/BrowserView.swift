@@ -17,6 +17,15 @@ struct BrowserView: View {
 
     var body: some View {
         ZStack(alignment: .leading) {
+            // Window Drag & Zoom clearance along top window margin
+            VStack {
+                WindowDragArea()
+                    .frame(height: Theme.pageInset)
+                    .frame(maxWidth: .infinity)
+                Spacer()
+            }
+            .zIndex(100)
+
             // Page Area: floats with pageInset and corner radius beside the sidebar
             let currentSidebarWidth = CGFloat(settings.sidebarWidth)
             let leadingPad = Theme.pageInset + (settings.isSidebarCollapsed ? 0 : currentSidebarWidth)
@@ -35,10 +44,6 @@ struct BrowserView: View {
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: Theme.pageCornerRadius, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: Theme.pageCornerRadius, style: .continuous)
-                    .strokeBorder(Theme.activeTabHairline, lineWidth: 0.5)
-            }
             .padding([.top, .trailing, .bottom], Theme.pageInset)
             .padding(.leading, leadingPad)
             .animation(.spring(response: 0.24, dampingFraction: 0.88), value: settings.isSidebarCollapsed)

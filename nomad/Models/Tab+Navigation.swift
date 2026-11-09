@@ -262,6 +262,7 @@ extension Tab: WKNavigationDelegate {
             "tabId": self.id.uuidString,
             "url": targetUrl
         ])
+        self.updateNavigationState()
     }
 
     private func isSupersededOrCancelled(_ error: Error, navigation: WKNavigation!) -> Bool {

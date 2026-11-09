@@ -92,11 +92,6 @@ struct VerticalSidebarView: View {
         )
         .background(Theme.frame.ignoresSafeArea())
         .overlay(alignment: .trailing) {
-            Rectangle()
-                .fill(Theme.activeTabHairline)
-                .frame(width: 0.5)
-        }
-        .overlay(alignment: .trailing) {
             sidebarResizeHandle
         }
     }
@@ -114,7 +109,8 @@ struct VerticalSidebarView: View {
                 }
             }
 
-            Spacer(minLength: 0)
+            WindowDragArea()
+                .frame(maxWidth: .infinity, maxHeight: Theme.rowHeight)
 
             if let activeTab = store.activeTab {
                 Door(icon: "chevron.left", help: "Back (⌘[)") { activeTab.goBack() }

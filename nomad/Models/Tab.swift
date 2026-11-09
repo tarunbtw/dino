@@ -599,6 +599,7 @@ final class Tab: NSObject, Identifiable, ObservableObject {
 
         if webView.canGoBack {
             webView.goBack()
+            updateNavigationState()
             return
         }
 
@@ -656,6 +657,7 @@ final class Tab: NSObject, Identifiable, ObservableObject {
 
         if webView.canGoForward {
             webView.goForward()
+            updateNavigationState()
             return
         }
 
@@ -922,15 +924,27 @@ final class Tab: NSObject, Identifiable, ObservableObject {
 
         observers.append(webView.observe(\.canGoBack, options: [.initial, .new]) { [weak self] _, _ in
             guard let self else { return }
-            Task { @MainActor [weak self] in
-                self?.updateNavigationState()
+            if Thread.isMainThread {
+                MainActor.assumeIsolated {
+                    self.updateNavigationState()
+                }
+            } else {
+                DispatchQueue.main.async { [weak self] in
+                    self?.updateNavigationState()
+                }
             }
         })
 
         observers.append(webView.observe(\.canGoForward, options: [.initial, .new]) { [weak self] _, _ in
             guard let self else { return }
-            Task { @MainActor [weak self] in
-                self?.updateNavigationState()
+            if Thread.isMainThread {
+                MainActor.assumeIsolated {
+                    self.updateNavigationState()
+                }
+            } else {
+                DispatchQueue.main.async { [weak self] in
+                    self?.updateNavigationState()
+                }
             }
         })
 

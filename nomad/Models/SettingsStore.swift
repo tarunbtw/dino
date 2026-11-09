@@ -128,6 +128,9 @@ final class SettingsStore: ObservableObject {
     @AppStorage("nomad.searchEngine") var searchEngine: String = "duckduckgo" {
         didSet { objectWillChange.send() }
     }
+    @AppStorage("nomad.searchSuggestions") var searchSuggestions: Bool = false {
+        didSet { objectWillChange.send() }
+    }
 
     // MARK: - Tab Layout & Sidebar Preferences
     @AppStorage("nomad.tabLayout") var tabLayout: String = "vertical" {

@@ -19,7 +19,6 @@ struct SettingsView: View {
         get { Section(rawValue: settings.activeSection) ?? .general }
         nonmutating set { settings.activeSection = newValue.rawValue }
     }
-    @State var hexInputText: String = ""
     @ObservedObject var updater = Updater.shared
     @ObservedObject var extensionManager = ExtensionManager.shared
     @ObservedObject var historyStore = HistoryStore.shared
@@ -40,6 +39,7 @@ struct SettingsView: View {
 
     enum Section: String, CaseIterable, Identifiable {
         case general = "General"
+        case spaces = "Spaces"
         case passwords = "Passwords"
         case history = "History"
         case bookmarks = "Bookmarks"
@@ -51,6 +51,7 @@ struct SettingsView: View {
         var icon: String {
             switch self {
             case .general: return "gearshape"
+            case .spaces: return "square.stack"
             case .passwords: return "key.fill"
             case .history: return "clock.arrow.circlepath"
             case .bookmarks: return "bookmark"
@@ -64,10 +65,11 @@ struct SettingsView: View {
         HStack(spacing: 0) {
             // Left Navigation Rail
             sidebarRail
-                .frame(width: 180)
+                .frame(width: 190)
+                .background(Theme.frameWash)
 
             Rectangle()
-                .fill(Color(nsColor: .separatorColor).opacity(0.35))
+                .fill(Theme.activeTabHairline)
                 .frame(width: 1)
 
             // Right Main Content
@@ -76,6 +78,8 @@ struct SettingsView: View {
                     switch selectedSection {
                     case .general:
                         generalSection
+                    case .spaces:
+                        spacesSection
                     case .passwords:
                         passwordsSection
                     case .history:
@@ -93,21 +97,18 @@ struct SettingsView: View {
             }
             .scrollIndicators(.hidden)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Theme.page.ignoresSafeArea())
         }
-        .background(Color(nsColor: .windowBackgroundColor))
-        .preferredColorScheme(settings.colorScheme)
-        .tint(settings.accentColor)
-        .onAppear {
-            hexInputText = settings.customBgHex.replacingOccurrences(of: "#", with: "")
-        }
+        .background(Theme.page)
+        .tint(Theme.accent)
     }
 
     // MARK: - Sidebar Rail
     private var sidebarRail: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 4) {
             Text("Settings")
-                .font(.system(size: 18, weight: .bold))
-                .foregroundStyle(.primary)
+                .font(.system(size: 18, weight: .bold, design: .serif))
+                .foregroundStyle(Theme.ink)
                 .padding(.horizontal, 16)
                 .padding(.top, 24)
                 .padding(.bottom, 12)
@@ -116,18 +117,19 @@ struct SettingsView: View {
                 Button(action: { selectedSection = section }) {
                     HStack(spacing: 10) {
                         Image(systemName: section.icon)
-                            .font(.system(size: 12, weight: .medium))
-                            .frame(width: 16)
+                            .font(.system(size: 13, weight: .medium))
+                            .frame(width: 18)
+                            .foregroundStyle(selectedSection == section ? Color.white : Theme.accent)
                         Text(section.rawValue)
                             .font(.system(size: 13, weight: selectedSection == section ? .medium : .regular))
                         Spacer()
                     }
                     .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
-                    .foregroundStyle(selectedSection == section ? .primary : .secondary)
+                    .padding(.vertical, 8)
+                    .foregroundStyle(selectedSection == section ? Color.white : Theme.ink)
                     .background(
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .fill(selectedSection == section ? Color.primary.opacity(0.08) : Color.clear)
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(selectedSection == section ? Color.white.opacity(0.12) : Color.clear)
                     )
                     .contentShape(Rectangle())
                 }
@@ -139,7 +141,7 @@ struct SettingsView: View {
 
             Text("nomad://settings")
                 .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(.quaternary)
+                .foregroundStyle(Theme.muted)
                 .padding(16)
         }
     }
@@ -150,27 +152,31 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text(title)
                 .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.ink)
             content()
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.primary.opacity(0.03))
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Theme.hover)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(Color(nsColor: .separatorColor).opacity(0.35), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Theme.activeTabHairline, lineWidth: 1)
         )
     }
 
     func header(title: String, subtitle: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
-                .font(.system(size: 20, weight: .semibold))
-            Text(subtitle)
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
+                .font(.system(size: 22, weight: .semibold, design: .serif))
+                .foregroundStyle(Theme.ink)
+            if !subtitle.isEmpty {
+                Text(subtitle)
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.muted)
+            }
         }
     }
 }

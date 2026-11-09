@@ -60,7 +60,7 @@ private struct WindowConfigurator: NSViewRepresentable {
 
         private func apply() {
             guard let window = window else { return }
-            window.isMovable = false
+            window.isMovable = true
             window.isMovableByWindowBackground = false
             window.titlebarAppearsTransparent = true
             window.titleVisibility = .hidden

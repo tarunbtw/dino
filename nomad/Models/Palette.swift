@@ -17,6 +17,7 @@ enum Theme {
     static let muted = Color(light: 0x5E564E, dark: 0xD4CDC5)
     static let faint = Color(light: 0x9D9389, dark: 0x958D85)
     static let frost = Color(light: 0x82A8BE, dark: 0xA0C4D6, opacity: 0.45)
+    static let accent = Color(light: 0x82A8BE, dark: 0xA0C4D6)
     static let hover = Color(light: 0x463728, lightOpacity: 0.07, dark: 0xF5F1EC, darkOpacity: 0.07)
     static let press = Color(light: 0x463728, lightOpacity: 0.13, dark: 0xF5F1EC, darkOpacity: 0.13)
     static let activeTab = Color(light: 0xFBFAF8, lightOpacity: 1, dark: 0xF5F1EC, darkOpacity: 0.17)
