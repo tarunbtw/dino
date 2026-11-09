@@ -8,7 +8,7 @@
 import Foundation
 
 public enum NomadVersion {
-    public static let version = "0.38"
+    public static let version = "0.39"
     public static let build = "1"
 
     /// Resolves the actual runtime version string, inspecting the enclosing bundle if running from a symlinked CLI binary.
