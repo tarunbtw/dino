@@ -101,6 +101,7 @@ struct SettingsView: View {
         }
         .background(Theme.page)
         .tint(Theme.accent)
+        .preferredColorScheme(.dark)
     }
 
     // MARK: - Sidebar Rail

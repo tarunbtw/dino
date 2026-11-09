@@ -46,6 +46,7 @@ struct Space: Identifiable, Codable, Equatable {
     var name: String
     var icon: String // SF Symbol: e.g. "person.fill", "briefcase.fill", "sparkles", "globe"
     var colorHex: String
+    var sharesWithId: UUID? = nil
 
     static let defaultFirstID = UUID(uuidString: "00000000-0000-0000-0000-000000000001") ?? UUID()
     static let defaultSecondID = UUID(uuidString: "00000000-0000-0000-0000-000000000002") ?? UUID()
@@ -68,6 +69,7 @@ final class BrowserStore: ObservableObject {
     @Published var splitPairs: [SplitPair] = []
     @Published var spaces: [Space] = Space.defaultSpaces
     @Published var activeSpaceId: UUID = Space.defaultFirstID
+    @Published var isShowingNewSpaceSheet: Bool = false
     @Published var peekTab: Tab? = nil
     @Published var peekFromTabId: UUID? = nil
     @Published var isAutopilotRailVisible: Bool = false
@@ -599,10 +601,10 @@ final class BrowserStore: ObservableObject {
     }
 
     /// Creates a new workspace with name, icon, and color.
-    func createSpace(name: String, icon: String = "folder.fill", colorHex: String = "#8B5CF6") {
+    func createSpace(name: String, icon: String = "folder.fill", colorHex: String = "#7F9CB0", sharesWithId: UUID? = nil) {
         let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let finalName = cleanName.isEmpty ? "Space \(spaces.count + 1)" : cleanName
-        let newSpace = Space(id: UUID(), name: finalName, icon: icon, colorHex: colorHex)
+        let finalName = cleanName.isEmpty ? "New Space" : cleanName
+        let newSpace = Space(id: UUID(), name: finalName, icon: icon, colorHex: colorHex, sharesWithId: sharesWithId)
         withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) {
             spaces.append(newSpace)
             switchSpace(id: newSpace.id)

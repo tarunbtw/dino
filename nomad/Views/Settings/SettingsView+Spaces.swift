@@ -59,7 +59,7 @@ extension SettingsView {
                         .padding(.vertical, 4)
 
                     Button(action: {
-                        store.createSpace(name: "New Space")
+                        store.isShowingNewSpaceSheet = true
                     }) {
                         HStack(spacing: 6) {
                             Image(systemName: "plus")
@@ -104,19 +104,8 @@ extension SettingsView {
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(Theme.muted)
 
-                        let firnColors: [(name: String, hex: String)] = [
-                            ("glacier", "#7F9CB0"),
-                            ("sand", "#C9A27E"),
-                            ("sage", "#8FAE8B"),
-                            ("heather", "#B88A9E"),
-                            ("ochre", "#C4A95B"),
-                            ("dusk", "#8E8FB8"),
-                            ("clay", "#B07F6A"),
-                            ("lagoon", "#6FA3A0")
-                        ]
-
                         HStack(spacing: 8) {
-                            ForEach(firnColors, id: \.name) { item in
+                            ForEach(Theme.spaceColors, id: \.name) { item in
                                 let isPicked = activeSpace.colorHex.lowercased() == item.hex.lowercased()
                                 Button(action: {
                                     if let idx = store.spaces.firstIndex(where: { $0.id == activeSpace.id }) {

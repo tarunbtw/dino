@@ -35,7 +35,7 @@ private struct BrowserMainView: View {
         }
         .frame(minWidth: 640, minHeight: 420)
         .background(WindowConfigurator())
-        .preferredColorScheme(settings.colorScheme)
+        .preferredColorScheme(.dark)
         .tint(settings.accentColor)
         .onAppear {
             NomadAgentServer.shared.start(store: store)
@@ -70,7 +70,8 @@ private struct WindowConfigurator: NSViewRepresentable {
                 window.standardWindowButton(button)?.isHidden = true
             }
             window.isOpaque = true
-            window.backgroundColor = .windowBackgroundColor
+            window.appearance = NSAppearance(named: .darkAqua)
+            window.backgroundColor = NSColor(hex: 0x3A3734)
             window.invalidateShadow()
             SettingsStore.shared.applyTheme()
         }

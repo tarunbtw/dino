@@ -10,21 +10,21 @@ import AppKit
 
 /// Firn design tokens and metrics.
 enum Theme {
-    static let frame = Color(light: 0xE9E3DA, dark: 0x3A3734)
-    static let frameWash = Color(light: 0xE9E3DA, lightOpacity: 0.45, dark: 0x3A3734, darkOpacity: 0.55)
-    static let page = Color(light: 0xFBFAF8, dark: 0x2B2826)
-    static let ink = Color(light: 0x241F1B, dark: 0xF5F1EC)
-    static let muted = Color(light: 0x5E564E, dark: 0xD4CDC5)
-    static let faint = Color(light: 0x9D9389, dark: 0x958D85)
-    static let frost = Color(light: 0x82A8BE, dark: 0xA0C4D6, opacity: 0.45)
-    static let accent = Color(light: 0x82A8BE, dark: 0xA0C4D6)
-    static let hover = Color(light: 0x463728, lightOpacity: 0.07, dark: 0xF5F1EC, darkOpacity: 0.07)
-    static let press = Color(light: 0x463728, lightOpacity: 0.13, dark: 0xF5F1EC, darkOpacity: 0.13)
-    static let activeTab = Color(light: 0xFBFAF8, lightOpacity: 1, dark: 0xF5F1EC, darkOpacity: 0.17)
-    static let activeTabHairline = Color(light: 0x3C2814, lightOpacity: 0.08, dark: 0x000000, darkOpacity: 0.25)
-    static let commandDim = Color(light: 0x14100C, lightOpacity: 0.18, dark: 0x000000, darkOpacity: 0.45)
-    static let commandVeil = Color(light: 0xFBFAF8, lightOpacity: 0.62, dark: 0x2B2826, darkOpacity: 0.62)
-    static let shadowPeek = Color(light: 0x3C2814, lightOpacity: 0.22, dark: 0x000000, darkOpacity: 0.45)
+    static let frame = Color(hex: 0x3A3734)
+    static let frameWash = Color(hex: 0x3A3734, opacity: 0.55)
+    static let page = Color(hex: 0x2B2826)
+    static let ink = Color(hex: 0xF5F1EC)
+    static let muted = Color(hex: 0xD4CDC5)
+    static let faint = Color(hex: 0x958D85)
+    static let frost = Color(hex: 0xA0C4D6, opacity: 0.45)
+    static let accent = Color(hex: 0x82A8BE)
+    static let hover = Color(hex: 0xF5F1EC, opacity: 0.07)
+    static let press = Color(hex: 0xF5F1EC, opacity: 0.13)
+    static let activeTab = Color(hex: 0xF5F1EC, opacity: 0.17)
+    static let activeTabHairline = Color(hex: 0x000000, opacity: 0.25)
+    static let commandDim = Color(hex: 0x000000, opacity: 0.45)
+    static let commandVeil = Color(hex: 0x2B2826, opacity: 0.62)
+    static let shadowPeek = Color(hex: 0x000000, opacity: 0.45)
 
     static let pageInset: CGFloat = 8
     static let pageCornerRadius: CGFloat = 10
@@ -36,6 +36,23 @@ enum Theme {
     static let rowSpacing: CGFloat = 4
     static let rowPadding: CGFloat = 12
     static let sectionSpacing: CGFloat = 16
+
+    static let tabFont = Font.system(size: 13)
+    static let labelFont = Font.system(size: 12)
+    static let groupHeaderFont = Font.system(size: 13, weight: .semibold)
+    static let hintFont = Font.system(size: 11)
+    static let panelTitleFont = Font.system(size: 22, weight: .regular, design: .serif)
+
+    static let spaceColors: [(name: String, hex: String)] = [
+        ("glacier", "#7F9CB0"),
+        ("sand", "#C9A27E"),
+        ("sage", "#8FAE8B"),
+        ("heather", "#B88A9E"),
+        ("ochre", "#C4A95B"),
+        ("dusk", "#8E8FB8"),
+        ("clay", "#B07F6A"),
+        ("lagoon", "#6FA3A0")
+    ]
 
     static func spaceColor(_ hex: String) -> Color {
         Color(hex: hex)
@@ -60,15 +77,16 @@ enum WebAddress {
 }
 
 extension Color {
+    init(hex: UInt32, opacity: CGFloat = 1) {
+        self.init(nsColor: NSColor(hex: hex, opacity: opacity))
+    }
+
     init(light: UInt32, dark: UInt32, opacity: CGFloat = 1) {
-        self.init(light: light, lightOpacity: opacity, dark: dark, darkOpacity: opacity)
+        self.init(hex: dark, opacity: opacity)
     }
 
     init(light: UInt32, lightOpacity: CGFloat, dark: UInt32, darkOpacity: CGFloat) {
-        self.init(nsColor: NSColor(name: nil) { appearance in
-            let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-            return isDark ? NSColor(hex: dark, opacity: darkOpacity) : NSColor(hex: light, opacity: lightOpacity)
-        })
+        self.init(hex: dark, opacity: darkOpacity)
     }
 }
 
@@ -89,7 +107,7 @@ enum Palette {
     static let ink = Theme.ink
     static let muted = Theme.muted
     static let faint = Theme.faint
-    static let hairline = Color(light: 0x3C2814, lightOpacity: 0.08, dark: 0x000000, darkOpacity: 0.25)
+    static let hairline = Color(hex: 0x000000, opacity: 0.25)
     static let wash = Theme.hover
     static let pinLive = Theme.activeTab
     static let hover = Theme.hover

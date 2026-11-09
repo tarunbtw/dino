@@ -11,8 +11,6 @@ import AppKit
 
 struct SpaceRow: View {
     @ObservedObject var store: BrowserStore
-    @State private var isShowingNewSpaceAlert = false
-    @State private var newSpaceName = ""
     @State private var isHovering = false
 
     var body: some View {
@@ -47,8 +45,7 @@ struct SpaceRow: View {
                 Divider()
 
                 Button("New Space…") {
-                    newSpaceName = ""
-                    isShowingNewSpaceAlert = true
+                    store.isShowingNewSpaceSheet = true
                 }
 
                 Button("Space Settings…") {
@@ -83,36 +80,5 @@ struct SpaceRow: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .sheet(isPresented: $isShowingNewSpaceAlert) {
-            newSpaceSheet
-        }
-    }
-
-    private var newSpaceSheet: some View {
-        VStack(spacing: 16) {
-            Text("Create New Space")
-                .font(.headline)
-            TextField("Space Name (e.g. Work, Research)", text: $newSpaceName)
-                .textFieldStyle(.roundedBorder)
-                .frame(width: 260)
-            HStack(spacing: 12) {
-                Button("Cancel") {
-                    isShowingNewSpaceAlert = false
-                }
-                .keyboardShortcut(.cancelAction)
-
-                Button("Create") {
-                    let name = newSpaceName.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !name.isEmpty {
-                        store.createSpace(name: name)
-                    }
-                    isShowingNewSpaceAlert = false
-                }
-                .keyboardShortcut(.defaultAction)
-                .buttonStyle(.borderedProminent)
-            }
-        }
-        .padding(24)
-        .frame(width: 320)
     }
 }

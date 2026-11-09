@@ -92,7 +92,7 @@ final class SettingsStore: ObservableObject {
     }
 
     // MARK: - Appearance Preferences
-    @AppStorage("nomad.theme") var theme: String = "system" {
+    @AppStorage("nomad.theme") var theme: String = "dark" {
         didSet {
             applyTheme()
             objectWillChange.send()
@@ -201,15 +201,11 @@ final class SettingsStore: ObservableObject {
     }
 
     var currentAppearance: NSAppearance? {
-        switch theme {
-        case "dark": return NSAppearance(named: .darkAqua)
-        case "light": return NSAppearance(named: .aqua)
-        default: return nil
-        }
+        NSAppearance(named: .darkAqua)
     }
 
     func applyTheme() {
-        let appAppearance = currentAppearance
+        let appAppearance = NSAppearance(named: .darkAqua)
         NSApp.appearance = appAppearance
         for window in NSApp.windows {
             window.appearance = appAppearance
@@ -219,19 +215,7 @@ final class SettingsStore: ObservableObject {
 
     // MARK: - Color & Theme Resolvers
     var colorScheme: ColorScheme? {
-        switch theme {
-        case "dark": return .dark
-        case "light": return .light
-        case "system":
-            let isDark: Bool = {
-                if let style = UserDefaults.standard.persistentDomain(forName: UserDefaults.globalDomain)?["AppleInterfaceStyle"] as? String {
-                    return style.caseInsensitiveCompare("dark") == .orderedSame
-                }
-                return NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            }()
-            return isDark ? .dark : .light
-        default: return nil
-        }
+        .dark
     }
 
     var accentColor: Color {

@@ -116,6 +116,12 @@ struct BrowserView: View {
                     .zIndex(350)
             }
 
+            // Modal New Space Sheet
+            if store.isShowingNewSpaceSheet {
+                NewSpaceSheetView(store: store, isPresented: $store.isShowingNewSpaceSheet)
+                    .zIndex(360)
+            }
+
             // Arc-style Floating Link Peek Preview (Shift-click on links)
             if let peekTab = store.peekTab {
                 Color.black.opacity(0.32)
@@ -132,10 +138,12 @@ struct BrowserView: View {
             }
         }
         .background(Theme.frame.ignoresSafeArea())
-        .preferredColorScheme(settings.colorScheme)
+        .preferredColorScheme(.dark)
         .tint(settings.accentColor)
         .onExitCommand {
-            if store.isAddressBarFocused {
+            if store.isShowingNewSpaceSheet {
+                store.isShowingNewSpaceSheet = false
+            } else if store.isAddressBarFocused {
                 store.isAddressBarFocused = false
             } else if store.peekTab != nil {
                 store.closePeek()
