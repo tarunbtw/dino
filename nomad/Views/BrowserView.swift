@@ -16,82 +16,82 @@ struct BrowserView: View {
     @State private var isSidebarPeeking: Bool = false
 
     var body: some View {
-        ZStack(alignment: .top) {
-            VStack(spacing: 0) {
-                if !settings.isVerticalTabs {
-                    // Top browser chrome (horizontal tabs mode)
-                    TopBarView(store: store, settings: settings)
-                        .frame(height: Metrics.strip)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .layoutPriority(1)
-                        .zIndex(100)
+        ZStack(alignment: .leading) {
+            // Page Area: floats with pageInset and corner radius beside the sidebar
+            let currentSidebarWidth = CGFloat(settings.sidebarWidth)
+            let leadingPad = Theme.pageInset + (settings.isSidebarCollapsed ? 0 : currentSidebarWidth)
+
+            Group {
+                if let split = store.activeSplitPair,
+                   let leftTab = store.tabs.first(where: { $0.id == split.leftTabId }),
+                   let rightTab = store.tabs.first(where: { $0.id == split.rightTabId }) {
+                    SplitStageView(store: store, split: split, leftTab: leftTab, rightTab: rightTab, settings: settings)
+                        .id(split.id)
+                } else if let activeTab = store.activeTab {
+                    TabStageView(store: store, tab: activeTab, settings: settings)
+                        .id(activeTab.id)
+                } else {
+                    Color.clear
                 }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: Theme.pageCornerRadius, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: Theme.pageCornerRadius, style: .continuous)
+                    .strokeBorder(Theme.activeTabHairline, lineWidth: 0.5)
+            }
+            .padding([.top, .trailing, .bottom], Theme.pageInset)
+            .padding(.leading, leadingPad)
+            .animation(.spring(response: 0.24, dampingFraction: 0.88), value: settings.isSidebarCollapsed)
+            .animation(.spring(response: 0.24, dampingFraction: 0.88), value: settings.sidebarWidth)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .zIndex(0)
 
-                ZStack(alignment: .leading) {
-                    HStack(spacing: 0) {
-                        if settings.isVerticalTabs && !settings.isSidebarCollapsed {
-                            VerticalSidebarView(store: store, settings: settings)
-                                .zIndex(50)
-                                .transition(.move(edge: .leading))
-                        }
+            // Autopilot Rail (if visible)
+            if store.isAutopilotRailVisible {
+                HStack {
+                    Spacer()
+                    AutopilotRailView(store: store)
+                        .transition(.move(edge: .trailing))
+                }
+                .zIndex(60)
+            }
 
-                        // Tab Stage (observes activeTab or activeSplitPair directly)
-                        Group {
-                            if let split = store.activeSplitPair,
-                               let leftTab = store.tabs.first(where: { $0.id == split.leftTabId }),
-                               let rightTab = store.tabs.first(where: { $0.id == split.rightTabId }) {
-                                SplitStageView(store: store, split: split, leftTab: leftTab, rightTab: rightTab, settings: settings)
-                                    .id(split.id)
-                            } else if let activeTab = store.activeTab {
-                                TabStageView(store: store, tab: activeTab, settings: settings)
-                                    .id(activeTab.id)
-                            } else {
-                                Color.clear
+            // Docked Sidebar
+            if !settings.isSidebarCollapsed {
+                VerticalSidebarView(store: store, settings: settings)
+                    .frame(width: currentSidebarWidth)
+                    .transition(.move(edge: .leading))
+                    .zIndex(50)
+            }
+
+            // Auto-hide hover peek overlay (when sidebar is collapsed)
+            if settings.isSidebarCollapsed {
+                Color.clear
+                    .frame(width: 12)
+                    .frame(maxHeight: .infinity)
+                    .contentShape(Rectangle())
+                    .onHover { hovering in
+                        if hovering {
+                            withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
+                                isSidebarPeeking = true
                             }
                         }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .clipped()
-                        .zIndex(0)
-
-                        if store.isAutopilotRailVisible {
-                            AutopilotRailView(store: store)
-                                .transition(.move(edge: .trailing))
-                                .zIndex(60)
-                        }
                     }
+                    .zIndex(150)
 
-                    // Auto-hide hover peek overlay (Search & Brave flow)
-                    if settings.isVerticalTabs && settings.isSidebarCollapsed {
-                        // Invisible edge trigger strip along leading edge
-                        Color.clear
-                            .frame(width: 12)
-                            .frame(maxHeight: .infinity)
-                            .contentShape(Rectangle())
-                            .onHover { hovering in
-                                if hovering {
-                                    withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
-                                        isSidebarPeeking = true
-                                    }
+                if isSidebarPeeking {
+                    VerticalSidebarView(store: store, settings: settings)
+                        .frame(width: currentSidebarWidth)
+                        .shadow(color: Color.black.opacity(0.35), radius: 24, x: 8, y: 0)
+                        .transition(.move(edge: .leading))
+                        .zIndex(200)
+                        .onHover { inside in
+                            if !inside {
+                                withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
+                                    isSidebarPeeking = false
                                 }
                             }
-                            .zIndex(150)
-
-                        // Sliding sidebar overlay
-                        if isSidebarPeeking {
-                            VerticalSidebarView(store: store, settings: settings)
-                                .frame(width: CGFloat(settings.sidebarWidth))
-                                .shadow(color: Color.black.opacity(0.32), radius: 24, x: 8, y: 0)
-                                .transition(.move(edge: .leading))
-                                .zIndex(200)
-                                .onHover { inside in
-                                    if !inside {
-                                        withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
-                                            isSidebarPeeking = false
-                                        }
-                                    }
-                                }
                         }
-                    }
                 }
             }
 
@@ -105,7 +105,7 @@ struct BrowserView: View {
                 .zIndex(300)
             }
 
-            // Modal Centered Floating Omnibox Plate
+            // Modal Centered Floating Omnibox / Command Bar
             if store.isAddressBarFocused {
                 OmniboxModalView(store: store, isPresented: $store.isAddressBarFocused)
                     .zIndex(350)
@@ -126,11 +126,13 @@ struct BrowserView: View {
                     .zIndex(401)
             }
         }
-        .background((settings.isVerticalTabs ? Palette.frame : Palette.ground).ignoresSafeArea())
+        .background(Theme.frame.ignoresSafeArea())
         .preferredColorScheme(settings.colorScheme)
         .tint(settings.accentColor)
         .onExitCommand {
-            if store.peekTab != nil {
+            if store.isAddressBarFocused {
+                store.isAddressBarFocused = false
+            } else if store.peekTab != nil {
                 store.closePeek()
             } else if let tab = store.activeTab, tab.isZapperActive {
                 tab.stopElementZapper()
@@ -144,7 +146,7 @@ struct BrowserView: View {
     @ViewBuilder
     private var keyboardShortcutBridge: some View {
         Group {
-            Button("New Tab") { store.newTab() }.keyboardShortcut("t", modifiers: .command)
+            Button("New Tab") { store.isAddressBarFocused = true }.keyboardShortcut("t", modifiers: .command)
             Button("Reopen Closed Tab") { store.reopenLastClosedTab() }.keyboardShortcut("t", modifiers: [.command, .shift])
             Button("New Incognito") { store.newIncognitoTab() }.keyboardShortcut("n", modifiers: [.command, .shift])
             Button("Close Tab") { if let activeId = store.activeTabId { store.closeTab(id: activeId) } }.keyboardShortcut("w", modifiers: .command)
@@ -171,8 +173,6 @@ struct BrowserView: View {
             Button("Toggle Split View") { store.toggleSplitCurrentTab() }.keyboardShortcut("s", modifiers: [.command, .option])
             Button("Swap Split Panes") { store.swapSplit() }.keyboardShortcut("s", modifiers: [.command, .control])
             Button("Toggle Sidebar Collapse") { settings.toggleSidebarCollapsed() }.keyboardShortcut("s", modifiers: .command)
-            Button("Toggle Tab Layout") { settings.toggleTabLayout() }.keyboardShortcut("s", modifiers: [.command, .shift])
-            Button("Toggle Tab Layout Option") { settings.toggleTabLayout() }.keyboardShortcut("t", modifiers: [.command, .option])
             Button("Toggle Pin Tab") { if let id = store.activeTabId { store.togglePin(tabId: id) } }.keyboardShortcut("p", modifiers: [.command, .option])
             Button("Next Space") { store.switchNextSpace() }.keyboardShortcut("]", modifiers: [.command, .control])
             Button("Prev Space") { store.switchNextSpace() }.keyboardShortcut("[", modifiers: [.command, .control])
@@ -522,217 +522,42 @@ private struct SwipeIndicatorView: View {
     }
 }
 
-/// Minimal start canvas for blank tabs: clean centered URL input field, quick bookmarks, and custom atmosphere.
+/// Minimal start canvas for blank tabs: calm page with tap-to-search.
 private struct EmptyStateView: View {
     @ObservedObject var tab: Tab
     @ObservedObject var store: BrowserStore
     @ObservedObject var settings: SettingsStore
 
-    @State private var text: String = ""
-    @FocusState private var isFocused: Bool
-
     var body: some View {
         ZStack {
-            // Atmosphere Canvas (Theme Solid, Custom Hex, or Custom Image)
-            atmosphereView
-
-            // Centered omnibox and quick bookmarks
-            VStack(spacing: 16) {
-                // Incognito Private Browsing Badge & Notice
-                if tab.isIncognito {
-                    VStack(spacing: 8) {
-                        Image(systemName: "eye.slash.fill")
-                            .font(.system(size: 32, weight: .semibold))
-                            .foregroundStyle(Color.purple.opacity(0.85))
-
-                        Text("Private Browsing")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(.primary)
-
-                        Text("Nomad does not save your history, cookies, or site data for this tab.")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                    }
-                    .padding(.bottom, 6)
+            Theme.page
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    store.isAddressBarFocused = true
                 }
 
-                // Centered "Enter a web address" field
-                HStack(spacing: 8) {
-                    TextField(tab.isIncognito ? "Search privately or enter address" : "Enter a web address", text: $text)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 14.5, weight: .regular))
-                        .foregroundStyle(.primary)
-                        .focused($isFocused)
-                        .onSubmit {
-                            submit()
-                        }
+            if tab.isIncognito {
+                VStack(spacing: 8) {
+                    Image(systemName: "eye.slash.fill")
+                        .font(.system(size: 32, weight: .semibold))
+                        .foregroundStyle(Color.purple.opacity(0.85))
 
-                    if !text.isEmpty {
-                        Button(action: { text = "" }) {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 12))
-                                .foregroundStyle(.tertiary)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal, 18)
-                .frame(width: Metrics.fieldWidth, height: 48)
-                .background(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(Palette.ground)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .strokeBorder(Palette.hairline, lineWidth: 1)
-                )
-                .shadow(color: Color.black.opacity(0.12), radius: 28, x: 0, y: 8)
-                .overlay(alignment: .top) {
-                    // Floating autocomplete suggestions dropdown directly beneath the field without jumping layout
-                    if isFocused && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        OmniboxSuggestionsView(query: text, width: Metrics.fieldWidth) { url in
-                            tab.load(url: url)
-                        }
-                        .offset(y: 56)
-                        .zIndex(100)
-                    }
-                }
+                    Text("Private Browsing")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(Theme.ink)
 
-                // Quick Bookmarks row below the field
-                if !settings.bookmarks.isEmpty {
-                    HStack(spacing: 8) {
-                        ForEach(settings.bookmarks.prefix(6)) { bookmark in
-                            Button(action: { store.openBookmark(bookmark) }) {
-                                HStack(spacing: 5) {
-                                    Image(systemName: "bookmark.fill")
-                                        .font(.system(size: 9))
-                                        .foregroundStyle(settings.accentColor)
-                                    Text(bookmark.title)
-                                        .font(.system(size: 11, weight: .regular))
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
-                                }
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 5)
-                                .background(Color.primary.opacity(0.04), in: Capsule())
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(.top, 4)
-                }
-
-                // Quick Open Tabs Pairing Pills when in Split View
-                if let split = store.splitPairs.first(where: { $0.contains(tab.id) }),
-                   let partnerId = split.partner(of: tab.id) {
-                    let candidateTabs = store.tabs.filter { $0.id != tab.id && $0.id != partnerId && !$0.isPinned }
-                    if !candidateTabs.isEmpty {
-                        VStack(spacing: 8) {
-                            Text("Pair with an open tab:")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(.secondary)
-
-                            HStack(spacing: 8) {
-                                ForEach(candidateTabs) { candidate in
-                                    Button(action: {
-                                        store.splitTab(primaryId: partnerId, secondaryId: candidate.id)
-                                        store.closeTab(id: tab.id)
-                                    }) {
-                                        HStack(spacing: 6) {
-                                            Image(systemName: candidate.isInternalPage ? "gearshape.fill" : "globe")
-                                                .font(.system(size: 10))
-                                                .foregroundStyle(settings.accentColor)
-                                            Text(candidate.title.isEmpty ? "Blank Tab" : candidate.title)
-                                                .font(.system(size: 11, weight: .medium))
-                                                .foregroundStyle(.primary)
-                                                .lineLimit(1)
-                                        }
-                                        .padding(.horizontal, 10)
-                                        .padding(.vertical, 5)
-                                        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                        }
-                        .padding(.top, 6)
-                    }
-                }
-            }
-
-            // Bottom-right Customize / Tune Canvas icon button
-            VStack {
-                Spacer()
-                HStack {
-                    Spacer()
-                    Button(action: { store.openSettings(section: "General") }) {
-                        Image(systemName: "pencil")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(.secondary)
-                            .padding(10)
-                            .background(Color.primary.opacity(0.05), in: Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .help("Customize Appearance (nomad://settings, ⌘,)")
-                    .padding(20)
+                    Text("Nomad does not save your history, cookies, or site data for this tab.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.muted)
                 }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .clipped()
         .onAppear {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                isFocused = true
+            if !tab.hasLoaded && tab.url == nil {
+                store.isAddressBarFocused = true
             }
-        }
-        .onChange(of: store.isAddressBarFocused) { _, focused in
-            if focused {
-                isFocused = true
-                store.isAddressBarFocused = false
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var atmosphereView: some View {
-        Group {
-            switch settings.backgroundStyle {
-            case "hex":
-                settings.customBgColor
-            case "customImage":
-                if let nsImage = settings.cachedCustomBgImage {
-                    GeometryReader { geo in
-                        Image(nsImage: nsImage)
-                            .resizable()
-                            .scaledToFill()
-                            .frame(width: geo.size.width, height: geo.size.height)
-                            .clipped()
-                            .overlay(Color.black.opacity(0.35))
-                    }
-                } else {
-                    themeSolidBackground
-                }
-            default:
-                themeSolidBackground
-            }
-        }
-        .allowsHitTesting(false)
-    }
-
-    private var themeSolidBackground: some View {
-        Color(nsColor: .windowBackgroundColor)
-    }
-
-    private func submit() {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        let parsed = URLParser.parse(trimmed)
-        if parsed.scheme == "nomad" && (parsed.host == "settings" || parsed.host == "tune") {
-            store.openSettings()
-        } else {
-            tab.load(text: trimmed)
         }
     }
 }

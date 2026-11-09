@@ -64,6 +64,11 @@ private struct WindowConfigurator: NSViewRepresentable {
             window.isMovableByWindowBackground = false
             window.titlebarAppearsTransparent = true
             window.titleVisibility = .hidden
+            window.styleMask.insert(.fullSizeContentView)
+            window.toolbar = nil
+            for button in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+                window.standardWindowButton(button)?.isHidden = true
+            }
             window.isOpaque = true
             window.backgroundColor = .windowBackgroundColor
             window.invalidateShadow()
