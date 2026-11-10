@@ -123,6 +123,8 @@
 			shellScript = (
 				"mkdir -p \"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/Scripts\"",
 				"cp -R \"${SRCROOT}/nomad/Resources/Scripts/\"* \"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/Scripts/\"",
+				"mkdir -p \"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/Fonts\"",
+				"if [ -d \"${SRCROOT}/nomad/Resources/Fonts\" ]; then cp -R \"${SRCROOT}/nomad/Resources/Fonts/\"* \"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/Fonts/\"; fi",
 				"",
 			);
 		};

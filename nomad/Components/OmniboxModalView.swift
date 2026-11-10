@@ -14,6 +14,8 @@ struct OmniboxModalView: View {
     @Binding var isPresented: Bool
     @State private var text: String = ""
     @State private var selectedIndex: Int = 0
+    @State private var liveSuggestions: [String] = []
+    @State private var suggestionTask: Task<Void, Never>? = nil
     @FocusState private var isFieldFocused: Bool
     @ObservedObject private var settings = SettingsStore.shared
     @ObservedObject private var history = HistoryStore.shared
@@ -32,7 +34,27 @@ struct OmniboxModalView: View {
 
     private var items: [CommandItem] {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return [] }
+        if trimmed.isEmpty {
+            if store.isPickingSplit {
+                var list: [CommandItem] = []
+                for tab in store.unpinnedTabsForActiveSpace where tab.id != store.splitPickAnchor?.id && !tab.isBlank {
+                    list.append(CommandItem(
+                        id: "tab:\(tab.id)",
+                        kind: .tab,
+                        icon: "globe",
+                        title: tab.title.isEmpty ? (tab.url?.host ?? "Tab") : tab.title,
+                        hint: "Open in Split",
+                        action: {
+                            if let anchor = store.splitPickAnchor {
+                                store.openSplit(tab, beside: anchor, on: store.splitPickSide.other)
+                            }
+                        }
+                    ))
+                }
+                return list
+            }
+            return []
+        }
         let lower = trimmed.lowercased()
         var list: [CommandItem] = []
 
@@ -48,7 +70,7 @@ struct OmniboxModalView: View {
                     kind: .url,
                     icon: "globe",
                     title: trimmed,
-                    hint: "Open Address",
+                    hint: store.isPickingSplit ? "Open in Split" : "Open Address",
                     action: { openURL(url) }
                 ))
             }
@@ -59,7 +81,7 @@ struct OmniboxModalView: View {
                 kind: .search,
                 icon: "magnifyingglass",
                 title: trimmed,
-                hint: "Search \(settings.searchEngineName)",
+                hint: store.isPickingSplit ? "Search in Split" : "Search \(settings.searchEngineName)",
                 action: { if let u = searchURL { openURL(u) } }
             ))
         } else {
@@ -69,9 +91,24 @@ struct OmniboxModalView: View {
                 kind: .search,
                 icon: "magnifyingglass",
                 title: trimmed,
-                hint: "Search \(settings.searchEngineName)",
+                hint: store.isPickingSplit ? "Search in Split" : "Search \(settings.searchEngineName)",
                 action: { if let u = searchURL { openURL(u) } }
             ))
+        }
+
+        // Live Search Engine Suggestions
+        if !store.isPickingSplit {
+            for suggestion in liveSuggestions where suggestion.lowercased() != lower {
+                let sURL = URL(string: "\(settings.searchEngineBaseURL)\(URLParser.encodeQueryComponent(suggestion))")
+                list.append(CommandItem(
+                    id: "sugg:\(suggestion)",
+                    kind: .search,
+                    icon: "magnifyingglass",
+                    title: suggestion,
+                    hint: "",
+                    action: { if let u = sURL { openURL(u) } }
+                ))
+            }
         }
 
         // Settings Action Row (matching Firn Image 2)
@@ -104,15 +141,20 @@ struct OmniboxModalView: View {
 
         // Matching open tabs
         for tab in store.tabs where !tab.isBlank && !tab.isGhost {
+            if let anchor = store.splitPickAnchor, tab.id == anchor.id { continue }
             if tab.title.localizedCaseInsensitiveContains(lower) || (tab.url?.absoluteString.localizedCaseInsensitiveContains(lower) ?? false) {
                 list.append(CommandItem(
                     id: "tab:\(tab.id)",
                     kind: .tab,
                     icon: "globe",
                     title: tab.title.isEmpty ? (tab.url?.host ?? "Tab") : tab.title,
-                    hint: "Switch to Tab",
+                    hint: store.isPickingSplit ? "Open in Split" : "Switch to Tab",
                     action: {
-                        store.selectTab(id: tab.id)
+                        if let anchor = store.splitPickAnchor {
+                            store.openSplit(tab, beside: anchor, on: store.splitPickSide.other)
+                        } else {
+                            store.selectTab(id: tab.id)
+                        }
                     }
                 ))
                 if list.count >= 6 { break }
@@ -127,10 +169,35 @@ struct OmniboxModalView: View {
         GeometryReader { proxy in
             ZStack(alignment: .top) {
                 // Dimming backdrop
-                Theme.commandDim
+                if !store.isPickingSplit {
+                    Theme.commandDim
+                        .ignoresSafeArea()
+                        .contentShape(Rectangle())
+                        .onTapGesture { dismiss() }
+                } else {
+                    // In split pick mode, only the empty picking half has a backdrop to commit on tap;
+                    // the anchor page and sidebar remain completely interactive without dimming or click interception.
+                    HStack(spacing: 0) {
+                        if store.splitPickSide == .left {
+                            Spacer()
+                            Color.clear
+                                .frame(width: proxy.size.width / 2)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    store.commitSplitPickWithNewTab(selectAnchor: false)
+                                }
+                        } else {
+                            Color.clear
+                                .frame(width: proxy.size.width / 2)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    store.commitSplitPickWithNewTab(selectAnchor: false)
+                                }
+                            Spacer()
+                        }
+                    }
                     .ignoresSafeArea()
-                    .contentShape(Rectangle())
-                    .onTapGesture { dismiss() }
+                }
 
                 // Centered modal card
                 VStack(spacing: 0) {
@@ -142,13 +209,27 @@ struct OmniboxModalView: View {
 
                         TextField("Search or enter address", text: $text)
                             .textFieldStyle(.plain)
-                            .font(.system(size: 16))
+                            .font(Theme.font(size: 16))
                             .foregroundStyle(Theme.ink)
                             .focused($isFieldFocused)
                             .onSubmit { submit(rows: rows) }
                             .onExitCommand { dismiss() }
-                            .onChange(of: text) {
+                            .onChange(of: text) { _, newText in
                                 selectedIndex = 0
+                                suggestionTask?.cancel()
+                                guard SearchSuggestions.mayAsk(about: newText), !store.isPickingSplit else {
+                                    liveSuggestions = []
+                                    return
+                                }
+                                suggestionTask = Task {
+                                    try? await Task.sleep(nanoseconds: 100_000_000)
+                                    guard !Task.isCancelled else { return }
+                                    let results = await SearchSuggestions.fetch(newText)
+                                    guard !Task.isCancelled else { return }
+                                    await MainActor.run {
+                                        self.liveSuggestions = results
+                                    }
+                                }
                             }
                     }
                     .padding(.horizontal, 16)
@@ -174,7 +255,7 @@ struct OmniboxModalView: View {
                                             .foregroundStyle(Theme.muted)
 
                                         Text(item.title)
-                                            .font(.system(size: 13))
+                                            .font(Theme.font(size: 13))
                                             .foregroundStyle(Theme.ink)
                                             .lineLimit(1)
 
@@ -182,7 +263,7 @@ struct OmniboxModalView: View {
 
                                         if !item.hint.isEmpty {
                                             Text(item.hint)
-                                                .font(.system(size: 11))
+                                                .font(Theme.font(size: 11))
                                                 .foregroundStyle(Theme.faint)
                                                 .lineLimit(1)
                                         }
@@ -196,12 +277,15 @@ struct OmniboxModalView: View {
                                     .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
+                                .onHover { isHover in
+                                    if isHover { selectedIndex = index }
+                                }
                             }
                         }
                         .padding(6)
                     }
                 }
-                .frame(width: min(560, max(0, proxy.size.width - 64)))
+                .frame(width: store.isPickingSplit ? min(420, max(240, (proxy.size.width / 2) - 32)) : min(560, max(240, proxy.size.width - 64)))
                 .background {
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
                         .fill(Theme.page)
@@ -213,9 +297,19 @@ struct OmniboxModalView: View {
                 }
                 .shadow(color: Color.black.opacity(0.35), radius: 24, y: 8)
                 .shadow(color: Color.black.opacity(0.20), radius: 3, y: 1)
+                .frame(maxWidth: .infinity)
+                .padding(.leading, store.isPickingSplit ? (store.splitPickSide == .left ? (proxy.size.width / 2) : 0) : 0)
+                .padding(.trailing, store.isPickingSplit ? (store.splitPickSide == .right ? (proxy.size.width / 2) : 0) : 0)
                 .padding(.top, max(48, proxy.size.height * 0.22))
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        }
+        .background {
+            ArrowCatcher { offset in
+                let count = rows.count
+                guard count > 0 else { return }
+                selectedIndex = min(max(selectedIndex + offset, 0), count - 1)
+            }
         }
         .onAppear {
             selectedIndex = 0
@@ -253,6 +347,11 @@ struct OmniboxModalView: View {
     }
 
     private func openURL(_ url: URL) {
+        if let anchor = store.splitPickAnchor {
+            let newT = store.newTab(url: url, select: false)
+            store.openSplit(newT, beside: anchor, on: store.splitPickSide.other)
+            return
+        }
         if let active = store.activeTab, active.isBlank {
             active.load(url: url)
         } else {
@@ -261,8 +360,12 @@ struct OmniboxModalView: View {
     }
 
     private func dismiss() {
-        isPresented = false
-        store.isAddressBarFocused = false
+        if store.isPickingSplit {
+            store.cancelSplitPick()
+        } else {
+            isPresented = false
+            store.isAddressBarFocused = false
+        }
     }
 }
 
@@ -295,5 +398,50 @@ enum AddressInput {
         }
         let encoded = URLParser.encodeQueryComponent(trimmed)
         return URL(string: "\(searchBase)\(encoded)")
+    }
+}
+
+/// Intercepts ↑ and ↓ keys while typing in the text field.
+struct ArrowCatcher: NSViewRepresentable {
+    let onArrow: (Int) -> Void
+
+    func makeNSView(context: Context) -> CatcherView { CatcherView() }
+
+    func updateNSView(_ view: CatcherView, context: Context) { view.onArrow = onArrow }
+
+    final class CatcherView: NSView {
+        var onArrow: ((Int) -> Void)?
+        private var monitor: Any?
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+            guard window != nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                let caught = MainActor.assumeIsolated { self?.catches(event) ?? false }
+                return caught ? nil : event
+            }
+        }
+
+        private func catches(_ event: NSEvent) -> Bool {
+            let offset: Int = switch event.keyCode {
+            case 125: 1 // Down arrow
+            case 126: -1 // Up arrow
+            default: 0
+            }
+            guard offset != 0, let window, event.window === window,
+                  event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty,
+                  (window.firstResponder as? NSTextView)?.isFieldEditor == true,
+                  let onArrow else { return false }
+            onArrow(offset)
+            return true
+        }
+
+        deinit {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+        }
     }
 }

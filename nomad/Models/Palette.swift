@@ -27,7 +27,10 @@ enum Theme {
     static let shadowPeek = Color(hex: 0x000000, opacity: 0.45)
 
     static let pageInset: CGFloat = 8
-    static let pageCornerRadius: CGFloat = 10
+    @MainActor static var pageCornerRadius: CGFloat {
+        guard let window = WindowCorners.shared.radius else { return 10 }
+        return min(max(window - pageInset, 6), 24)
+    }
     static let rowHeight: CGFloat = 36
     static let tabRadius: CGFloat = 8
     static let fieldRadius: CGFloat = 8
@@ -37,11 +40,22 @@ enum Theme {
     static let rowPadding: CGFloat = 12
     static let sectionSpacing: CGFloat = 16
 
+    static func font(size: CGFloat, weight: Font.Weight = .regular) -> Font {
+        Font.system(size: size, weight: weight)
+    }
+
     static let tabFont = Font.system(size: 13)
     static let labelFont = Font.system(size: 12)
     static let groupHeaderFont = Font.system(size: 13, weight: .semibold)
     static let hintFont = Font.system(size: 11)
     static let panelTitleFont = Font.system(size: 22, weight: .regular, design: .serif)
+
+    static let tileRimTop = Color(hex: 0xFFFFFF, opacity: 0.16)
+    static let tileRimBottom = Color(hex: 0xFFFFFF, opacity: 0.03)
+    static let shadowSoft = Color(hex: 0x000000, opacity: 0.15)
+    static let shadowLift = Color(hex: 0x000000, opacity: 0.20)
+
+    static let glide = Animation.spring(response: 0.24, dampingFraction: 0.88)
 
     static let spaceColors: [(name: String, hex: String)] = [
         ("glacier", "#7F9CB0"),
@@ -60,6 +74,54 @@ enum Theme {
 
     static func spaceInk(_ hex: String) -> Color {
         spaceColor(hex)
+    }
+
+    // MARK: - First Light
+    enum FirstLight {
+        static let skyTop = Color(hex: 0x2E2F31)
+        static let cool = Color(hex: 0x6E98B2, opacity: 0.24)
+        static let warm = Color(hex: 0xD69268, opacity: 0.16)
+        static let warm2 = Color(hex: 0xA0786E, opacity: 0.10)
+        static let sun = Color(hex: 0xD68C60, opacity: 0.32)
+        static let sunMid = Color(hex: 0xD68C60, opacity: 0.10)
+        static let flake = NSColor(hex: 0x7F9CB0, opacity: 1)
+        static let flakeOpacity: Float = 0.22
+        static let grainOpacity: Double = 0.50
+
+        static func mix(_ a: UInt32, _ b: UInt32, _ amount: Double) -> UInt32 {
+            func channel(_ shift: UInt32) -> UInt32 {
+                let x = Double((a >> shift) & 0xFF), y = Double((b >> shift) & 0xFF)
+                return UInt32((x + (y - x) * amount).rounded()) << shift
+            }
+            return channel(16) | channel(8) | channel(0)
+        }
+
+        static func spaceHex(_ nameOrHex: String) -> UInt32 {
+            switch nameOrHex.lowercased() {
+            case "sand": return 0xC9A27E
+            case "sage": return 0x8FAE8B
+            case "heather": return 0xB88A9E
+            case "ochre": return 0xC4A95B
+            case "dusk": return 0x8E8FB8
+            case "clay": return 0xB07F6A
+            case "lagoon": return 0x6FA3A0
+            case "glacier": return 0x7F9CB0
+            default:
+                let clean = nameOrHex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+                if let val = UInt32(clean, radix: 16) { return val }
+                return 0x7F9CB0
+            }
+        }
+
+        static func snow(_ space: String) -> [Color] {
+            let tint = spaceHex(space)
+            if tint == 0x7F9CB0 {
+                return [0x34353A, 0x3A3F46, 0x414B55, 0x495865, 0x536777].map { Color(hex: $0) }
+            }
+            return [0.12, 0.20, 0.29, 0.38, 0.48].map {
+                Color(hex: mix(0x2B2826, tint, $0))
+            }
+        }
     }
 }
 

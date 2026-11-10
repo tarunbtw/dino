@@ -204,7 +204,7 @@ extension SettingsView {
                     Spacer()
 
                     Button("Import…") {
-                        settings.promptBringThingsOver()
+                        store.isShowingArcImportModal = true
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)

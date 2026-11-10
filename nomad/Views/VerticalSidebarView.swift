@@ -29,15 +29,14 @@ struct VerticalSidebarView: View {
         VStack(spacing: 0) {
             // Header: Traffic lights, Sidebar door, Back/Forward
             headerSection
+                .padding(.top, store.menuBarDrop)
 
             // Address bar with domain & reload
             addressBarSection
 
-            // Pinned Tabs Shelf (if any)
-            if !store.pinnedTabs.isEmpty {
-                pinnedTabsSection
-                    .padding(.horizontal, 10)
-                    .padding(.bottom, 6)
+            // Basecamp Pinned Tiles (if any)
+            if !store.basecampTabs.isEmpty {
+                BasecampGrid(store: store, sidebarWidth: sidebarWidth)
 
                 Rectangle()
                     .fill(Theme.activeTabHairline)
@@ -48,26 +47,38 @@ struct VerticalSidebarView: View {
 
             // Tabs List for Active Space
             ScrollView(.vertical, showsIndicators: false) {
-                let currentTabs = store.unpinnedTabsForActiveSpace
                 VStack(spacing: tabRowSpacing) {
-                    ForEach(Array(currentTabs.enumerated()), id: \.element.id) { index, tab in
-                        let isDragging = draggingTabId == tab.id
-                        let offset = tabOffsetY(for: tab, index: index, tabs: currentTabs)
+                    // Tab Groups for Active Space
+                    ForEach(store.tabGroupsForActiveSpace) { group in
+                        TabGroupCardView(store: store, group: group)
+                    }
 
-                        VerticalTabRowView(
-                            store: store,
-                            tab: tab,
-                            isActive: tab.id == store.activeTabId,
-                            isDragging: isDragging,
-                            offsetY: offset,
-                            onDragChanged: { translation in
-                                handleDragChanged(tabId: tab.id, translation: translation)
-                            },
-                            onDragEnded: { translation in
-                                handleDragEnded(tabId: tab.id, translation: translation, tabs: currentTabs)
-                            }
-                        )
-                        .animation(draggingTabId == nil ? nil : (isDragging && !isSettling ? nil : .spring(response: 0.18, dampingFraction: 0.95)), value: offset)
+                    // Loose Everyday Tabs & Unified Split Rows
+                    let loose = store.looseTabs
+                    ForEach(looseTabItems) { item in
+                        switch item {
+                        case .split(let split, let leftTab, let rightTab):
+                            SplitRowView(store: store, split: split, leftTab: leftTab, rightTab: rightTab)
+                        case .single(let tab):
+                            let isDragging = draggingTabId == tab.id
+                            let index = loose.firstIndex(where: { $0.id == tab.id }) ?? 0
+                            let offset = tabOffsetY(for: tab, index: index, tabs: loose)
+
+                            VerticalTabRowView(
+                                store: store,
+                                tab: tab,
+                                isActive: tab.id == store.activeTabId,
+                                isDragging: isDragging,
+                                offsetY: offset,
+                                onDragChanged: { translation in
+                                    handleDragChanged(tabId: tab.id, translation: translation)
+                                },
+                                onDragEnded: { translation in
+                                    handleDragEnded(tabId: tab.id, translation: translation, tabs: loose)
+                                }
+                            )
+                            .animation(draggingTabId == nil ? nil : (isDragging && !isSettling ? nil : .spring(response: 0.18, dampingFraction: 0.95)), value: offset)
+                        }
                     }
 
                     // + New tab button
@@ -75,10 +86,18 @@ struct VerticalSidebarView: View {
                 }
                 .padding(.horizontal, 8)
                 .padding(.top, 2)
+                .contextMenu {
+                    Button("New Tab Group", systemImage: "folder.badge.plus") {
+                        store.createTabGroup()
+                    }
+                }
             }
             .scrollIndicators(.hidden)
             .coordinateSpace(name: "VerticalSidebarSpace")
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            // Audio & Media Mini-Player Capsule
+            MiniPlayer(store: store)
 
             // Centered Space Profile Row
             footerSection
@@ -113,13 +132,17 @@ struct VerticalSidebarView: View {
                 .frame(maxWidth: .infinity, maxHeight: Theme.rowHeight)
 
             if let activeTab = store.activeTab {
-                Door(icon: "chevron.left", help: "Back (⌘[)") { activeTab.goBack() }
-                    .disabled(!activeTab.canGoBack)
-                    .opacity(activeTab.canGoBack ? 1.0 : 0.35)
+                SidebarNavButtons(tab: activeTab)
+            } else {
+                HStack(spacing: 2) {
+                    Door(icon: "chevron.left", help: "Back (⌘[)") {}
+                        .disabled(true)
+                        .opacity(0.35)
 
-                Door(icon: "chevron.right", help: "Forward (⌘])") { activeTab.goForward() }
-                    .disabled(!activeTab.canGoForward)
-                    .opacity(activeTab.canGoForward ? 1.0 : 0.35)
+                    Door(icon: "chevron.right", help: "Forward (⌘])") {}
+                        .disabled(true)
+                        .opacity(0.35)
+                }
             }
         }
         .frame(height: Theme.rowHeight)
@@ -130,54 +153,106 @@ struct VerticalSidebarView: View {
     // MARK: - Address Bar Section
     @ViewBuilder
     private var addressBarSection: some View {
-        let activeTab = store.activeTab
-        let displaySite = WebAddress.site(of: activeTab?.url)
+        let isLookout = store.peekTab != nil
+        let activeTab = store.peekTab ?? store.activeTab
+        let rawSite = WebAddress.site(of: activeTab?.url)
+        let displaySite = isLookout ? (rawSite.isEmpty ? "Lookout" : "Lookout: \(rawSite)") : rawSite
+        let canBookmark = activeTab != nil && !(activeTab?.isBlank ?? true) && activeTab?.url != nil && !isLookout
+        let isBookmarked = activeTab?.url.map { settings.isBookmarked($0.absoluteString) } ?? false
 
-        Button(action: {
-            store.isAddressBarFocused = true
-        }) {
-            HStack(spacing: 8) {
-                Text(displaySite.isEmpty ? "Search or enter address" : displaySite)
-                    .font(.system(size: 13))
-                    .foregroundStyle(displaySite.isEmpty ? Theme.muted : Theme.ink)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+        HStack(spacing: 6) {
+            // Text area clicking opens Omnibox
+            Button(action: {
+                store.isAddressBarFocused = true
+            }) {
+                HStack(spacing: 0) {
+                    Text(displaySite.isEmpty ? "Search or enter address" : displaySite)
+                        .font(Theme.tabFont)
+                        .foregroundStyle(displaySite.isEmpty ? Theme.faint : Theme.ink)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
 
-                Spacer(minLength: 4)
+                    if let tab = activeTab, tab.currentZoom != 1.0 {
+                        Button {
+                            tab.resetZoom()
+                        } label: {
+                            Text("\(Int(round(tab.currentZoom * 100)))%")
+                                .font(Theme.font(size: 10, weight: .semibold))
+                                .foregroundStyle(Theme.faint)
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 2)
+                                .background(Theme.hover, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                        .help("Reset Zoom (⌘0)")
+                    }
+                    Spacer(minLength: 4)
+                }
+                .frame(maxHeight: .infinity)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
 
-                if let tab = activeTab {
+            if let tab = activeTab {
+                // Save / Bookmark button (appears on hover, or stays visible if already bookmarked)
+                if (isHoveringAddress || isBookmarked) && canBookmark {
                     Button(action: {
-                        if tab.isLoading { tab.stopLoading() } else { tab.reload() }
+                        store.toggleBookmark(for: tab)
                     }) {
-                        Image(systemName: tab.isLoading ? "xmark" : "arrow.clockwise")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(Theme.muted)
-                            .frame(width: 24, height: 24)
+                        Image(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(isBookmarked ? Theme.ink : Theme.muted)
+                            .frame(width: 22, height: 22)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .help(tab.isLoading ? "Stop loading" : "Reload this page (⌘R)")
+                    .help(isBookmarked ? "Remove bookmark (⌘D)" : "Bookmark this tab (⌘D)")
+                    .transition(.opacity)
                 }
+
+                // Reload / Stop button
+                Button(action: {
+                    if tab.isLoading { tab.stopLoading() } else { tab.reload() }
+                }) {
+                    Image(systemName: tab.isLoading ? "xmark" : "arrow.clockwise")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Theme.muted)
+                        .frame(width: 22, height: 22)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(tab.isLoading ? "Stop loading" : "Reload this page (⌘R)")
+            } else {
+                Button(action: {}) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Theme.faint.opacity(0.4))
+                        .frame(width: 22, height: 22)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(true)
             }
-            .padding(.horizontal, 10)
-            .frame(height: Theme.rowHeight)
-            .background {
-                RoundedRectangle(cornerRadius: Theme.fieldRadius, style: .continuous)
-                    .fill(isHoveringAddress ? Theme.press : Theme.hover)
-                    .overlay {
-                        if let tab = activeTab, tab.isLoading {
-                            GeometryReader { geo in
-                                RoundedRectangle(cornerRadius: Theme.fieldRadius, style: .continuous)
-                                    .fill(Theme.frost)
-                                    .frame(width: geo.size.width * CGFloat(max(0.05, tab.estimatedProgress)))
-                            }
-                            .clipShape(RoundedRectangle(cornerRadius: Theme.fieldRadius, style: .continuous))
-                        }
-                    }
-            }
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, 10)
+        .frame(height: Theme.rowHeight)
+        .background {
+            RoundedRectangle(cornerRadius: Theme.fieldRadius, style: .continuous)
+                .fill(isHoveringAddress ? Theme.press : Theme.hover)
+                .overlay {
+                    if let tab = activeTab {
+                        LoadingFrost(
+                            isLoading: tab.isLoading,
+                            progress: tab.estimatedProgress,
+                            spaceColorHex: store.activeSpace.colorHex
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: Theme.fieldRadius, style: .continuous))
+                    }
+                }
+        }
+        .contentShape(RoundedRectangle(cornerRadius: Theme.fieldRadius, style: .continuous))
         .onHover { isHoveringAddress = $0 }
+        .animation(.easeOut(duration: 0.15), value: isHoveringAddress)
         .padding(.horizontal, 8)
         .padding(.top, 6)
         .padding(.bottom, 10)
@@ -187,13 +262,17 @@ struct VerticalSidebarView: View {
     @ViewBuilder
     private var newTabRow: some View {
         Button(action: {
-            store.isAddressBarFocused = true
+            if store.isPickingSplit {
+                store.commitSplitPickWithNewTab(selectAnchor: false)
+            } else {
+                store.isAddressBarFocused = true
+            }
         }) {
             HStack(spacing: 8) {
                 Image(systemName: "plus")
                     .font(.system(size: 13, weight: .medium))
                 Text("New tab")
-                    .font(.system(size: 13))
+                    .font(Theme.tabFont)
                 Spacer()
             }
             .foregroundStyle(Theme.muted)
@@ -204,6 +283,11 @@ struct VerticalSidebarView: View {
         }
         .buttonStyle(.plain)
         .onHover { isHoveringNewTab = $0 }
+        .contextMenu {
+            Button("New Tab Group", systemImage: "folder.badge.plus") {
+                store.createTabGroup()
+            }
+        }
         .help("New tab (⌘T)")
     }
 
@@ -255,11 +339,17 @@ struct VerticalSidebarView: View {
         }
     }
 
-    // MARK: - Centered Space Row
+    // MARK: - Centered Space Row with Downloads & Overflow Buttons
     @ViewBuilder
     private var footerSection: some View {
-        SpaceRow(store: store)
-            .padding(.bottom, Theme.pageInset)
+        HStack(spacing: 6) {
+            SpaceRow(store: store)
+
+            DownloadsButton(store: store)
+
+            OverflowButton(store: store)
+        }
+        .padding(.bottom, Theme.pageInset)
     }
 
     // MARK: - Sidebar Resize Handle
@@ -287,6 +377,40 @@ struct VerticalSidebarView: View {
                     settings.sidebarWidth = 240
                 }
             }
+    }
+
+    // MARK: - Loose Tab Items (Unified Split Rows)
+    private enum LooseTabItem: Identifiable {
+        case single(Tab)
+        case split(SplitPair, Tab, Tab)
+
+        var id: String {
+            switch self {
+            case .single(let tab): return "single:\(tab.id)"
+            case .split(let split, _, _): return "split:\(split.id)"
+            }
+        }
+    }
+
+    private var looseTabItems: [LooseTabItem] {
+        var items: [LooseTabItem] = []
+        var handled = Set<UUID>()
+        let loose = store.looseTabs
+
+        for tab in loose {
+            if handled.contains(tab.id) { continue }
+            if let pair = store.split(of: tab),
+               let leftTab = store.tabs.first(where: { $0.id == pair.leftTabId }),
+               let rightTab = store.tabs.first(where: { $0.id == pair.rightTabId }) {
+                items.append(.split(pair, leftTab, rightTab))
+                handled.insert(pair.leftTabId)
+                handled.insert(pair.rightTabId)
+            } else {
+                items.append(.single(tab))
+                handled.insert(tab.id)
+            }
+        }
+        return items
     }
 
     // MARK: - Drag Reordering
@@ -350,7 +474,7 @@ struct VerticalSidebarView: View {
 }
 
 /// An individual tab row inside the vertical sidebar.
-private struct VerticalTabRowView: View {
+struct VerticalTabRowView: View {
     @ObservedObject var store: BrowserStore
     @ObservedObject var tab: Tab
     let isActive: Bool
@@ -389,10 +513,14 @@ private struct VerticalTabRowView: View {
         }
         .padding(.horizontal, 10)
         .frame(height: Theme.rowHeight)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.tabRadius, style: .continuous)
-                .fill(isActive ? Theme.activeTab : (isHovered ? Theme.hover : Color.clear))
-        )
+        .background {
+            if isActive {
+                ActiveTabBackground()
+            } else {
+                RoundedRectangle(cornerRadius: Theme.tabRadius, style: .continuous)
+                    .fill(isHovered ? Theme.hover : Color.clear)
+            }
+        }
         .contentShape(RoundedRectangle(cornerRadius: Theme.tabRadius, style: .continuous))
         .onTapGesture {
             store.selectTab(id: tab.id)
@@ -419,8 +547,33 @@ private struct VerticalTabRowView: View {
             Button("Duplicate Tab") {
                 store.newTab(url: tab.url, isIncognito: tab.isIncognito, select: true)
             }
-            Button(tab.isPinned ? "Unpin Tab" : "Pin Tab") {
+            Button("Open as Split", systemImage: "rectangle.split.2x1") {
+                store.pickSplit(beside: tab)
+            }
+            Button(tab.place == .basecamp ? "Remove from Basecamp" : "Add to Basecamp") {
                 store.togglePin(tabId: tab.id)
+            }
+            Button("New Group with Tab", systemImage: "folder.badge.plus") {
+                let g = store.createTabGroup(spaceId: tab.spaceId)
+                store.moveTab(tabId: tab.id, toGroupId: g.id)
+            }
+            if !store.tabGroupsForActiveSpace.isEmpty || tab.groupId != nil {
+                Menu("Move to Group") {
+                    ForEach(store.tabGroupsForActiveSpace) { grp in
+                        Button(grp.name) {
+                            store.moveTab(tabId: tab.id, toGroupId: grp.id)
+                        }
+                    }
+                    if tab.groupId != nil {
+                        Divider()
+                        Button("Remove from Group") {
+                            store.moveTab(tabId: tab.id, toGroupId: nil)
+                        }
+                    }
+                }
+            }
+            Button("Tidy Away", systemImage: "archivebox") {
+                store.drift(tab: tab)
             }
             Divider()
             Button("Close Tab") {
@@ -463,5 +616,46 @@ private struct VerticalTabRowView: View {
             return host
         }
         return tab.isBlank ? "New Tab" : (trimmedTitle.isEmpty ? "New Tab" : trimmedTitle)
+    }
+}
+
+/// Navigation Chevrons directly observing the active Tab for zero-latency enabled/disabled updates.
+private struct SidebarNavButtons: View {
+    @ObservedObject var tab: Tab
+
+    var body: some View {
+        HStack(spacing: 2) {
+            Door(icon: "chevron.left", help: "Back (⌘[)") {
+                tab.goBack()
+            }
+            .disabled(!tab.canGoBack)
+            .opacity(tab.canGoBack ? 1.0 : 0.35)
+
+            Door(icon: "chevron.right", help: "Forward (⌘])") {
+                tab.goForward()
+            }
+            .disabled(!tab.canGoForward)
+            .opacity(tab.canGoForward ? 1.0 : 0.35)
+        }
+    }
+}
+
+/// The tab on screen: a lifted sheet of frosted glass matching Firn.
+private struct ActiveTabBackground: View {
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: Theme.tabRadius, style: .continuous)
+        shape
+            .fill(Theme.activeTab)
+            .overlay {
+                shape.inset(by: 0.5).strokeBorder(
+                    LinearGradient(colors: [Theme.tileRimTop, Theme.tileRimBottom], startPoint: .top, endPoint: .bottom),
+                    lineWidth: 0.5
+                )
+            }
+            .overlay {
+                shape.strokeBorder(Theme.activeTabHairline, lineWidth: 0.5)
+            }
+            .shadow(color: Theme.shadowSoft, radius: 1, y: 1)
+            .shadow(color: Theme.shadowLift, radius: 4, y: 2)
     }
 }

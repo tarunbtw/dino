@@ -138,7 +138,7 @@ struct CommandPaletteView: View {
             shortcut: "⌘T",
             category: .actions,
             action: {
-                store.newTab()
+                store.isAddressBarFocused = true
                 onDismiss()
             }
         ))

@@ -127,6 +127,32 @@ final class Tab: NSObject, Identifiable, ObservableObject {
     @Published var isReaderModeActive: Bool = false
     @Published var isFloatingVideo: Bool = false
     @Published var wantsNextNewTabInSplit: Bool = false
+    // MARK: - Phase 1: Tab Lifecycle, Grouping & Basecamp
+    public enum TabPlace: String, Codable, Sendable {
+        case basecamp, open, drifted
+    }
+
+    @Published var place: TabPlace = .open
+    @Published var homeURL: URL? = nil
+    @Published var groupId: UUID? = nil
+    @Published var driftedAt: Date? = nil
+    @Published var faviconPNGData: Data? = nil
+
+    var isAwayFromHome: Bool {
+        guard place == .basecamp, let home = homeURL, let current = url else { return false }
+        return home != current
+    }
+
+    func goHome() {
+        guard let target = homeURL ?? url else { return }
+        load(url: target)
+    }
+
+    var siteColors: IconColor.Colors? {
+        guard let data = faviconPNGData else { return nil }
+        return IconColor.from(png: data)
+    }
+
     @Published var wantsNextNewTabIncognito: Bool = false
     @Published var isPinned: Bool = false
     @Published var isGhost: Bool = false
@@ -720,10 +746,12 @@ final class Tab: NSObject, Identifiable, ObservableObject {
     @Published var isFindBarVisible: Bool = false
     @Published var findQuery: String = ""
     @Published var findHasMatches: Bool = false
+    @Published var findCount: Int? = nil
 
     func findInPage(_ query: String, forward: Bool = true) {
-        self.findQuery = query
-        guard !query.isEmpty else {
+        let cleanQuery = FindOnPage.query(query)
+        self.findQuery = cleanQuery
+        guard !cleanQuery.isEmpty else {
             clearFind()
             return
         }
@@ -733,9 +761,21 @@ final class Tab: NSObject, Identifiable, ObservableObject {
         config.caseSensitive = false
         config.wraps = true
 
-        webView.find(query, configuration: config) { [weak self] result in
+        webView.find(cleanQuery, configuration: config) { [weak self] result in
             Task { @MainActor in
                 self?.findHasMatches = result.matchFound
+            }
+        }
+
+        // Count occurrences
+        let js = "\(FindOnPage.countScript)(\(cleanQuery.debugDescription), \(FindOnPage.countLimit));"
+        webView.evaluateJavaScript(js) { [weak self] val, _ in
+            Task { @MainActor in
+                if let num = val as? NSNumber {
+                    self?.findCount = min(max(num.intValue, 1), FindOnPage.countLimit)
+                } else {
+                    self?.findCount = nil
+                }
             }
         }
     }
@@ -743,12 +783,48 @@ final class Tab: NSObject, Identifiable, ObservableObject {
     func clearFind() {
         findQuery = ""
         findHasMatches = false
+        findCount = nil
         webView.evaluateJavaScript("window.getSelection().removeAllRanges()", completionHandler: nil)
     }
 
     func closeFind() {
         isFindBarVisible = false
         clearFind()
+    }
+
+    // MARK: - Media & Sound Playback
+    @Published var isPlayingAudio: Bool = false
+    @Published var isAudioPausedByPlayer: Bool = false
+
+    func toggleMediaPlayback() {
+        isAudioPausedByPlayer.toggle()
+        let shouldPause = isAudioPausedByPlayer
+        let js = """
+        (function() {
+            const media = document.querySelectorAll('audio, video');
+            for (const el of media) {
+                if (\(shouldPause)) {
+                    el.pause();
+                } else {
+                    var p = el.play();
+                    if (p) p.catch(function() {});
+                }
+            }
+        })();
+        """
+        webView.evaluateJavaScript(js, completionHandler: nil)
+    }
+
+    func checkMediaPlayback() {
+        guard !isBlank, !isInternalPage else { return }
+        let js = "Boolean(Array.from(document.querySelectorAll('audio, video')).find(el => !el.paused && !el.ended))"
+        webView.evaluateJavaScript(js) { [weak self] val, _ in
+            Task { @MainActor in
+                if let playing = val as? Bool {
+                    self?.isPlayingAudio = playing
+                }
+            }
+        }
     }
 
     // MARK: - Native Print & PDF Export (⌘P)
@@ -1028,11 +1104,15 @@ final class Tab: NSObject, Identifiable, ObservableObject {
     func fetchFavicon(for url: URL) {
         guard url.scheme == "http" || url.scheme == "https", let host = url.host, !host.isEmpty else {
             self.favicon = nil
+            self.faviconPNGData = nil
             return
         }
 
         if let cached = FaviconService.shared.cachedFavicon(for: host) {
             self.favicon = cached
+            if let tiff = cached.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) {
+                self.faviconPNGData = rep.representation(using: .png, properties: [:])
+            }
             return
         }
 
@@ -1041,6 +1121,9 @@ final class Tab: NSObject, Identifiable, ObservableObject {
             if let image = await FaviconService.shared.loadFavicon(for: url) {
                 if self.url?.host == host || self.webView.url?.host == host {
                     self.favicon = image
+                    if let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) {
+                        self.faviconPNGData = rep.representation(using: .png, properties: [:])
+                    }
                 }
             }
         }

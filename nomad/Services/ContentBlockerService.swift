@@ -20,11 +20,20 @@ final class ContentBlockerService: ObservableObject {
     @Published var isEnabled: Bool = true {
         didSet {
             UserDefaults.standard.set(isEnabled, forKey: "nomad.adblocker.enabled")
+            guard let list = compiledRuleList else { return }
+            for controller in controllers.allObjects {
+                if isEnabled {
+                    controller.add(list)
+                } else {
+                    controller.remove(list)
+                }
+            }
         }
     }
 
     private var compiledRuleList: WKContentRuleList?
     private let ruleListIdentifier = "nomad.native.blocker.v2"
+    private let controllers = NSHashTable<WKUserContentController>.weakObjects()
 
     /// Known third-party tracker and ad networks.
     /// Strictly scoped to third-party loads so first-party scripts and streaming players are never disrupted.
@@ -62,14 +71,28 @@ final class ContentBlockerService: ObservableObject {
 
     /// Attaches the native compiled rule list to a WKUserContentController
     func attach(to userContentController: WKUserContentController) {
-        guard isEnabled, let list = compiledRuleList else { return }
-        userContentController.add(list)
+        guard !controllers.contains(userContentController) else { return }
+        controllers.add(userContentController)
+        if isEnabled, let list = compiledRuleList {
+            userContentController.add(list)
+        }
     }
 
     /// Removes the compiled rule list if disabled
     func detach(from userContentController: WKUserContentController) {
+        controllers.remove(userContentController)
         guard let list = compiledRuleList else { return }
         userContentController.remove(list)
+    }
+
+    private func applyCompiledRuleList(_ list: WKContentRuleList) {
+        self.compiledRuleList = list
+        self.isReady = true
+        if isEnabled {
+            for controller in controllers.allObjects {
+                controller.add(list)
+            }
+        }
     }
 
     private func loadOrCompileRules() {
@@ -79,8 +102,7 @@ final class ContentBlockerService: ObservableObject {
         store.lookUpContentRuleList(forIdentifier: ruleListIdentifier) { [weak self] list, _ in
             if let list = list {
                 Task { @MainActor [weak self] in
-                    self?.compiledRuleList = list
-                    self?.isReady = true
+                    self?.applyCompiledRuleList(list)
                 }
             } else {
                 // Compile the curated rule set
@@ -117,9 +139,10 @@ final class ContentBlockerService: ObservableObject {
                 print("[nomad] ContentBlocker compilation error: \(error.localizedDescription)")
                 return
             }
-            Task { @MainActor [weak self] in
-                self?.compiledRuleList = list
-                self?.isReady = true
+            if let list = list {
+                Task { @MainActor [weak self] in
+                    self?.applyCompiledRuleList(list)
+                }
             }
         }
     }

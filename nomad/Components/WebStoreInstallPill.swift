@@ -28,19 +28,19 @@ struct WebStoreInstallPill: View {
                 guard !isInstalled && !localIsInstalling else { return }
                 install(id: extensionId)
             }) {
-                HStack(spacing: 5) {
+                HStack(spacing: 6) {
                     if localIsInstalling || manager.busy != nil {
                         ProgressView()
                             .controlSize(.mini)
-                        Text("Installing...")
-                            .font(.system(size: 11, weight: .semibold))
+                        Text("Installing…")
+                            .font(.system(size: 11, weight: .medium))
                     } else if isInstalled {
                         Image(systemName: "checkmark")
                             .font(.system(size: 10, weight: .bold))
                             .foregroundStyle(.green)
                         Text("Added to Nomad")
                             .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.muted)
                     } else {
                         Image(systemName: "plus")
                             .font(.system(size: 10, weight: .bold))
@@ -48,17 +48,18 @@ struct WebStoreInstallPill: View {
                             .font(.system(size: 11, weight: .semibold))
                     }
                 }
-                .padding(.horizontal, 9)
-                .padding(.vertical, 4)
+                .padding(.horizontal, 10)
+                .frame(height: 28)
                 .background(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
                         .fill(
                             isInstalled
-                                ? Color.primary.opacity(0.06)
-                                : Color.primary.opacity(isHovered ? 0.88 : 1.0)
+                                ? Theme.hover
+                                : (isHovered ? Theme.ink.opacity(0.88) : Theme.ink)
                         )
                 )
-                .foregroundStyle(isInstalled ? Color.primary : Color(nsColor: .windowBackgroundColor))
+                .foregroundStyle(isInstalled ? Theme.muted : Theme.page)
+                .shadow(color: isInstalled ? Color.clear : Color.black.opacity(0.18), radius: 4, y: 1)
             }
             .buttonStyle(.plain)
             .disabled(isInstalled || localIsInstalling)

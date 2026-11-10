@@ -28,13 +28,13 @@ private struct BrowserMainView: View {
                 .ignoresSafeArea()
 
             if !settings.hasCompletedOnboarding {
-                OnboardingView(settings: settings)
+                WelcomeView(settings: settings, store: store)
                     .transition(.opacity.combined(with: .scale(scale: 1.01)))
                     .zIndex(500)
             }
         }
         .frame(minWidth: 640, minHeight: 420)
-        .background(WindowConfigurator())
+        .background(WindowSetup(store: store))
         .preferredColorScheme(.dark)
         .tint(settings.accentColor)
         .onAppear {
@@ -43,38 +43,4 @@ private struct BrowserMainView: View {
     }
 }
 
-/// Permanently disables automatic window dragging so tabs can be dragged freely without moving the window,
-/// and ensures window is always solid and non-translucent.
-private struct WindowConfigurator: NSViewRepresentable {
-    func makeNSView(context: Context) -> ConfigNSView {
-        ConfigNSView()
-    }
-
-    func updateNSView(_ nsView: ConfigNSView, context: Context) {}
-
-    final class ConfigNSView: NSView {
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
-            apply()
-        }
-
-        private func apply() {
-            guard let window = window else { return }
-            window.isMovable = true
-            window.isMovableByWindowBackground = false
-            window.titlebarAppearsTransparent = true
-            window.titleVisibility = .hidden
-            window.styleMask.insert(.fullSizeContentView)
-            window.toolbar = nil
-            for button in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
-                window.standardWindowButton(button)?.isHidden = true
-            }
-            window.isOpaque = true
-            window.appearance = NSAppearance(named: .darkAqua)
-            window.backgroundColor = NSColor(hex: 0x3A3734)
-            window.invalidateShadow()
-            SettingsStore.shared.applyTheme()
-        }
-    }
-}
 

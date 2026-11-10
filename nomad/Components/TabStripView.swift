@@ -90,7 +90,7 @@ struct TabStripView: View {
 
             // New Tab Button (+)
             Button(action: {
-                store.newTab(url: nil, select: true)
+                store.isAddressBarFocused = true
             }) {
                 Image(systemName: "plus")
                     .font(.system(size: 11, weight: .medium))

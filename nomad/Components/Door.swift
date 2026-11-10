@@ -20,11 +20,11 @@ struct Door: View {
         Button(action: action) {
             Image(systemName: icon)
                 .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(on ? Palette.ink : (isHovering ? Palette.ink : Palette.muted))
+                .foregroundStyle(on ? Theme.ink : (isHovering ? Theme.ink : Theme.muted))
                 .frame(width: 26, height: 26)
                 .background(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(on ? Palette.wash : (isHovering ? Palette.sideHover : Color.clear))
+                        .fill(on ? Theme.press : (isHovering ? Theme.hover : Color.clear))
                 )
                 .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }

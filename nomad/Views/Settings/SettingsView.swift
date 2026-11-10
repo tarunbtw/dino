@@ -108,7 +108,7 @@ struct SettingsView: View {
     private var sidebarRail: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Settings")
-                .font(.system(size: 18, weight: .bold, design: .serif))
+                .font(Theme.panelTitleFont)
                 .foregroundStyle(Theme.ink)
                 .padding(.horizontal, 16)
                 .padding(.top, 24)
@@ -122,7 +122,7 @@ struct SettingsView: View {
                             .frame(width: 18)
                             .foregroundStyle(selectedSection == section ? Color.white : Theme.accent)
                         Text(section.rawValue)
-                            .font(.system(size: 13, weight: selectedSection == section ? .medium : .regular))
+                            .font(Theme.font(size: 13, weight: selectedSection == section ? .medium : .regular))
                         Spacer()
                     }
                     .padding(.horizontal, 12)
@@ -152,7 +152,7 @@ struct SettingsView: View {
     func card<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(title)
-                .font(.system(size: 13, weight: .semibold))
+                .font(Theme.font(size: 13, weight: .semibold))
                 .foregroundStyle(Theme.ink)
             content()
         }
@@ -171,11 +171,11 @@ struct SettingsView: View {
     func header(title: String, subtitle: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
-                .font(.system(size: 22, weight: .semibold, design: .serif))
+                .font(Theme.panelTitleFont)
                 .foregroundStyle(Theme.ink)
             if !subtitle.isEmpty {
                 Text(subtitle)
-                    .font(.system(size: 13))
+                    .font(Theme.font(size: 13))
                     .foregroundStyle(Theme.muted)
             }
         }

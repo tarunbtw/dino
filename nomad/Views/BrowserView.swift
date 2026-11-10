@@ -12,6 +12,7 @@ import AppKit
 struct BrowserView: View {
     @ObservedObject var store: BrowserStore
     @StateObject private var settings = SettingsStore.shared
+    @ObservedObject private var windowCorners = WindowCorners.shared
     @State private var isCommandPaletteVisible: Bool = false
     @State private var isSidebarPeeking: Bool = false
 
@@ -31,7 +32,60 @@ struct BrowserView: View {
             let leadingPad = Theme.pageInset + (settings.isSidebarCollapsed ? 0 : currentSidebarWidth)
 
             Group {
-                if let split = store.activeSplitPair,
+                if store.isPickingSplit, let anchorTab = store.splitPickAnchor {
+                    HStack(spacing: Theme.pageInset) {
+                        if store.splitPickSide == .left {
+                            TabStageView(store: store, tab: anchorTab, settings: settings)
+                                .clipShape(RoundedRectangle(cornerRadius: Theme.pageCornerRadius, style: .continuous))
+                                .frame(maxWidth: .infinity)
+                                .contentShape(Rectangle())
+                                .simultaneousGesture(
+                                    TapGesture().onEnded {
+                                        store.commitSplitPickWithNewTab(selectAnchor: true)
+                                    }
+                                )
+
+                            ZStack {
+                                RoundedRectangle(cornerRadius: Theme.pageCornerRadius, style: .continuous)
+                                    .fill(Theme.page)
+                                    .overlay {
+                                        RoundedRectangle(cornerRadius: Theme.pageCornerRadius, style: .continuous)
+                                            .strokeBorder(Theme.activeTabHairline, lineWidth: 0.5)
+                                    }
+                            }
+                            .frame(maxWidth: .infinity)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                store.commitSplitPickWithNewTab(selectAnchor: false)
+                            }
+                        } else {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: Theme.pageCornerRadius, style: .continuous)
+                                    .fill(Theme.page)
+                                    .overlay {
+                                        RoundedRectangle(cornerRadius: Theme.pageCornerRadius, style: .continuous)
+                                            .strokeBorder(Theme.activeTabHairline, lineWidth: 0.5)
+                                    }
+                            }
+                            .frame(maxWidth: .infinity)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                store.commitSplitPickWithNewTab(selectAnchor: false)
+                            }
+
+                            TabStageView(store: store, tab: anchorTab, settings: settings)
+                                .clipShape(RoundedRectangle(cornerRadius: Theme.pageCornerRadius, style: .continuous))
+                                .frame(maxWidth: .infinity)
+                                .contentShape(Rectangle())
+                                .simultaneousGesture(
+                                    TapGesture().onEnded {
+                                        store.commitSplitPickWithNewTab(selectAnchor: true)
+                                    }
+                                )
+                        }
+                    }
+                    .transition(.opacity)
+                } else if let split = store.activeSplitPair,
                    let leftTab = store.tabs.first(where: { $0.id == split.leftTabId }),
                    let rightTab = store.tabs.first(where: { $0.id == split.rightTabId }) {
                     SplitStageView(store: store, split: split, leftTab: leftTab, rightTab: rightTab, settings: settings)
@@ -40,11 +94,17 @@ struct BrowserView: View {
                     TabStageView(store: store, tab: activeTab, settings: settings)
                         .id(activeTab.id)
                 } else {
-                    Color.clear
+                    FirstLightScene(spaceColor: store.activeSpace.colorHex)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            store.isAddressBarFocused = true
+                        }
+                        .transition(.opacity)
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: Theme.pageCornerRadius, style: .continuous))
-            .padding([.top, .trailing, .bottom], Theme.pageInset)
+            .padding(.top, Theme.pageInset + store.menuBarDrop)
+            .padding([.trailing, .bottom], Theme.pageInset)
             .padding(.leading, leadingPad)
             .animation(.spring(response: 0.24, dampingFraction: 0.88), value: settings.isSidebarCollapsed)
             .animation(.spring(response: 0.24, dampingFraction: 0.88), value: settings.sidebarWidth)
@@ -113,6 +173,8 @@ struct BrowserView: View {
             // Modal Centered Floating Omnibox / Command Bar
             if store.isAddressBarFocused {
                 OmniboxModalView(store: store, isPresented: $store.isAddressBarFocused)
+                    .padding(.leading, leadingPad)
+                    .padding([.top, .trailing, .bottom], Theme.pageInset)
                     .zIndex(350)
             }
 
@@ -122,27 +184,51 @@ struct BrowserView: View {
                     .zIndex(360)
             }
 
-            // Arc-style Floating Link Peek Preview (Shift-click on links)
+            // Modal Arc Import Sheet
+            if store.isShowingArcImportModal {
+                ArcImportModal(store: store, isPresented: $store.isShowingArcImportModal)
+                    .zIndex(362)
+            }
+
+            // Modal Extensions Popup (⌘E)
+            if store.isShowingExtensionsModal {
+                ExtensionsModalView(store: store, isPresented: $store.isShowingExtensionsModal)
+                    .zIndex(365)
+            }
+
+            // Lookout Link Preview Overlay (Shift-click on links or eye action)
             if let peekTab = store.peekTab {
-                Color.black.opacity(0.32)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        store.closePeek()
-                    }
+                LookoutLayer(store: store, settings: settings, tab: peekTab)
                     .transition(.opacity)
                     .zIndex(400)
-
-                PeekOverlayView(store: store, tab: peekTab, settings: settings)
-                    .transition(.scale(scale: 0.96).combined(with: .opacity))
-                    .zIndex(401)
             }
+
+            // Visual ⌃Tab Quick Switcher Panel
+            if store.isQuickSwitcherVisible {
+                QuickSwitcherPanel(store: store)
+                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                    .zIndex(450)
+            }
+
+            // In-Process Glass Sheet Host Layer
+            GlassSheetLayer(cornerRadius: Theme.pageCornerRadius)
+                .zIndex(500)
         }
+        .glassSheetHost(colorHex: store.activeSpace.colorHex)
         .background(Theme.frame.ignoresSafeArea())
         .preferredColorScheme(.dark)
         .tint(settings.accentColor)
         .onExitCommand {
-            if store.isShowingNewSpaceSheet {
+            if store.isQuickSwitcherVisible {
+                store.cancelTabSwitch()
+            } else if store.isShowingExtensionsModal {
+                store.isShowingExtensionsModal = false
+            } else if store.isShowingArcImportModal {
+                store.isShowingArcImportModal = false
+            } else if store.isShowingNewSpaceSheet {
                 store.isShowingNewSpaceSheet = false
+            } else if store.isPickingSplit {
+                store.cancelSplitPick()
             } else if store.isAddressBarFocused {
                 store.isAddressBarFocused = false
             } else if store.peekTab != nil {
@@ -150,6 +236,9 @@ struct BrowserView: View {
             } else if let tab = store.activeTab, tab.isZapperActive {
                 tab.stopElementZapper()
             }
+        }
+        .background {
+            QuickSwitchKeyMonitor(store: store)
         }
         .background {
             keyboardShortcutBridge
@@ -172,6 +261,7 @@ struct BrowserView: View {
             Button("Settings") { store.openSettings() }.keyboardShortcut(",", modifiers: .command)
             Button("History") { store.openSettings(section: "History") }.keyboardShortcut("y", modifiers: .command)
             Button("Bookmark") { store.toggleBookmark() }.keyboardShortcut("d", modifiers: .command)
+            Button("Extensions") { store.isShowingExtensionsModal.toggle() }.keyboardShortcut("e", modifiers: .command)
             Button("Zoom In") { store.activeTab?.zoomIn() }.keyboardShortcut("+", modifiers: .command)
             Button("Zoom In Eq") { store.activeTab?.zoomIn() }.keyboardShortcut("=", modifiers: .command)
             Button("Zoom Out") { store.activeTab?.zoomOut() }.keyboardShortcut("-", modifiers: .command)
@@ -183,7 +273,15 @@ struct BrowserView: View {
             Button("Element Zapper") { store.activeTab?.toggleElementZapper() }.keyboardShortcut("h", modifiers: [.command, .shift])
             Button("Reader Mode") { store.activeTab?.toggleReaderMode() }.keyboardShortcut("r", modifiers: [.command, .shift])
             Button("Picture in Picture") { store.activeTab?.togglePictureInPicture() }.keyboardShortcut("p", modifiers: [.command, .shift])
-            Button("Toggle Split View") { store.toggleSplitCurrentTab() }.keyboardShortcut("s", modifiers: [.command, .option])
+            Button("Toggle Split View") {
+                if store.activeSplitPair != nil {
+                    store.toggleSplitCurrentTab()
+                } else if store.isPickingSplit {
+                    store.commitSplitPickWithNewTab()
+                } else if let active = store.activeTab {
+                    store.pickSplit(beside: active)
+                }
+            }.keyboardShortcut("s", modifiers: [.command, .option])
             Button("Swap Split Panes") { store.swapSplit() }.keyboardShortcut("s", modifiers: [.command, .control])
             Button("Toggle Sidebar Collapse") { settings.toggleSidebarCollapsed() }.keyboardShortcut("s", modifiers: .command)
             Button("Toggle Pin Tab") { if let id = store.activeTabId { store.togglePin(tabId: id) } }.keyboardShortcut("p", modifiers: [.command, .option])
@@ -232,8 +330,30 @@ private struct TabStageView: View {
                     .transition(.opacity)
             } else if tab.isBlank {
                 // Calm empty start state when tab has no URL loaded
-                EmptyStateView(tab: tab, store: store, settings: settings)
-                    .transition(.opacity)
+                ZStack {
+                    FirstLightScene(spaceColor: store.activeSpace.colorHex)
+
+                    if tab.isIncognito {
+                        VStack(spacing: 8) {
+                            Image(systemName: "eye.slash.fill")
+                                .font(.system(size: 32, weight: .semibold))
+                                .foregroundStyle(Color.purple.opacity(0.85))
+
+                            Text("Private Browsing")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(Theme.ink)
+
+                            Text("Nomad does not save your history, cookies, or site data for this tab.")
+                                .font(.system(size: 12))
+                                .foregroundStyle(Theme.muted)
+                        }
+                    }
+                }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    store.isAddressBarFocused = true
+                }
+                .transition(.opacity)
             } else if tab.isFloatingVideo {
                 VStack(spacing: 14) {
                     Image(systemName: "pip.fill")
@@ -265,14 +385,53 @@ private struct TabStageView: View {
                             .transition(.move(edge: .top).combined(with: .opacity))
                     }
 
-                    WebStage(tab: tab)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    // Contextual Chrome Web Store extension installation banner
+                    if tab.chromeWebStoreExtensionId != nil {
+                        HStack(spacing: 8) {
+                            Image(systemName: "puzzlepiece.extension")
+                                .font(.system(size: 12))
+                                .foregroundStyle(Theme.muted)
+
+                            Text(tab.chromeWebStoreExtensionName ?? "Extension")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(Theme.ink)
+                                .lineLimit(1)
+
+                            Spacer()
+
+                            WebStoreInstallPill(tab: tab, store: store)
+                        }
+                        .padding(.horizontal, 14)
+                        .frame(height: 38)
+                        .background(Theme.page)
+                        .overlay(alignment: .bottom) {
+                            Rectangle()
+                                .fill(Theme.activeTabHairline)
+                                .frame(height: 0.5)
+                        }
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                    }
+
+                    ZStack {
+                        WebStage(tab: tab)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                        if let snapshot = store.tabSnapshots[tab.id], tab.isLoading {
+                            Image(nsImage: snapshot)
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .allowsHitTesting(false)
+                                .transition(.opacity)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                     if tab.isDevDrawerVisible {
                         DevDrawerView(tab: tab, store: store)
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
                 }
+                .animation(.spring(response: 0.24, dampingFraction: 0.88), value: tab.chromeWebStoreExtensionId)
                 .animation(.spring(response: 0.26, dampingFraction: 0.86), value: tab.isDevDrawerVisible)
                 .animation(.spring(response: 0.24, dampingFraction: 0.88), value: tab.isHitlActive)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -535,46 +694,6 @@ private struct SwipeIndicatorView: View {
     }
 }
 
-/// Minimal start canvas for blank tabs: calm page with tap-to-search.
-private struct EmptyStateView: View {
-    @ObservedObject var tab: Tab
-    @ObservedObject var store: BrowserStore
-    @ObservedObject var settings: SettingsStore
-
-    var body: some View {
-        ZStack {
-            Theme.page
-                .ignoresSafeArea()
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    store.isAddressBarFocused = true
-                }
-
-            if tab.isIncognito {
-                VStack(spacing: 8) {
-                    Image(systemName: "eye.slash.fill")
-                        .font(.system(size: 32, weight: .semibold))
-                        .foregroundStyle(Color.purple.opacity(0.85))
-
-                    Text("Private Browsing")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(Theme.ink)
-
-                    Text("Nomad does not save your history, cookies, or site data for this tab.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Theme.muted)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onAppear {
-            if !tab.hasLoaded && tab.url == nil {
-                store.isAddressBarFocused = true
-            }
-        }
-    }
-}
-
 /// Sleek floating translucent capsule banner for Element Zapper mode (⇧⌘H)
 private struct ZapperFloatingBar: View {
     @ObservedObject var tab: Tab
@@ -724,92 +843,5 @@ private extension View {
     }
 }
 
-/// Floating modal preview panel for Shift-clicking hyperlinks (Arc-style Peek).
-private struct PeekOverlayView: View {
-    @ObservedObject var store: BrowserStore
-    @ObservedObject var tab: Tab
-    @ObservedObject var settings: SettingsStore
-
-    var body: some View {
-        GeometryReader { geo in
-            ZStack {
-                HStack(alignment: .top, spacing: 10) {
-                    VStack(spacing: 0) {
-                        // Header bar with link title and action controls
-                        HStack(spacing: 8) {
-                            Image(systemName: "globe")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
-
-                            Text(tab.title.isEmpty ? (tab.url?.host ?? "Preview") : tab.title)
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(.primary)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-
-                            Spacer()
-
-                            // Keep beside in Split View
-                            Button {
-                                store.keepPeek(beside: true)
-                            } label: {
-                                Image(systemName: "rectangle.split.2x1")
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .foregroundStyle(.secondary)
-                                    .frame(width: 26, height: 26)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .help("Keep beside this page in Split View")
-
-                            // Open as full tab
-                            Button {
-                                store.keepPeek(beside: false)
-                            } label: {
-                                Image(systemName: "arrow.up.left.and.arrow.down.right")
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .foregroundStyle(.secondary)
-                                    .frame(width: 26, height: 26)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .help("Open as Full Tab")
-
-                            // Close peek
-                            Button {
-                                store.closePeek()
-                            } label: {
-                                Image(systemName: "xmark")
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .foregroundStyle(.secondary)
-                                    .frame(width: 26, height: 26)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .help("Close Preview (Esc)")
-                        }
-                        .padding(.horizontal, 14)
-                        .frame(height: 38)
-                        .background(Color(nsColor: .windowBackgroundColor))
-
-                        Divider()
-
-                        WebStage(tab: tab)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    }
-                    .background(Color(nsColor: .windowBackgroundColor))
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
-                    )
-                    .shadow(color: .black.opacity(0.3), radius: 24, y: 8)
-                }
-                .frame(width: min(geo.size.width * 0.82, 1100), height: min(geo.size.height * 0.86, 760))
-            }
-            .frame(width: geo.size.width, height: geo.size.height)
-        }
-    }
-}
 
 

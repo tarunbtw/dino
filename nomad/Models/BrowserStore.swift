@@ -70,9 +70,25 @@ final class BrowserStore: ObservableObject {
     @Published var spaces: [Space] = Space.defaultSpaces
     @Published var activeSpaceId: UUID = Space.defaultFirstID
     @Published var isShowingNewSpaceSheet: Bool = false
+    @Published var isShowingArcImportModal: Bool = false
+    @Published var isShowingExtensionsModal: Bool = false
     @Published var peekTab: Tab? = nil
     @Published var peekFromTabId: UUID? = nil
     @Published var isAutopilotRailVisible: Bool = false
+
+    // MARK: - Split Picker State
+    @Published var splitPickAnchor: Tab? = nil
+    @Published var splitPickSide: SplitSide = .left
+    var isPickingSplit: Bool { splitPickAnchor != nil }
+
+    // MARK: - Window Fullscreen & Menu Bar Glide
+    @Published var isFullScreen: Bool = false
+    @Published var menuBarDrop: CGFloat = 0
+
+    // MARK: - Quick Switcher (⌃Tab) State
+    @Published var isQuickSwitcherVisible: Bool = false
+    @Published var quickSwitcherPickedId: UUID? = nil
+    @Published var tabSnapshots: [UUID: NSImage] = [:]
 
     struct ClosedTabSnapshot {
         let url: URL?
@@ -95,6 +111,17 @@ final class BrowserStore: ObservableObject {
         spaces.first { $0.id == activeSpaceId } ?? spaces[0]
     }
 
+    /// Tab in the active space that is playing audio out of sight (for the Mini Player).
+    var miniPlayerTab: Tab? {
+        tabs.first {
+            $0.spaceId == activeSpaceId &&
+            ($0.isPlayingAudio || $0.isAudioPausedByPlayer) &&
+            $0.id != activeTabId &&
+            !$0.isBlank &&
+            !$0.isGhost
+        }
+    }
+
     /// Tabs visible in the current view context: all pinned tabs + unpinned tabs belonging to the active space (excluding background ghost tabs).
     var visibleTabs: [Tab] {
         tabs.filter { tab in
@@ -102,12 +129,174 @@ final class BrowserStore: ObservableObject {
         }
     }
 
+    // MARK: - Phase 1: Tab Lifecycle, Grouping & Basecamp
+    @Published var tabGroups: [TabGroup] = []
+    @Published var renamingGroupId: UUID? = nil
+    @Published var unseenTidiedSpaces: Set<UUID> = []
+
+    var basecampTabs: [Tab] {
+        tabs.filter { ($0.place == .basecamp || $0.isPinned) && !$0.isGhost && ($0.spaceId == activeSpaceId || $0.spaceId == nil) }
+    }
+
+    var openTabs: [Tab] {
+        tabs.filter { $0.place == .open && !$0.isPinned && !$0.isGhost && ($0.spaceId == activeSpaceId || $0.spaceId == nil) }
+    }
+
+    var driftedTabs: [Tab] {
+        tabs.filter { $0.place == .drifted && !$0.isGhost && ($0.spaceId == activeSpaceId || $0.spaceId == nil) }
+    }
+
+    var looseTabs: [Tab] {
+        openTabs.filter { $0.groupId == nil }
+    }
+
+    var tabGroupsForActiveSpace: [TabGroup] {
+        tabGroups.filter { $0.spaceId == activeSpaceId }
+    }
+
+    var hasUnseenTidied: Bool {
+        unseenTidiedSpaces.contains(activeSpaceId) && !driftedTabs.isEmpty
+    }
+
+    func tabs(in group: TabGroup) -> [Tab] {
+        tabs.filter { $0.groupId == group.id && $0.place == .open && !$0.isGhost }
+    }
+
+    func markTidiedSeen() {
+        unseenTidiedSpaces.remove(activeSpaceId)
+    }
+
+    @discardableResult
+    func createTabGroup(name: String = TabGroup.defaultName, spaceId: UUID? = nil) -> TabGroup {
+        let sid = spaceId ?? activeSpaceId
+        let newGroup = TabGroup(spaceId: sid, name: name)
+        withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
+            tabGroups.append(newGroup)
+            renamingGroupId = newGroup.id
+        }
+        persistSession()
+        return newGroup
+    }
+
+    func toggleFoldGroup(id: UUID) {
+        guard let idx = tabGroups.firstIndex(where: { $0.id == id }) else { return }
+        withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
+            tabGroups[idx].isFolded.toggle()
+        }
+        persistSession()
+    }
+
+    func renameGroup(id: UUID, name: String) {
+        guard let idx = tabGroups.firstIndex(where: { $0.id == id }) else { return }
+        let clean = TabGroup.cleanName(name) ?? TabGroup.defaultName
+        tabGroups[idx].name = clean
+        if renamingGroupId == id {
+            renamingGroupId = nil
+        }
+        persistSession()
+    }
+
+    func removeGroup(id: UUID) {
+        withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
+            for tab in tabs where tab.groupId == id {
+                tab.groupId = nil
+            }
+            tabGroups.removeAll { $0.id == id }
+            if renamingGroupId == id {
+                renamingGroupId = nil
+            }
+        }
+        persistSession()
+    }
+
+    func moveTab(tabId: UUID, toGroupId: UUID?) {
+        guard let tab = tabs.first(where: { $0.id == tabId }) else { return }
+        withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
+            tab.groupId = toGroupId
+            if let toGroupId, let idx = tabGroups.firstIndex(where: { $0.id == toGroupId }) {
+                tabGroups[idx].isFolded = false
+            }
+        }
+        persistSession()
+    }
+
+    func addToBasecamp(tab: Tab) {
+        withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
+            tab.place = .basecamp
+            tab.isPinned = true
+            tab.homeURL = tab.url
+            tab.groupId = nil
+        }
+        persistSession()
+    }
+
+    func removeFromBasecamp(tab: Tab) {
+        withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
+            tab.place = .open
+            tab.isPinned = false
+        }
+        persistSession()
+    }
+
+    func drift(tab: Tab) {
+        guard tab.place == .open && !tab.isPinned && tab.groupId == nil else { return }
+        withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
+            tab.place = .drifted
+            tab.driftedAt = Date()
+            if let sid = tab.spaceId {
+                unseenTidiedSpaces.insert(sid)
+            }
+            if activeTabId == tab.id {
+                let remaining = openTabs.filter { $0.id != tab.id }
+                activeTabId = remaining.first?.id
+            }
+        }
+        persistSession()
+    }
+
+    func restoreDrifted(tab: Tab) {
+        withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
+            tab.place = .open
+            tab.driftedAt = nil
+            tab.lastActiveTime = Date()
+            activeTabId = tab.id
+        }
+        persistSession()
+    }
+
+    func restoreAllDrifted() {
+        withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
+            for tab in driftedTabs {
+                tab.place = .open
+                tab.driftedAt = nil
+                tab.lastActiveTime = Date()
+            }
+            unseenTidiedSpaces.remove(activeSpaceId)
+        }
+        persistSession()
+    }
+
+    func checkDrift() {
+        let cutoff = Date().addingTimeInterval(-12 * 3600)
+        let toDrift = tabs.filter {
+            $0.place == .open &&
+            !$0.isPinned &&
+            $0.groupId == nil &&
+            !$0.isFloatingVideo &&
+            $0.lastActiveTime < cutoff &&
+            $0.id != activeTabId
+        }
+        for tab in toDrift {
+            drift(tab: tab)
+        }
+    }
+
     var pinnedTabs: [Tab] {
-        tabs.filter { $0.isPinned && !$0.isGhost }
+        tabs.filter { ($0.place == .basecamp || $0.isPinned) && !$0.isGhost }
     }
 
     var unpinnedTabsForActiveSpace: [Tab] {
-        tabs.filter { !$0.isPinned && !$0.isGhost && ($0.spaceId == activeSpaceId || $0.spaceId == nil) }
+        tabs.filter { $0.place == .open && !$0.isPinned && !$0.isGhost && ($0.spaceId == activeSpaceId || $0.spaceId == nil) }
     }
 
     var ghostTabs: [Tab] {
@@ -115,14 +304,23 @@ final class BrowserStore: ObservableObject {
     }
 
     init() {
-        let restoredURLs = NomadHeadlessManager.isHeadless ? [] : SessionManager.shared.restore()
-        if !restoredURLs.isEmpty {
-            for (idx, url) in restoredURLs.enumerated() {
-                _ = newTab(url: url, select: idx == 0, lazy: idx != 0)
+        if let session = NomadHeadlessManager.isHeadless ? nil : SessionManager.shared.restoreSession(), !session.tabs.isEmpty {
+            self.tabGroups = session.groups
+            for (idx, record) in session.tabs.enumerated() {
+                let tab = newTab(url: record.url, select: idx == 0, lazy: idx != 0)
+                tab.spaceId = record.spaceId
+                tab.place = record.place
+                tab.isPinned = (record.place == .basecamp)
+                tab.groupId = record.groupId
+                tab.homeURL = record.homeURL
             }
         } else {
-            // Start with an initial clean blank tab
-            _ = newTab(url: nil, select: true, lazy: false)
+            let restoredURLs = NomadHeadlessManager.isHeadless ? [] : SessionManager.shared.restore()
+            if !restoredURLs.isEmpty {
+                for (idx, url) in restoredURLs.enumerated() {
+                    _ = newTab(url: url, select: idx == 0, lazy: idx != 0)
+                }
+            }
         }
         ExtensionManager.shared.start(with: self)
         NomadAgentServer.shared.start(store: self)
@@ -140,9 +338,9 @@ final class BrowserStore: ObservableObject {
     }
 
     /// Persists open session tabs to disk (excluding background ghost tabs and incognito tabs).
-    private func persistSession() {
+    func persistSession() {
         let persistentTabs = tabs.filter { !$0.isGhost && !$0.isIncognito }
-        SessionManager.shared.save(tabs: persistentTabs, activeTabId: activeTabId)
+        SessionManager.shared.save(tabs: persistentTabs, groups: tabGroups, activeTabId: activeTabId)
     }
 
     /// Creates and appends a new tab.
@@ -210,7 +408,11 @@ final class BrowserStore: ObservableObject {
         }
 
         tab.onRequestNewTab = { [weak self] url in
-            self?.newTab(url: url, select: true)
+            if let url {
+                self?.newTab(url: url, select: true)
+            } else {
+                self?.isAddressBarFocused = true
+            }
         }
 
         tab.onRequestPeek = { [weak self, weak tab] targetURL in
@@ -301,8 +503,7 @@ final class BrowserStore: ObservableObject {
                 } else {
                     let visible = visibleTabs
                     if visible.isEmpty {
-                        // Keep at least one visible tab open
-                        newTab(url: nil, select: true)
+                        activeTabId = nil
                     } else {
                         let nextIndex = min(index, visible.count - 1)
                         activeTabId = visible[nextIndex].id
@@ -323,18 +524,96 @@ final class BrowserStore: ObservableObject {
 
     /// Selects a tab by ID with smooth content transition.
     func selectTab(id: UUID) {
+        if isPickingSplit, let anchor = splitPickAnchor {
+            if id != anchor.id, let partner = tabs.first(where: { $0.id == id }) {
+                openSplit(partner, beside: anchor, on: splitPickSide.other)
+                return
+            } else if id == anchor.id {
+                commitSplitPickWithNewTab(selectAnchor: true)
+                return
+            }
+        }
         if tabs.contains(where: { $0.id == id }), activeTabId != id {
+            captureActiveTabSnapshot()
             withAnimation(.easeInOut(duration: 0.18)) {
                 activeTabId = id
             }
             if let tab = tabs.first(where: { $0.id == id }) {
                 tab.ensureLoaded()
                 tab.hydrateToHot()
+                tab.lastActiveTime = Date()
                 ExtensionManager.shared.didActivateTab(tab)
             }
             enforceMemoryGovernor()
             persistSession()
         }
+    }
+
+    /// Captures an in-memory thumbnail of the active web tab for ⌃Tab quick switcher and zero-flash wake.
+    func captureActiveTabSnapshot() {
+        guard let current = activeTab, !current.isBlank, !current.isInternalPage else { return }
+        current.webView.takeSnapshot(with: nil) { [weak self, weak current] image, _ in
+            guard let self = self, let current = current, let image = image else { return }
+            Task { @MainActor in
+                self.tabSnapshots[current.id] = image
+                if self.tabSnapshots.count > 24 {
+                    let activeIDs = Set(self.tabs.map(\.id))
+                    self.tabSnapshots = self.tabSnapshots.filter { activeIDs.contains($0.key) }
+                }
+            }
+        }
+    }
+
+    /// Most recently used tabs in the active space (for ⌃Tab quick switcher).
+    var recentTabsForActiveSpace: [Tab] {
+        let activeID = activeSpaceId
+        let inSpace = tabs.filter {
+            !$0.isGhost && !$0.isBlank && ($0.spaceId == activeID || $0.isPinned)
+        }
+        return inSpace
+            .sorted { $0.lastActiveTime > $1.lastActiveTime }
+            .prefix(5)
+            .map { $0 }
+    }
+
+    func startTabSwitch(backward: Bool = false) {
+        let recents = recentTabsForActiveSpace
+        guard recents.count > 1 else { return }
+        captureActiveTabSnapshot()
+        let initialIndex = backward ? recents.count - 1 : 1
+        quickSwitcherPickedId = recents[min(initialIndex, recents.count - 1)].id
+        isQuickSwitcherVisible = true
+    }
+
+    func cycleTabSwitch(forward: Bool = true) {
+        let recents = recentTabsForActiveSpace
+        guard !recents.isEmpty else { return }
+        let currentIndex = recents.firstIndex(where: { $0.id == quickSwitcherPickedId }) ?? 0
+        let nextIndex: Int
+        if forward {
+            nextIndex = (currentIndex + 1) % recents.count
+        } else {
+            nextIndex = (currentIndex + recents.count - 1) % recents.count
+        }
+        quickSwitcherPickedId = recents[nextIndex].id
+    }
+
+    func finishTabSwitch() {
+        guard isQuickSwitcherVisible else { return }
+        isQuickSwitcherVisible = false
+        if let targetId = quickSwitcherPickedId {
+            selectTab(id: targetId)
+        }
+        quickSwitcherPickedId = nil
+    }
+
+    func cancelTabSwitch() {
+        isQuickSwitcherVisible = false
+        quickSwitcherPickedId = nil
+    }
+
+    func pickTabSwitch(id: UUID) {
+        quickSwitcherPickedId = id
     }
 
     /// Opens a link in an Arc-style floating peek preview over the current tab.
@@ -555,21 +834,92 @@ final class BrowserStore: ObservableObject {
         splitPairs[idx].ratio = min(0.8, max(0.2, ratio.isFinite ? ratio : 0.5))
     }
 
+    /// Returns the split pair containing this tab, if any.
+    func split(of tab: Tab) -> SplitPair? {
+        splitPairs.first { $0.contains(tab.id) }
+    }
+
+    // MARK: - Visual Split Picker
+
+    /// Initiates picking a split beside `tab`. The active tab glides to half width
+    /// and the command bar / omnibox opens over the empty half to pick what goes there.
+    func pickSplit(beside tab: Tab, on side: SplitSide = .left) {
+        selectTab(id: tab.id)
+        withAnimation(Theme.glide) {
+            splitPickAnchor = tab
+            splitPickSide = side
+            isAddressBarFocused = true
+        }
+    }
+
+    /// Cancels split picking and glides the anchor tab back to full width.
+    func cancelSplitPick() {
+        withAnimation(Theme.glide) {
+            splitPickAnchor = nil
+            isAddressBarFocused = false
+        }
+    }
+
+    /// Opens `incoming` beside `anchor` on `side`.
+    func openSplit(_ incoming: Tab, beside anchor: Tab, on side: SplitSide = .right) {
+        let left = side == .left ? incoming : anchor
+        let right = side == .left ? anchor : incoming
+        splitTab(primaryId: left.id, secondaryId: right.id)
+        withAnimation(Theme.glide) {
+            splitPickAnchor = nil
+            isAddressBarFocused = false
+        }
+    }
+
+    /// Commits the active split pick by creating a new blank tab and pairing it in a persistent SplitPair.
+    @discardableResult
+    func commitSplitPickWithNewTab(selectAnchor: Bool = false) -> Tab? {
+        guard let anchor = splitPickAnchor else { return nil }
+        let newT = Tab(initialURL: nil, isIncognito: anchor.isIncognito)
+        newT.spaceId = activeSpaceId
+        tabs.append(newT)
+        openSplit(newT, beside: anchor, on: splitPickSide.other)
+        if selectAnchor {
+            selectTab(id: anchor.id)
+        } else {
+            selectTab(id: newT.id)
+        }
+        persistSession()
+        return newT
+    }
+
+    // MARK: - Window Fullscreen & Menu Bar Glide
+
+    func setFullScreen(_ on: Bool) {
+        isFullScreen = on
+        if !on {
+            menuBarDrop = 0
+        }
+    }
+
+    func menuBarMoved(to drop: CGFloat, animated: Bool) {
+        guard drop != menuBarDrop else { return }
+        let glide = animated && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        if glide {
+            withAnimation(.easeOut(duration: 0.2)) {
+                self.menuBarDrop = drop
+            }
+        } else {
+            self.menuBarDrop = drop
+        }
+    }
+
     // MARK: - Pinned Tabs & Spaces (Contextual Workspaces)
 
     /// Toggles the pinned status of a tab.
     func togglePin(tabId: UUID) {
         guard let index = tabs.firstIndex(where: { $0.id == tabId }) else { return }
-        withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
-            let tab = tabs[index]
-            tab.isPinned.toggle()
-            if tab.isPinned {
-                let t = tabs.remove(at: index)
-                let pinnedCount = tabs.filter { $0.isPinned }.count
-                tabs.insert(t, at: max(0, pinnedCount - 1))
-            }
+        let tab = tabs[index]
+        if tab.place == .basecamp || tab.isPinned {
+            removeFromBasecamp(tab: tab)
+        } else {
+            addToBasecamp(tab: tab)
         }
-        persistSession()
     }
 
     /// Switches the active space, bringing its contextual tabs to view.
@@ -581,8 +931,7 @@ final class BrowserStore: ObservableObject {
             if let first = spaceTabs.first {
                 activeTabId = first.id
             } else {
-                let newT = newTab(url: nil, select: true)
-                newT.spaceId = id
+                activeTabId = nil
             }
         }
     }

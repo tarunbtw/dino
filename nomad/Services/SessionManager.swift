@@ -20,6 +20,21 @@ extension FileManager {
     }
 }
 
+/// Metadata snapshot for a single tab during session persistence.
+struct StoredTabRecord: Codable {
+    let url: URL
+    let spaceId: UUID?
+    let place: Tab.TabPlace
+    let groupId: UUID?
+    let homeURL: URL?
+}
+
+/// Structured session container.
+struct StoredSession: Codable {
+    let tabs: [StoredTabRecord]
+    let groups: [TabGroup]
+}
+
 /// Coordinates persisting and restoring open tabs across app launches.
 @MainActor
 final class SessionManager {
@@ -31,21 +46,28 @@ final class SessionManager {
 
     private init() {}
 
-    /// Saves the current list of open tabs to disk.
-    func save(tabs: [Tab], activeTabId: UUID?) {
-        let toSave = tabs.compactMap { tab -> URL? in
+    /// Saves the current list of open tabs and groups to disk.
+    func save(tabs: [Tab], groups: [TabGroup] = [], activeTabId: UUID?) {
+        let records = tabs.compactMap { tab -> StoredTabRecord? in
             guard !tab.isIncognito, let url = tab.url, url.scheme == "http" || url.scheme == "https" else { return nil }
-            return url
+            return StoredTabRecord(
+                url: url,
+                spaceId: tab.spaceId,
+                place: tab.place,
+                groupId: tab.groupId,
+                homeURL: tab.homeURL
+            )
         }
 
-        guard !toSave.isEmpty else {
+        guard !records.isEmpty else {
             try? FileManager.default.removeItem(at: SessionManager.sessionFileURL)
             return
         }
 
+        let session = StoredSession(tabs: records, groups: groups)
         let url = SessionManager.sessionFileURL
         try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        if let data = try? JSONEncoder().encode(toSave) {
+        if let data = try? JSONEncoder().encode(session) {
             try? data.write(to: url, options: .atomic)
         }
     }
@@ -54,13 +76,22 @@ final class SessionManager {
     func restore() -> [URL] {
         let url = SessionManager.sessionFileURL
         guard let data = try? Data(contentsOf: url) else { return [] }
+        if let session = try? JSONDecoder().decode(StoredSession.self, from: data) {
+            return session.tabs.map(\.url)
+        }
         if let urls = try? JSONDecoder().decode([URL].self, from: data) {
             return urls
         }
-        // Backwards compatibility with legacy session format
         if let legacy = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
             return legacy.compactMap { ($0["url"] as? String).flatMap(URL.init(string:)) }
         }
         return []
+    }
+
+    /// Restores full session snapshot if available.
+    func restoreSession() -> StoredSession? {
+        let url = SessionManager.sessionFileURL
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode(StoredSession.self, from: data)
     }
 }
