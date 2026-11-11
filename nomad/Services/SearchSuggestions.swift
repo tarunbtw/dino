@@ -26,7 +26,7 @@ public enum SearchSuggestions {
 
     public static func mayAsk(about text: String) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return !trimmed.isEmpty && trimmed.count <= longestQuery && !AddressInput.isAddress(trimmed)
+        return !trimmed.isEmpty && trimmed.count <= longestQuery && !URLParser.isAddress(trimmed)
     }
 
     public static func fetch(_ text: String) async -> [String] {

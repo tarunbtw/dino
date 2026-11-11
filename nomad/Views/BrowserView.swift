@@ -209,12 +209,7 @@ struct BrowserView: View {
                     .transition(.opacity.combined(with: .scale(scale: 0.98)))
                     .zIndex(450)
             }
-
-            // In-Process Glass Sheet Host Layer
-            GlassSheetLayer(cornerRadius: Theme.pageCornerRadius)
-                .zIndex(500)
         }
-        .glassSheetHost(colorHex: store.activeSpace.colorHex)
         .background(Theme.frame.ignoresSafeArea())
         .preferredColorScheme(.dark)
         .tint(settings.accentColor)

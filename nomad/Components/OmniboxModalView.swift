@@ -37,7 +37,7 @@ struct OmniboxModalView: View {
         if trimmed.isEmpty {
             if store.isPickingSplit {
                 var list: [CommandItem] = []
-                for tab in store.unpinnedTabsForActiveSpace where tab.id != store.splitPickAnchor?.id && !tab.isBlank {
+                for tab in store.openTabs where tab.id != store.splitPickAnchor?.id && !tab.isBlank {
                     list.append(CommandItem(
                         id: "tab:\(tab.id)",
                         kind: .tab,
@@ -58,7 +58,7 @@ struct OmniboxModalView: View {
         let lower = trimmed.lowercased()
         var list: [CommandItem] = []
 
-        let isDirectAddress = AddressInput.isAddress(trimmed)
+        let isDirectAddress = URLParser.isAddress(trimmed)
         let searchURL = URL(string: "\(settings.searchEngineBaseURL)\(URLParser.encodeQueryComponent(trimmed))")
 
         if isDirectAddress {
@@ -339,7 +339,8 @@ struct OmniboxModalView: View {
             first.action()
         } else {
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if let target = AddressInput.targetURL(for: trimmed, searchBase: settings.searchEngineBaseURL) {
+            if !trimmed.isEmpty {
+                let target = URLParser.parse(trimmed)
                 openURL(target)
             }
         }
@@ -366,38 +367,6 @@ struct OmniboxModalView: View {
             isPresented = false
             store.isAddressBarFocused = false
         }
-    }
-}
-
-/// AddressInput helper following Firn's domain detection rules.
-enum AddressInput {
-    static func isAddress(_ text: String) -> Bool {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !trimmed.contains(" ") else { return false }
-        if trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://") || trimmed.hasPrefix("nomad://") || trimmed.hasPrefix("file://") {
-            return true
-        }
-        let hostAndPort = String(trimmed.prefix { !"/?#".contains($0) })
-        let host = hostAndPort.prefix { $0 != ":" }.lowercased()
-        if host == "localhost" || host.hasSuffix(".localhost") { return true }
-        let labels = host.split(separator: ".", omittingEmptySubsequences: false)
-        guard labels.count >= 2, let last = labels.last, last.count >= 2, last.allSatisfy({ $0.isLetter }) else {
-            return false
-        }
-        return labels.allSatisfy { label in
-            !label.isEmpty && label.allSatisfy { $0.isLetter || $0.isNumber || $0 == "-" }
-        }
-    }
-
-    static func targetURL(for text: String, searchBase: String) -> URL? {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        if isAddress(trimmed) {
-            let candidate = (trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://") || trimmed.hasPrefix("nomad://")) ? trimmed : "https://\(trimmed)"
-            return URL(string: candidate)
-        }
-        let encoded = URLParser.encodeQueryComponent(trimmed)
-        return URL(string: "\(searchBase)\(encoded)")
     }
 }
 

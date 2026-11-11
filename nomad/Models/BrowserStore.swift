@@ -9,37 +9,6 @@ import SwiftUI
 import Combine
 import WebKit
 
-/// Pair of tabs displayed side-by-side in Split View.
-struct SplitPair: Identifiable, Codable, Equatable {
-    let id: UUID
-    var leftTabId: UUID
-    var rightTabId: UUID
-    var ratio: Double // 0.2 ... 0.8, default 0.5
-
-    init(id: UUID = UUID(), leftTabId: UUID, rightTabId: UUID, ratio: Double = 0.5) {
-        self.id = id
-        self.leftTabId = leftTabId
-        self.rightTabId = rightTabId
-        self.ratio = min(0.8, max(0.2, ratio.isFinite ? ratio : 0.5))
-    }
-
-    func contains(_ tabId: UUID) -> Bool {
-        leftTabId == tabId || rightTabId == tabId
-    }
-
-    func partner(of tabId: UUID) -> UUID? {
-        if leftTabId == tabId { return rightTabId }
-        if rightTabId == tabId { return leftTabId }
-        return nil
-    }
-
-    mutating func swap() {
-        let temp = leftTabId
-        leftTabId = rightTabId
-        rightTabId = temp
-    }
-}
-
 /// Named contextual workspace grouping tabs with an icon and accent color.
 struct Space: Identifiable, Codable, Equatable {
     var id: UUID
@@ -64,8 +33,6 @@ final class BrowserStore: ObservableObject {
     @Published var tabs: [Tab] = []
     @Published var activeTabId: UUID?
     @Published var isAddressBarFocused: Bool = false
-    @Published var isOmniboxEditing: Bool = false
-    @Published var omniboxText: String = ""
     @Published var splitPairs: [SplitPair] = []
     @Published var spaces: [Space] = Space.defaultSpaces
     @Published var activeSpaceId: UUID = Space.defaultFirstID
@@ -293,10 +260,6 @@ final class BrowserStore: ObservableObject {
 
     var pinnedTabs: [Tab] {
         tabs.filter { ($0.place == .basecamp || $0.isPinned) && !$0.isGhost }
-    }
-
-    var unpinnedTabsForActiveSpace: [Tab] {
-        tabs.filter { $0.place == .open && !$0.isPinned && !$0.isGhost && ($0.spaceId == activeSpaceId || $0.spaceId == nil) }
     }
 
     var ghostTabs: [Tab] {
@@ -772,7 +735,7 @@ final class BrowserStore: ObservableObject {
             closeSplit(for: activeId)
         } else {
             // If there is another open unpinned tab in this space (e.g. GitHub + Settings), pair with it directly
-            let otherUnpinned = unpinnedTabsForActiveSpace.filter { $0.id != activeId }
+            let otherUnpinned = openTabs.filter { $0.id != activeId }
             if otherUnpinned.count == 1, let partner = otherUnpinned.first {
                 splitTab(primaryId: activeId, secondaryId: partner.id)
             } else {

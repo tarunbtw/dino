@@ -97,9 +97,3 @@ struct WindowLights: NSViewRepresentable {
         }
     }
 }
-
-/// Legacy Lights helper compatibility
-@MainActor
-final class Lights: NSObject {
-    static func keep(_ window: NSWindow) {}
-}

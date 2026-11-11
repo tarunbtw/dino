@@ -75,6 +75,16 @@ enum URLParser {
         return query.addingPercentEncoding(withAllowedCharacters: allowed) ?? query
     }
 
+    /// Checks if a string represents a direct URL or web host rather than search keywords.
+    static func isAddress(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !trimmed.contains(" ") else { return false }
+        if trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://") || trimmed.hasPrefix("nomad://") || trimmed.hasPrefix("file://") || trimmed.hasPrefix("about:") {
+            return true
+        }
+        return looksLikeHost(trimmed)
+    }
+
     /// Checks if a string looks like a web address or domain name rather than search keywords.
     private static func looksLikeHost(_ string: String) -> Bool {
         // Discard strings with spaces or containing @

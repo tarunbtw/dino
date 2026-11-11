@@ -183,7 +183,6 @@ extension Tab: WKNavigationDelegate {
         }
         if let currentURL = webView.url {
             fetchFavicon(for: currentURL)
-            detectPageThemeColor()
 
             // Record visited page in HistoryStore (only for user profile, bypassed in Incognito mode and Agent profiles)
             if !self.isIncognito && self.profileType == .user {
