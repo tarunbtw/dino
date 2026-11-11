@@ -199,7 +199,7 @@ private final class FlakesView: NSView {
     override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
         let scale = window?.backingScaleFactor ?? 2
-        let mark = NSImage(named: "FirnMarkSmall")
+        let mark = NSImage(named: "NomadMark") ?? NSImage(named: "FirnMarkSmall")
         for layer in flakeLayers {
             layer.mask?.contentsScale = scale
             layer.mask?.contents = mark?.layerContents(forContentsScale: scale)

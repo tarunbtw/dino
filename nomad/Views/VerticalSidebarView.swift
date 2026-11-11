@@ -442,12 +442,14 @@ struct VerticalSidebarView: View {
     private func handleDragChanged(tabId: UUID, translation: CGFloat) {
         if draggingTabId == nil {
             draggingTabId = tabId
+            store.draggingTabId = tabId
             isSettling = false
         }
         dragOffset = translation
     }
 
     private func handleDragEnded(tabId: UUID, translation: CGFloat, tabs: [Tab]) {
+        store.draggingTabId = nil
         guard let fromIdx = tabs.firstIndex(where: { $0.id == tabId }) else {
             draggingTabId = nil
             dragOffset = 0
@@ -554,8 +556,7 @@ struct VerticalTabRowView: View {
                 store.togglePin(tabId: tab.id)
             }
             Button("New Group with Tab", systemImage: "folder.badge.plus") {
-                let g = store.createTabGroup(spaceId: tab.spaceId)
-                store.moveTab(tabId: tab.id, toGroupId: g.id)
+                store.createTabGroup(spaceId: tab.spaceId, initialTabId: tab.id)
             }
             if !store.tabGroupsForActiveSpace.isEmpty || tab.groupId != nil {
                 Menu("Move to Group") {

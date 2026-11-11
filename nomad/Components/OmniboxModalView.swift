@@ -175,28 +175,13 @@ struct OmniboxModalView: View {
                         .contentShape(Rectangle())
                         .onTapGesture { dismiss() }
                 } else {
-                    // In split pick mode, only the empty picking half has a backdrop to commit on tap;
-                    // the anchor page and sidebar remain completely interactive without dimming or click interception.
-                    HStack(spacing: 0) {
-                        if store.splitPickSide == .left {
-                            Spacer()
-                            Color.clear
-                                .frame(width: proxy.size.width / 2)
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    store.commitSplitPickWithNewTab(selectAnchor: false)
-                                }
-                        } else {
-                            Color.clear
-                                .frame(width: proxy.size.width / 2)
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    store.commitSplitPickWithNewTab(selectAnchor: false)
-                                }
-                            Spacer()
+                    // In split pick mode, clicking outside the omnibox commits the split with a new blank tab
+                    Color.clear
+                        .ignoresSafeArea()
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            dismiss(cancelledByEscape: false)
                         }
-                    }
-                    .ignoresSafeArea()
                 }
 
                 // Centered modal card
@@ -213,7 +198,7 @@ struct OmniboxModalView: View {
                             .foregroundStyle(Theme.ink)
                             .focused($isFieldFocused)
                             .onSubmit { submit(rows: rows) }
-                            .onExitCommand { dismiss() }
+                            .onExitCommand { dismiss(cancelledByEscape: true) }
                             .onChange(of: text) { _, newText in
                                 selectedIndex = 0
                                 suggestionTask?.cancel()
@@ -360,9 +345,13 @@ struct OmniboxModalView: View {
         }
     }
 
-    private func dismiss() {
+    private func dismiss(cancelledByEscape: Bool = false) {
         if store.isPickingSplit {
-            store.cancelSplitPick()
+            if cancelledByEscape {
+                store.cancelSplitPick()
+            } else {
+                store.commitSplitPickWithNewTab(selectAnchor: false)
+            }
         } else {
             isPresented = false
             store.isAddressBarFocused = false

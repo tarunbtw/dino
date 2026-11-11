@@ -35,15 +35,16 @@ struct BrowserView: View {
                 if store.isPickingSplit, let anchorTab = store.splitPickAnchor {
                     HStack(spacing: Theme.pageInset) {
                         if store.splitPickSide == .left {
-                            TabStageView(store: store, tab: anchorTab, settings: settings)
-                                .clipShape(RoundedRectangle(cornerRadius: Theme.pageCornerRadius, style: .continuous))
-                                .frame(maxWidth: .infinity)
-                                .contentShape(Rectangle())
-                                .simultaneousGesture(
-                                    TapGesture().onEnded {
+                            ZStack {
+                                TabStageView(store: store, tab: anchorTab, settings: settings)
+                                Color.clear
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
                                         store.commitSplitPickWithNewTab(selectAnchor: true)
                                     }
-                                )
+                            }
+                            .clipShape(RoundedRectangle(cornerRadius: Theme.pageCornerRadius, style: .continuous))
+                            .frame(maxWidth: .infinity)
 
                             ZStack {
                                 RoundedRectangle(cornerRadius: Theme.pageCornerRadius, style: .continuous)
@@ -73,15 +74,16 @@ struct BrowserView: View {
                                 store.commitSplitPickWithNewTab(selectAnchor: false)
                             }
 
-                            TabStageView(store: store, tab: anchorTab, settings: settings)
-                                .clipShape(RoundedRectangle(cornerRadius: Theme.pageCornerRadius, style: .continuous))
-                                .frame(maxWidth: .infinity)
-                                .contentShape(Rectangle())
-                                .simultaneousGesture(
-                                    TapGesture().onEnded {
+                            ZStack {
+                                TabStageView(store: store, tab: anchorTab, settings: settings)
+                                Color.clear
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
                                         store.commitSplitPickWithNewTab(selectAnchor: true)
                                     }
-                                )
+                            }
+                            .clipShape(RoundedRectangle(cornerRadius: Theme.pageCornerRadius, style: .continuous))
+                            .frame(maxWidth: .infinity)
                         }
                     }
                     .transition(.opacity)

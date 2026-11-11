@@ -14,6 +14,7 @@ struct TabGroupCardView: View {
 
     @State private var isHoveringHeader = false
     @State private var draft: String = ""
+    @State private var isDropTargeted = false
     @FocusState private var isFieldFocused: Bool
 
     private var isRenaming: Bool {
@@ -131,26 +132,44 @@ struct TabGroupCardView: View {
                             store: store,
                             tab: tab,
                             isActive: tab.id == store.activeTabId,
-                            isDragging: false,
+                            isDragging: store.draggingTabId == tab.id,
                             offsetY: 0,
-                            onDragChanged: { _ in },
-                            onDragEnded: { _ in }
+                            onDragChanged: { _ in
+                                store.draggingTabId = tab.id
+                            },
+                            onDragEnded: { translation in
+                                store.draggingTabId = nil
+                                if abs(translation) > 36 {
+                                    store.moveTab(tabId: tab.id, toGroupId: nil)
+                                }
+                            }
                         )
                     }
                 }
                 .padding(.leading, 4)
-                .transition(.opacity.combined(with: .move(edge: .top)))
+                .clipped()
             }
         }
         .padding(4)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Theme.hover.opacity(0.35))
+                .fill(isDropTargeted ? Theme.spaceColor(store.activeSpace.colorHex).opacity(0.18) : Theme.hover.opacity(0.35))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Theme.activeTabHairline.opacity(0.35), lineWidth: 0.5)
+                .strokeBorder(
+                    isDropTargeted ? Theme.spaceColor(store.activeSpace.colorHex).opacity(0.6) : Theme.activeTabHairline.opacity(0.35),
+                    lineWidth: isDropTargeted ? 1.0 : 0.5
+                )
         )
+        .onHover { inside in
+            if inside, let draggingId = store.draggingTabId, !memberTabs.contains(where: { $0.id == draggingId }) {
+                isDropTargeted = true
+            } else {
+                isDropTargeted = false
+            }
+        }
+        .animation(.spring(response: 0.22, dampingFraction: 0.88), value: isDropTargeted)
         .animation(.spring(response: 0.24, dampingFraction: 0.88), value: group.isFolded)
     }
 }

@@ -42,6 +42,7 @@ final class BrowserStore: ObservableObject {
     @Published var peekTab: Tab? = nil
     @Published var peekFromTabId: UUID? = nil
     @Published var isAutopilotRailVisible: Bool = false
+    @Published var draggingTabId: UUID? = nil
 
     // MARK: - Split Picker State
     @Published var splitPickAnchor: Tab? = nil
@@ -134,15 +135,26 @@ final class BrowserStore: ObservableObject {
     }
 
     @discardableResult
-    func createTabGroup(name: String = TabGroup.defaultName, spaceId: UUID? = nil) -> TabGroup {
+    func createTabGroup(name: String = TabGroup.defaultName, spaceId: UUID? = nil, initialTabId: UUID? = nil) -> TabGroup {
         let sid = spaceId ?? activeSpaceId
         let newGroup = TabGroup(spaceId: sid, name: name)
         withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
             tabGroups.append(newGroup)
+            if let initialTabId, let tab = tabs.first(where: { $0.id == initialTabId }) {
+                tab.groupId = newGroup.id
+            }
             renamingGroupId = newGroup.id
         }
         persistSession()
         return newGroup
+    }
+
+    /// Automatically dissolves empty tab groups.
+    func pruneEmptyGroups() {
+        let occupiedGroupIds = Set(tabs.compactMap(\.groupId))
+        withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
+            tabGroups.removeAll { !occupiedGroupIds.contains($0.id) }
+        }
     }
 
     func toggleFoldGroup(id: UUID) {
@@ -183,6 +195,7 @@ final class BrowserStore: ObservableObject {
             if let toGroupId, let idx = tabGroups.firstIndex(where: { $0.id == toGroupId }) {
                 tabGroups[idx].isFolded = false
             }
+            pruneEmptyGroups()
         }
         persistSession()
     }
@@ -284,6 +297,7 @@ final class BrowserStore: ObservableObject {
                     _ = newTab(url: url, select: idx == 0, lazy: idx != 0)
                 }
             }
+            pruneEmptyGroups()
         }
         ExtensionManager.shared.start(with: self)
         NomadAgentServer.shared.start(store: self)
@@ -473,6 +487,7 @@ final class BrowserStore: ObservableObject {
                     }
                 }
             }
+            pruneEmptyGroups()
         }
         persistSession()
     }
@@ -524,6 +539,7 @@ final class BrowserStore: ObservableObject {
                     self.tabSnapshots = self.tabSnapshots.filter { activeIDs.contains($0.key) }
                 }
             }
+            pruneEmptyGroups()
         }
     }
 
