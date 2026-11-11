@@ -143,6 +143,11 @@ final class NomadHeadlessManager: ObservableObject {
         let browserStore = BrowserStore()
         self.store = browserStore
 
+        // Ensure headless worker boots with an initial tab ready for automation
+        if browserStore.tabs.isEmpty {
+            _ = browserStore.newTab(url: nil, isIncognito: false, isGhost: false, select: true)
+        }
+
         // Bind active tab's webView to the offscreen window's contentView
         if let activeTab = browserStore.activeTab {
             attachWebView(activeTab.webView)

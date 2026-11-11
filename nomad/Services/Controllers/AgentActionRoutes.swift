@@ -108,7 +108,7 @@ extension NomadAgentServer {
             }
             return true
 
-        case ("POST", "/evaluate"):
+        case ("POST", "/evaluate"), ("POST", "/eval"):
             guard let bodyData = bodyData, !bodyData.isEmpty else {
                 sendResponse(connection: connection, status: "400 Bad Request", body: "{\"error\":\"Missing body in /evaluate\",\"code\":\"MISSING_BODY\",\"success\":false}", origin: origin)
                 return true
@@ -117,7 +117,7 @@ extension NomadAgentServer {
                 sendResponse(connection: connection, status: "400 Bad Request", body: "{\"error\":\"Malformed JSON in evaluate body\",\"code\":\"MALFORMED_JSON\",\"success\":false}", origin: origin)
                 return true
             }
-            guard let script = (json["script"] as? String) ?? (json["expression"] as? String) else {
+            guard let script = (json["script"] as? String) ?? (json["expression"] as? String) ?? (json["code"] as? String) else {
                 sendResponse(connection: connection, status: "400 Bad Request", body: "{\"error\":\"Missing script or expression string in body\",\"code\":\"MISSING_SCRIPT\",\"success\":false}", origin: origin)
                 return true
             }

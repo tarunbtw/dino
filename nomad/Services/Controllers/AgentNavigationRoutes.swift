@@ -46,7 +46,20 @@ extension NomadAgentServer {
                 return true
             }
             let tid = (json["tabId"] as? String) ?? queryItem("tabId")
-            guard let activeTab = requireTab(id: tid, connection: connection, origin: origin) else { return true }
+            let activeTab: Tab
+            if let target = resolveTab(id: tid) {
+                activeTab = target
+            } else if tid == nil, let store = self.store {
+                if let first = store.tabs.first {
+                    store.selectTab(id: first.id)
+                    activeTab = first
+                } else {
+                    activeTab = store.newTab(url: nil, select: true)
+                }
+            } else {
+                guard let tab = requireTab(id: tid, connection: connection, origin: origin) else { return true }
+                activeTab = tab
+            }
             let action = (json["action"] as? String)?.lowercased()
             if let action = action, ["back", "forward", "reload"].contains(action) {
                 handleNavAction(action, tab: activeTab, connection: connection, origin: origin)

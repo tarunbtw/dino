@@ -100,15 +100,52 @@ final class NomadAgentServer: ObservableObject {
         return host == "127.0.0.1" || host == "localhost" || host == "::1" || host == "[::1]"
     }
 
-    /// Checks if a file path points to sensitive OS or user credentials (SSH keys, Nomad tokens, Keychains, system passwd).
+    /// Checks if a file path points to sensitive OS or user credentials (SSH keys, Nomad tokens, Keychains, system passwd, cloud secrets).
     nonisolated static func isSensitivePath(_ path: String) -> Bool {
         let expanded = (path as NSString).expandingTildeInPath
         let rawLower = expanded.lowercased()
-        let canonicalLower = URL(fileURLWithPath: expanded).resolvingSymlinksInPath().standardized.path.lowercased()
-        let sensitiveTokens = ["/.ssh", "/.nomad", "/library/keychains", "/etc/master.passwd", "/etc/sudoers"]
-        return [rawLower, canonicalLower].contains { p in
-            sensitiveTokens.contains { p.contains($0) }
+        let canonicalURL = URL(fileURLWithPath: expanded).resolvingSymlinksInPath().standardized
+        let canonicalLower = canonicalURL.path.lowercased()
+        let pathsToCheck = [rawLower, canonicalLower]
+
+        // 1. Block sensitive OS system directories
+        let blockedSystemPrefixes = [
+            "/etc", "/private/etc",
+            "/var/root", "/private/var/root",
+            "/system", "/usr", "/bin", "/sbin"
+        ]
+        for p in pathsToCheck {
+            for prefix in blockedSystemPrefixes {
+                if p == prefix || p.hasPrefix(prefix + "/") {
+                    return true
+                }
+            }
         }
+
+        // 2. Block sensitive user credential and dotfile directories
+        let sensitiveDirTokens = [
+            "/.ssh", "/.nomad", "/.aws", "/.azure", "/.config/gcloud",
+            "/.gnupg", "/.kube", "/library/keychains", "/keychains"
+        ]
+        for p in pathsToCheck {
+            if sensitiveDirTokens.contains(where: { p.contains($0) }) {
+                return true
+            }
+        }
+
+        // 3. Block sensitive filenames and credential dotfiles anywhere
+        let sensitiveFileNames: Set<String> = [
+            "passwd", "shadow", "master.passwd", "sudoers",
+            "id_rsa", "id_ed25519", "id_ecdsa", "id_dsa",
+            "known_hosts", "authorized_keys",
+            ".env", ".gitconfig", ".netrc", ".dockercfg"
+        ]
+        let lastComponent = canonicalURL.lastPathComponent.lowercased()
+        if sensitiveFileNames.contains(lastComponent) || lastComponent.hasPrefix(".env.") || lastComponent.hasSuffix(".passwd") {
+            return true
+        }
+
+        return false
     }
 
     @Published private(set) var isRunning: Bool = false

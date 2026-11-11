@@ -13,7 +13,17 @@ extension NomadAgentServer {
     func handleTabsRoute(method: String, cleanPath: String, bodyData: Data?, queryItem: ((String) -> String?)? = nil, connection: NWConnection, origin: String?) -> Bool {
         guard let store = self.store else { return false }
 
+        let segments = cleanPath.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
+        let isTabPrefix = segments.first == "tabs" || segments.first == "tab"
+
         func extractTargetTabId(json: [String: Any]?) -> String? {
+            if isTabPrefix && segments.count >= 2 {
+                let seg1 = segments[1]
+                let reserved: Set<String> = ["new", "switch", "close", "tier", "split", "promote", "pip", "kill", "reap"]
+                if !reserved.contains(seg1.lowercased()) {
+                    return seg1
+                }
+            }
             if let json = json {
                 if let s = json["id"] as? String, !s.isEmpty { return s }
                 if let n = json["id"] as? Int { return String(n) }
@@ -34,7 +44,7 @@ extension NomadAgentServer {
         }
 
         switch (method, cleanPath) {
-        case ("GET", "/tabs"):
+        case ("GET", "/tabs"), ("GET", "/tab"):
             let hotCount = store.tabs.filter { $0.tier == .hot }.count
             let warmCount = store.tabs.filter { $0.tier == .warm }.count
             let coldCount = store.tabs.filter { $0.tier == .cold }.count
@@ -73,7 +83,7 @@ extension NomadAgentServer {
             ], origin: origin)
             return true
 
-        case ("POST", "/tabs/new"):
+        case ("POST", "/tabs/new"), ("POST", "/tab/new"):
             var targetURL: URL? = nil
             var select = true
             var isIncognito = false
@@ -106,7 +116,7 @@ extension NomadAgentServer {
             ], origin: origin)
             return true
 
-        case ("POST", "/tabs/switch"):
+        case ("POST", "/tabs/switch"), ("POST", "/tab/switch"):
             var json: [String: Any]? = nil
             if let bodyData = bodyData {
                 json = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any]
@@ -120,7 +130,7 @@ extension NomadAgentServer {
             sendJSON(connection: connection, object: ["success": true, "activeTabId": tab.id.uuidString, "tabsCount": store.tabs.count, "tabCount": store.tabs.count], origin: origin)
             return true
 
-        case ("POST", "/tabs/close"), ("DELETE", "/tabs/close"), ("DELETE", "/tabs"):
+        case ("POST", "/tabs/close"), ("DELETE", "/tabs/close"), ("DELETE", "/tabs"), ("DELETE", "/tab"), ("POST", "/tab/close"):
             var json: [String: Any]? = nil
             if let bodyData = bodyData {
                 json = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any]
@@ -274,6 +284,97 @@ extension NomadAgentServer {
             return true
 
         default:
+            if isTabPrefix && segments.count == 2 {
+                let targetId = segments[1]
+                let reserved: Set<String> = ["new", "switch", "close", "tier", "split", "promote", "pip", "kill", "reap"]
+                if !reserved.contains(targetId.lowercased()) {
+                    guard let tab = self.resolveTab(id: targetId) else {
+                        sendResponse(connection: connection, status: "404 Not Found", body: "{\"error\":\"Tab not found: \(targetId)\",\"code\":\"TAB_NOT_FOUND\",\"success\":false}", origin: origin)
+                        return true
+                    }
+                    if method == "GET" {
+                        let title = (tab.webView.title?.isEmpty == false ? tab.webView.title : tab.title) ?? ""
+                        let urlStr = (tab.webView.url?.absoluteString ?? tab.url?.absoluteString) ?? ""
+                        let isActive = tab.id == store.activeTabId
+                        sendJSON(connection: connection, object: [
+                            "success": true,
+                            "tab": [
+                                "id": tab.id.uuidString,
+                                "title": title,
+                                "url": urlStr,
+                                "isIncognito": tab.isIncognito,
+                                "isGhost": tab.isGhost,
+                                "active": isActive,
+                                "isActive": isActive,
+                                "isLoading": tab.isLoading,
+                                "tier": tab.tier.rawValue,
+                                "tabVirtualization": [
+                                    "tier": tab.tier.rawValue,
+                                    "isSuspended": tab.tier == .cold,
+                                    "lastActive": tab.lastActiveTime.timeIntervalSince1970 * 1000.0
+                                ]
+                            ]
+                        ], origin: origin)
+                        return true
+                    } else if method == "DELETE" {
+                        let closedId = tab.id.uuidString
+                        store.closeTab(id: tab.id)
+                        NomadCDPSessionManager.shared.notifyTargetDestroyed(tabId: closedId)
+                        sendJSON(connection: connection, object: [
+                            "success": true,
+                            "closedTabId": closedId,
+                            "tabsCount": store.tabs.count,
+                            "tabCount": store.tabs.count
+                        ], origin: origin)
+                        return true
+                    }
+                }
+            } else if isTabPrefix && segments.count == 3 {
+                let targetId = segments[1]
+                let action = segments[2].lowercased()
+                guard let tab = self.resolveTab(id: targetId) else {
+                    sendResponse(connection: connection, status: "404 Not Found", body: "{\"error\":\"Tab not found: \(targetId)\",\"code\":\"TAB_NOT_FOUND\",\"success\":false}", origin: origin)
+                    return true
+                }
+                if action == "close" && (method == "POST" || method == "DELETE") {
+                    let closedId = tab.id.uuidString
+                    store.closeTab(id: tab.id)
+                    NomadCDPSessionManager.shared.notifyTargetDestroyed(tabId: closedId)
+                    sendJSON(connection: connection, object: [
+                        "success": true,
+                        "closedTabId": closedId,
+                        "tabsCount": store.tabs.count,
+                        "tabCount": store.tabs.count
+                    ], origin: origin)
+                    return true
+                } else if (action == "switch" || action == "select") && (method == "POST" || method == "GET") {
+                    store.selectTab(id: tab.id)
+                    sendJSON(connection: connection, object: [
+                        "success": true,
+                        "activeTabId": tab.id.uuidString,
+                        "tabsCount": store.tabs.count,
+                        "tabCount": store.tabs.count
+                    ], origin: origin)
+                    return true
+                } else if action == "tier" && method == "POST" {
+                    var json: [String: Any]? = nil
+                    if let bodyData = bodyData {
+                        json = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any]
+                    }
+                    guard let tierStr = (json?["tier"] as? String) ?? queryItem?("tier"),
+                          let newTier = TabTier(rawValue: tierStr.lowercased()) else {
+                        sendResponse(connection: connection, status: "400 Bad Request", body: "{\"error\":\"Missing or invalid 'tier' (expected 'hot', 'warm', or 'cold')\",\"code\":\"INVALID_PAYLOAD\",\"success\":false}", origin: origin)
+                        return true
+                    }
+                    tab.tier = newTier
+                    sendJSON(connection: connection, object: [
+                        "success": true,
+                        "tabId": tab.id.uuidString,
+                        "tier": newTier.rawValue
+                    ], origin: origin)
+                    return true
+                }
+            }
             return false
         }
     }

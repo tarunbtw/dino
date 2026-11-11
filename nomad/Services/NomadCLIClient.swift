@@ -90,7 +90,7 @@ enum NomadCLIClient {
         "click": ["--native", "--right", "-r", "--middle", "--double", "--wait", "-w", "--tab"],
         "dblclick": ["--native", "--wait", "-w", "--tab"],
         "double-click": ["--native", "--wait", "-w", "--tab"],
-        "type": ["--press", "-p", "--submit", "--clear", "--native", "--wait", "-w", "--tab"],
+        "type": ["--press", "-p", "--press-enter", "--enter", "--return", "--submit", "--clear", "--native", "--wait", "-w", "--tab"],
         "press": ["--native", "--modifiers", "--wait", "-w", "--tab"],
         "drag": ["--native", "--to-target", "--to-selector", "--to-x", "--to-y", "--wait", "-w", "--tab"],
         "hover": ["--tab"],
@@ -942,6 +942,121 @@ enum NomadCLIClient {
               -j, --json               Output raw JSON
             """)
 
+        case "token":
+            emitOutput("""
+            Usage: nomad token [options]
+
+            Display the agent authentication token for HTTP REST and WebSocket requests.
+
+            Options:
+              -H, --header             Output formatted HTTP Authorization header
+              -j, --json               Output raw JSON with token field
+            """)
+
+        case "playbook":
+            emitOutput("""
+            Usage: nomad playbook <subcommand> [options]
+
+            Record and deterministically replay macros with zero LLM tokens.
+
+            Subcommands:
+              record [name]            Start recording actions into a playbook
+              stop                     Stop recording and save playbook to ~/.nomad/playbooks/
+              run, replay <name>       Replay a saved playbook deterministically
+              list                     List all saved playbooks
+              export <name>            Export playbook steps as JSON
+              delete, rm <name>        Delete a saved playbook
+
+            Options:
+              -V, --var, --param k=v   Substitute variables during replay (e.g. -V query="hello")
+              --tab <id|idx>           Target specific tab by index or ID (default: active tab)
+            """)
+
+        case "route":
+            emitOutput("""
+            Usage: nomad route <subcommand> [options]
+
+            Intercept, mock, or block network requests matching URL glob patterns.
+
+            Subcommands:
+              block <pattern>          Block network requests matching pattern (e.g. '*://*.ads.com/**')
+              mock <pattern> [body]    Mock response body and status code (default: 200)
+              list                     List active routing and blocking rules
+              clear                    Clear all active network routes
+
+            Options:
+              --status <status>        HTTP status code for mock responses (default: 200)
+              --body <body>            Mock response body (JSON string or text)
+              --tab <id|idx>           Target specific tab by index or ID (default: active tab)
+            """)
+
+        case "hitl":
+            emitOutput("""
+            Usage: nomad hitl [subcommand] [options]
+
+            Inspect and manage Human-in-the-Loop security challenge gates (Turnstile, reCAPTCHA, 2FA).
+
+            Subcommands:
+              status                   Check current HITL status (default)
+              resolve                  Mark active challenge as resolved and unblock automation
+
+            Options:
+              --tab <id|idx>           Target specific tab by index or ID (default: active tab)
+            """)
+
+        case "start", "daemon":
+            emitOutput("""
+            Usage: nomad start [options]
+
+            Run Nomad as a background daemon or spawn concurrent headless agent workers.
+
+            Options:
+              --profile <type>         Profile partition: agent (default), ephemeral, user
+              --idle-timeout <s>       Auto-reap idle countdown in seconds (default: 60)
+              --no-reap                Disable auto-reaping idle shutdown
+              --port <port>            Explicit loopback HTTP port (default: auto-allocated)
+              --socket <path>          Explicit Unix domain socket path
+            """)
+
+        case "stop":
+            emitOutput("""
+            Usage: nomad stop [options]
+
+            Stop running Nomad workers or instances.
+
+            Options:
+              --workers                Target all headless workers only (keeps GUI active)
+              --gui                    Target GUI instance only
+              --all                    Target all Nomad instances (GUI + workers)
+            """)
+
+        case "status":
+            emitOutput("""
+            Usage: nomad status [options]
+
+            Check running Nomad GUI and headless worker status, ports, and sockets.
+
+            Options:
+              --port <port>            Check specific port
+            """)
+
+        case "mcp":
+            emitOutput("""
+            Usage: nomad mcp [subcommand] [options]
+
+            Run Model Context Protocol (MCP) server over stdio for AI agents.
+
+            Subcommands:
+              (no args)                Start MCP server over stdio (JSON-RPC)
+              install [target]         Auto-register in Claude Desktop, Cursor, or Windsurf
+              config                   Print JSON configuration snippet for MCP registration
+
+            Options:
+              --claude                 Target Claude Desktop for install
+              --cursor                 Target Cursor for install
+              --windsurf               Target Windsurf for install
+            """)
+
         default:
             emitOutput("No detailed help available for command '\(cmd)'. Run 'nomad help' for all commands.")
         }
@@ -1232,10 +1347,10 @@ enum NomadCLIClient {
 
         let ref = args.positionals[0]
         let text = args.positionals.dropFirst().joined(separator: " ")
-        let isSubmit = args.boolFlag(["--submit"])
+        let isSubmit = args.boolFlag(["--submit", "--press-enter", "--enter", "--return"])
         let isClear = args.boolFlag(["--clear"])
         let isNative = args.boolFlag(["--native"])
-        let pressKey = args.stringOption(["--press", "-p"]) ?? (args.boolFlag(["--press", "-p"]) ? "Enter" : nil)
+        let pressKey = args.stringOption(["--press", "-p"]) ?? (args.boolFlag(["--press", "-p", "--press-enter", "--enter", "--return"]) ? "Enter" : nil)
 
         var bodyObj: [String: Any] = [
             "type": "type",

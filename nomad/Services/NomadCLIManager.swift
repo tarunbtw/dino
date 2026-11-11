@@ -368,10 +368,11 @@ enum NomadCLIManager {
                 }
 
             case "help", "--help", "-h":
-                if subcommand == nil {
-                    subcommand = "help"
+                if let sub = subcommand {
+                    NomadCLIClient.showCommandHelp(sub.lowercased())
+                    exit(0)
                 } else {
-                    unrecognizedTokens.append(token)
+                    subcommand = "help"
                 }
 
             case "start", "daemon":
@@ -521,7 +522,7 @@ enum NomadCLIManager {
 
         // 4. Reject unrecognized tokens strictly (unless help <driver_command>)
         if let firstUnrecognized = unrecognizedTokens.first {
-            if subcommand == "help", driverCommands.contains(firstUnrecognized.lowercased()) {
+            if subcommand == "help" {
                 NomadCLIClient.showCommandHelp(firstUnrecognized.lowercased())
                 exit(0)
             }
