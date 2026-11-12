@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# Nomad Build Verification & Environment Cleanliness Test Script
+# Dino Build Verification & Environment Cleanliness Test Script
 #
 # Compiles Release build with strict zero-warnings/zero-errors enforcement,
 # unregisters any temporary build artifacts from macOS LaunchServices,
@@ -20,16 +20,16 @@ LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Versions/Current/F
 export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
 
 echo "=========================================================="
-echo "  Nomad Build Verification & Cleanliness Suite"
+echo "  Dino Build Verification & Cleanliness Suite"
 echo "=========================================================="
 
 # 1. Compile Release binary with strict zero-warnings and zero-errors flags
 echo "==> Compiling Release binary (strict: 0 warnings, 0 errors)..."
-LOG_FILE=$(mktemp -t nomad_build_verify.XXXXXX.log)
+LOG_FILE=$(mktemp -t dino_build_verify.XXXXXX.log)
 
 set +e
-xcodebuild -project nomad.xcodeproj \
-  -scheme nomad \
+xcodebuild -project dino.xcodeproj \
+  -scheme dino \
   -configuration Release \
   -destination "generic/platform=macOS" \
   SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
@@ -56,10 +56,10 @@ rm -f "$LOG_FILE"
 
 echo "==> Build passed cleanly with 0 errors and 0 warnings."
 
-# 2. Unregister any built nomad.app instances from LaunchServices
+# 2. Unregister any built app instances from LaunchServices
 echo "==> Unregistering DerivedData and local builds from LaunchServices..."
 if [ -x "$LSREGISTER" ]; then
-  for app in ~/Library/Developer/Xcode/DerivedData/nomad-*/Build/Products/*/*.app "$PROJECT_ROOT"/build*/*/*.app; do
+  for app in ~/Library/Developer/Xcode/DerivedData/dino-*/Build/Products/*/*.app "$PROJECT_ROOT"/build*/*/*.app; do
     if [ -d "$app" ]; then
       "$LSREGISTER" -u "$app" 2>/dev/null || true
     fi
@@ -67,8 +67,8 @@ if [ -x "$LSREGISTER" ]; then
 fi
 
 # 3. Clean DerivedData artifacts to prevent Spotlight/Dock duplicates
-echo "==> Purging DerivedData cache: ~/Library/Developer/Xcode/DerivedData/nomad-*"
-rm -rf ~/Library/Developer/Xcode/DerivedData/nomad-*
+echo "==> Purging DerivedData cache: ~/Library/Developer/Xcode/DerivedData/dino-*"
+rm -rf ~/Library/Developer/Xcode/DerivedData/dino-*
 
 echo "=========================================================="
 echo "  ✅ VERIFICATION PASSED: 0 errors, 0 warnings"

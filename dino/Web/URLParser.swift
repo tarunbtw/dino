@@ -1,0 +1,129 @@
+//
+//  URLParser.swift
+//  dino
+//
+//  Created by tarun on 10/10/26.
+//
+
+import Foundation
+import WebKit
+
+/// Resolves user input into a navigable URL.
+/// Handles standard web domains, internal dino:// schemes, and fallback search queries.
+enum URLParser {
+    private static let supportedSchemes: Set<String> = ["http", "https", "file", "about", "data", "dino", "chrome-extension", "webkit-extension"]
+
+    /// Parses user-typed text into a destination URL.
+    @MainActor
+    static func parse(_ input: String) -> URL {
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return URL(string: "about:blank")!
+        }
+
+        let lower = trimmed.lowercased()
+
+        // Direct internal schemes (dino://settings, redirects dino://tune to settings)
+        if lower.hasPrefix("dino://") || lower.hasPrefix("dino:") || lower == "settings" || lower == "tune" {
+            return URL(string: "dino://settings")!
+        }
+
+        // Direct extension ID check: if input matches an installed extension ID, navigate to its default page
+        if let ext = ExtensionManager.shared.installed.first(where: { $0.id == trimmed }),
+           let context = ExtensionManager.shared.contexts[ext.id],
+           let url = ExtensionManager.defaultPageURL(for: context) {
+            return url
+        }
+
+        // If it starts with a recognized scheme (including dino://), use it directly
+        if let schemeRange = trimmed.range(of: "://") {
+            let scheme = String(trimmed[..<schemeRange.lowerBound]).lowercased()
+            if supportedSchemes.contains(scheme), let url = URL(string: trimmed) {
+                return url
+            }
+        }
+
+        // Handle about: or data: prefixes
+        if lower.hasPrefix("about:") || lower.hasPrefix("data:") {
+            if let url = URL(string: trimmed) { return url }
+        }
+
+        // Direct local filesystem file paths
+        if trimmed.hasPrefix("/") && FileManager.default.fileExists(atPath: trimmed) {
+            return URL(fileURLWithPath: trimmed)
+        }
+
+        // Check if text looks like a host or IP (e.g. "github.com", "localhost:3000", "127.0.0.1")
+        if looksLikeHost(trimmed) {
+            let scheme = trimmed.isLocalOrPrivateHost ? "http://" : "https://"
+            if let url = URL(string: scheme + trimmed) {
+                return url
+            }
+        }
+
+        // Otherwise, treat as a search query using the configured search engine
+        let encodedQuery = encodeQueryComponent(trimmed)
+        let searchBase = SettingsStore.shared.searchEngineBaseURL
+        return URL(string: "\(searchBase)\(encodedQuery)") ?? URL(string: "https://duckduckgo.com/?q=\(encodedQuery)")!
+    }
+
+    /// Percent-encodes a user query string for inclusion in a search engine URL query parameter,
+    /// escaping characters like '+', '&', '=', '?', and '#' to prevent query parameter corruption.
+    static func encodeQueryComponent(_ query: String) -> String {
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: "+&=?#/")
+        return query.addingPercentEncoding(withAllowedCharacters: allowed) ?? query
+    }
+
+    /// Checks if a string represents a direct URL or web host rather than search keywords.
+    static func isAddress(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !trimmed.contains(" ") else { return false }
+        if trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://") || trimmed.hasPrefix("dino://") || trimmed.hasPrefix("file://") || trimmed.hasPrefix("about:") {
+            return true
+        }
+        return looksLikeHost(trimmed)
+    }
+
+    /// Checks if a string looks like a web address or domain name rather than search keywords.
+    private static func looksLikeHost(_ string: String) -> Bool {
+        // Discard strings with spaces or containing @
+        guard !string.contains(" "), !string.contains("@") else { return false }
+
+        if string.isLocalOrPrivateHost { return true }
+
+        let cleanHost = URL(string: "http://\(string)")?.host ?? string
+
+        if cleanHost.isLocalOrPrivateHost { return true }
+
+        // Must have at least one dot with valid characters and a common TLD structure
+        let parts = cleanHost.components(separatedBy: ".")
+        guard parts.count >= 2, let tld = parts.last else { return false }
+
+        // Valid TLD check (letters only, 2 to 63 characters)
+        return tld.count >= 2 && tld.count <= 63 && tld.allSatisfy { $0.isASCII && $0.isLetter }
+    }
+}
+
+extension String {
+    /// Detects local development environments and private networks (localhost, 127.0.0.1, 192.168.x, etc.)
+    var isLocalOrPrivateHost: Bool {
+        let lower = self.lowercased()
+        let hasPort = lower.contains(":")
+        let hostPart = lower.components(separatedBy: ":").first ?? lower
+        if hostPart == "localhost" || hostPart == "127.0.0.1" || hostPart == "::1" || hostPart == "0.0.0.0" { return true }
+        if hostPart.hasSuffix(".local") || hostPart.hasSuffix(".localhost") || hostPart.hasSuffix(".internal") || hostPart.hasSuffix(".lan") || hostPart.hasSuffix(".home") || hostPart.hasSuffix(".arpa") { return true }
+        if hostPart.hasPrefix("192.168.") || hostPart.hasPrefix("10.") || hostPart.hasPrefix("127.") { return true }
+        if hostPart.hasPrefix("172.") {
+            let parts = hostPart.split(separator: ".")
+            if parts.count >= 2, let second = Int(parts[1]), (16...31).contains(second) {
+                return true
+            }
+        }
+        // If an explicit port is given on a single-word hostname (e.g. router:8080), treat as local host
+        if hasPort && !hostPart.isEmpty && hostPart.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-") }) {
+            return true
+        }
+        return false
+    }
+}

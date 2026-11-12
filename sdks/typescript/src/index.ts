@@ -1,5 +1,5 @@
 /**
- * Nomad Browser TypeScript SDK (v0.33.0)
+ * Dino Browser TypeScript SDK (v0.41.0)
  * Ultra-light native macOS agentic browser driver, token-optimized perception, and Unix socket bridge.
  */
 
@@ -8,7 +8,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
-export interface NomadOptions {
+export interface DinoOptions {
   port?: number;
   host?: string;
   socketPath?: string;
@@ -20,6 +20,8 @@ export interface SnapshotOptions {
   limit?: number;
   offset?: number;
   viewportOnly?: boolean;
+  coords?: boolean;
+  includeCoords?: boolean;
   target?: string;
   role?: string;
   text?: string;
@@ -54,28 +56,28 @@ export interface WaitOptions {
   tabId?: string;
 }
 
-export class Nomad {
+export class Dino {
   readonly port: number;
   readonly host: string;
   readonly socketPath?: string;
   readonly token: string;
 
-  constructor(options: NomadOptions = {}) {
+  constructor(options: DinoOptions = {}) {
     if (os.platform() !== 'darwin') {
-      console.warn('Nomad is a native Apple Silicon browser engine and runs on macOS.');
+      console.warn('Dino is a native Apple Silicon browser engine and runs on macOS.');
     }
     this.port = options.port ?? 9222;
     this.host = options.host ?? '127.0.0.1';
-    this.socketPath = options.socketPath ?? Nomad.resolveSocketPath();
-    this.token = options.token ?? Nomad.loadToken();
+    this.socketPath = options.socketPath ?? Dino.resolveSocketPath();
+    this.token = options.token ?? Dino.loadToken();
   }
 
   static loadToken(): string {
-    if (process.env.NOMAD_TOKEN) return process.env.NOMAD_TOKEN.trim();
-    const tokenFile = path.join(os.homedir(), '.nomad', 'agent-token');
+    if (process.env.DINO_TOKEN) return process.env.DINO_TOKEN.trim();
+    const dinoTokenFile = path.join(os.homedir(), '.dino', 'agent-token');
     try {
-      if (fs.existsSync(tokenFile)) {
-        return fs.readFileSync(tokenFile, 'utf8').trim();
+      if (fs.existsSync(dinoTokenFile)) {
+        return fs.readFileSync(dinoTokenFile, 'utf8').trim();
       }
     } catch {
       // fallback
@@ -84,11 +86,11 @@ export class Nomad {
   }
 
   static resolveSocketPath(): string | undefined {
-    const defaultSock = path.join(os.homedir(), '.nomad', 'nomad.sock');
-    if (fs.existsSync(defaultSock)) return defaultSock;
+    const dinoSock = path.join(os.homedir(), '.dino', 'dino.sock');
+    if (fs.existsSync(dinoSock)) return dinoSock;
 
-    // Check for running headless worker socket
-    const workersDir = path.join(os.homedir(), '.nomad', 'workers');
+    // Check for running headless worker socket in .dino
+    const workersDir = path.join(os.homedir(), '.dino', 'workers');
     try {
       if (fs.existsSync(workersDir)) {
         const files = fs.readdirSync(workersDir);
@@ -135,7 +137,7 @@ export class Nomad {
         res.on('end', () => {
           const raw = Buffer.concat(chunks).toString('utf8');
           if (res.statusCode && res.statusCode >= 400) {
-            return reject(new Error(`Nomad HTTP ${res.statusCode}: ${raw}`));
+            return reject(new Error(`Dino HTTP ${res.statusCode}: ${raw}`));
           }
           try {
             const parsed = JSON.parse(raw);
@@ -148,7 +150,7 @@ export class Nomad {
 
       req.on('timeout', () => {
         req.destroy();
-        reject(new Error(`Nomad request timed out after ${timeoutMs}ms`));
+        reject(new Error(`Dino request timed out after ${timeoutMs}ms`));
       });
 
       req.on('error', (err) => reject(err));
@@ -401,5 +403,5 @@ export class Nomad {
   };
 }
 
-export const nomad = new Nomad();
-export default Nomad;
+export const dino = new Dino();
+export default Dino;

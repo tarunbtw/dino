@@ -1,8 +1,8 @@
 {
   "version": "0.41",
   "build": 1,
-  "url": "https://github.com/tarunbtw/nomad/releases/download/v0.41/Nomad-0.41.zip",
+  "url": "https://github.com/tarunbtw/dino/releases/download/v0.41/Dino-0.41.zip",
   "sha256": "5285dc29b3ea7475d16bb2ab27faa46b6ee4c358df2c7e7d481b6be6274c28a4",
-  "notes": "Nomad 0.41 release.",
+  "notes": "Dino 0.41 release.",
   "minimumSystemVersion": "13.0"
 }

@@ -1,14 +1,18 @@
 {
-  "name": "nomad-browser",
-  "version": "0.33.0",
-  "description": "Official TypeScript/JavaScript SDK for Nomad - the ultra-light native macOS agentic browser engine",
+  "name": "dino-browser",
+  "version": "0.41.0",
+  "description": "Official TypeScript/JavaScript SDK for Dino - the ultra-light native macOS agentic browser engine",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "bin": {
+    "dino": "bin/dino.js"
+  },
   "scripts": {
     "build": "tsc"
   },
   "keywords": [
-    "nomad",
+    "dino",
+    "dino-browser",
     "browser",
     "agent",
     "agentic",

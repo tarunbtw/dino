@@ -3,16 +3,16 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "nomad-browser"
-version = "0.33.0"
-description = "Official Python SDK for Nomad - the ultra-light native macOS agentic browser engine"
+name = "dino-browser"
+version = "0.41.0"
+description = "Official Python SDK for Dino - the ultra-light native macOS agentic browser engine"
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
 authors = [
-    {name = "Nomad Team"}
+    {name = "Dino Team"}
 ]
-keywords = ["nomad", "browser", "agent", "agentic", "webkit", "macos", "playwright", "puppeteer", "ai"]
+keywords = ["dino", "dino-browser", "browser", "agent", "agentic", "webkit", "macos", "playwright", "puppeteer", "ai"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: MacOS :: MacOS X",
@@ -21,4 +21,4 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/nomad-browser/nomad"
+Homepage = "https://github.com/tarunbtw/dino"
