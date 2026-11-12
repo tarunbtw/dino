@@ -1195,7 +1195,19 @@
                             y: Math.round(rect.top),
                             width: Math.round(rect.width),
                             height: Math.round(rect.height)
-                        }
+                        },
+                        box: [
+                            Math.round(rect.top),
+                            Math.round(rect.left),
+                            Math.round(rect.width),
+                            Math.round(rect.height)
+                        ],
+                        norm: [
+                            Math.max(0, Math.min(1000, Math.round((rect.top / Math.max(1, vpH)) * 1000))),
+                            Math.max(0, Math.min(1000, Math.round((rect.left / Math.max(1, vpW)) * 1000))),
+                            Math.max(0, Math.min(1000, Math.round(((rect.top + rect.height) / Math.max(1, vpH)) * 1000))),
+                            Math.max(0, Math.min(1000, Math.round(((rect.left + rect.width) / Math.max(1, vpW)) * 1000)))
+                        ]
                     });
                 }
 
@@ -1254,7 +1266,19 @@
                                             y: Math.round(sRect.top),
                                             width: Math.round(sRect.width),
                                             height: Math.round(sRect.height)
-                                        }
+                                        },
+                                        box: [
+                                            Math.round(sRect.top),
+                                            Math.round(sRect.left),
+                                            Math.round(sRect.width),
+                                            Math.round(sRect.height)
+                                        ],
+                                        norm: [
+                                            Math.max(0, Math.min(1000, Math.round((sRect.top / Math.max(1, vpH)) * 1000))),
+                                            Math.max(0, Math.min(1000, Math.round((sRect.left / Math.max(1, vpW)) * 1000))),
+                                            Math.max(0, Math.min(1000, Math.round(((sRect.top + sRect.height) / Math.max(1, vpH)) * 1000))),
+                                            Math.max(0, Math.min(1000, Math.round(((sRect.left + sRect.width) / Math.max(1, vpW)) * 1000)))
+                                        ]
                                     });
                                 }
                                 if (subEls.length > 0) {
@@ -1305,7 +1329,19 @@
                                     y: absY,
                                     width: fel.bounds.width,
                                     height: fel.bounds.height
-                                }
+                                },
+                                box: [
+                                    absY,
+                                    absX,
+                                    fel.bounds.width,
+                                    fel.bounds.height
+                                ],
+                                norm: [
+                                    Math.max(0, Math.min(1000, Math.round((absY / Math.max(1, vpH)) * 1000))),
+                                    Math.max(0, Math.min(1000, Math.round((absX / Math.max(1, vpW)) * 1000))),
+                                    Math.max(0, Math.min(1000, Math.round(((absY + fel.bounds.height) / Math.max(1, vpH)) * 1000))),
+                                    Math.max(0, Math.min(1000, Math.round(((absX + fel.bounds.width) / Math.max(1, vpW)) * 1000)))
+                                ]
                             });
                         }
                     }
@@ -1438,9 +1474,13 @@
                     'Interactive Elements (' + pagedItems.length + ' of ' + totalCount + (totalCount > limit ? ' | pass limit/offset for more' : '') + '):'
                 ];
 
+                var includeCoords = Boolean(options.coords || options.includeCoords);
                 for (var j = 0; j < pagedItems.length; j++) {
                     var item = pagedItems[j];
                     var desc = '[' + item.id + ']';
+                    if (includeCoords && item.norm) {
+                        desc += ' [' + item.norm.join(',') + ']';
+                    }
                     if (item.isNew) desc += ' [NEW]';
                     if (item.depth !== undefined && item.depth > 0) desc += ' (d=' + item.depth + ')';
                     if (item.rank) desc += ' #' + item.rank;

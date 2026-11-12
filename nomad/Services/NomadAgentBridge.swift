@@ -40,6 +40,8 @@ struct NomadElement: Codable {
     let value: String?
     let type: String?
     let bounds: NomadBounds
+    var box: [Int]?
+    var norm: [Int]?
     var className: String?
     var domId: String?
     var rank: String?
@@ -422,6 +424,7 @@ extension Tab {
         offset: Int = 0,
         viewportOnly: Bool = false,
         includeText: Bool = true,
+        includeCoords: Bool = false,
         role: String? = nil,
         text: String? = nil,
         target: String? = nil,
@@ -458,6 +461,7 @@ extension Tab {
         }
 
         var opts: [String: Any] = ["limit": limit, "offset": offset, "viewportOnly": viewportOnly, "includeText": includeText]
+        if includeCoords { opts["coords"] = true }
         if let r = role, !r.isEmpty { opts["role"] = r }
         if let txt = text, !txt.isEmpty { opts["text"] = txt }
         if let tgt = target, !tgt.isEmpty { opts["target"] = tgt }

@@ -6,6 +6,7 @@
 //
 
 import WebKit
+import Network
 
 /// Manages WebKit resources, configurations, and extension-readiness.
 enum WebKitPool {
@@ -28,6 +29,21 @@ enum WebKitPool {
             config.websiteDataStore = NomadProfileManager.websiteDataStore(for: .agent)
         } else {
             config.websiteDataStore = WKWebsiteDataStore.default()
+        }
+
+        if #available(macOS 14.0, *),
+           let proxyStr = NomadHeadlessManager.shared.proxyURLString,
+           let proxyURL = URL(string: proxyStr),
+           let host = proxyURL.host {
+            let port = UInt16(proxyURL.port ?? (proxyURL.scheme?.lowercased() == "socks5" ? 1080 : 8080))
+            let endpoint = NWEndpoint.hostPort(host: .init(host), port: .init(integerLiteral: port))
+            let proxyConfig: ProxyConfiguration
+            if proxyURL.scheme?.lowercased() == "socks5" {
+                proxyConfig = ProxyConfiguration(socksv5Proxy: endpoint)
+            } else {
+                proxyConfig = ProxyConfiguration(httpCONNECTProxy: endpoint, tlsOptions: nil)
+            }
+            config.websiteDataStore.proxyConfigurations = [proxyConfig]
         }
         ExtensionManager.shared.attach(config)
         
@@ -683,6 +699,7 @@ enum WebKitPool {
         })();
         """
         ucc.addUserScript(WKUserScript(source: framePiercerScript, injectionTime: .atDocumentStart, forMainFrameOnly: false))
+        ucc.addUserScript(WKUserScript(source: NomadDOMScript.core, injectionTime: .atDocumentEnd, forMainFrameOnly: false))
 
         return config
     }

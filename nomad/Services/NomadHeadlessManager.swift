@@ -48,6 +48,7 @@ final class NomadHeadlessManager: ObservableObject {
     var profile: NomadProfileType = .agent
     var idleTimeoutSeconds: TimeInterval = 60.0
     var autoReapEnabled: Bool = true
+    var proxyURLString: String? = nil
     private(set) var lastActivityDate: Date = Date()
     private var reaperTimer: Timer?
 
@@ -101,6 +102,13 @@ final class NomadHeadlessManager: ObservableObject {
             } else {
                 self.idleTimeoutSeconds = sec
             }
+        }
+
+        // Proxy configuration
+        if let idx = args.firstIndex(of: "--proxy"), idx + 1 < args.count {
+            self.proxyURLString = args[idx + 1]
+        } else if let envProxy = ProcessInfo.processInfo.environment["NOMAD_PROXY"] ?? ProcessInfo.processInfo.environment["ALL_PROXY"] ?? ProcessInfo.processInfo.environment["HTTPS_PROXY"] {
+            self.proxyURLString = envProxy
         }
     }
 

@@ -9,6 +9,7 @@ import Foundation
 import Network
 import AppKit
 import WebKit
+import PDFKit
 
 extension NomadAgentServer {
     func handlePerceptionRoute(method: String, cleanPath: String, bodyData: Data?, queryItem: (String) -> String?, connection: NWConnection, origin: String?) async -> Bool {
@@ -56,6 +57,47 @@ extension NomadAgentServer {
             }
 
             let isJsonMode = (mode == "json" || mode == "full")
+
+            let currentURL = activeTab.webView.url ?? activeTab.url
+            if let url = currentURL, url.pathExtension.lowercased() == "pdf" {
+                if let pdfDoc = PDFDocument(url: url) {
+                    let pageCount = pdfDoc.pageCount
+                    var pageStrings: [String] = []
+                    let maxPages = min(pageCount, 30)
+                    for i in 0..<maxPages {
+                        if let page = pdfDoc.page(at: i), let text = page.string?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty {
+                            pageStrings.append("### Page \(i + 1) of \(pageCount)\n\(text)")
+                        }
+                    }
+                    if pageStrings.isEmpty {
+                        pageStrings.append("[PDF Document with \(pageCount) page(s) has no extractable text layer or is scanned image]")
+                    }
+                    let title = (pdfDoc.documentAttributes?[PDFDocumentAttribute.titleAttribute] as? String) ?? url.lastPathComponent
+                    let body = """
+                    [Document: \(title) | Format: PDF | Pages: \(pageCount)]
+
+                    \(pageStrings.joined(separator: "\n\n"))
+                    """
+                    let fullSummary = "<!-- BEGIN UNTRUSTED WEB CONTENT (origin: \(url.absoluteString)) -->\n\(body)\n<!-- END UNTRUSTED WEB CONTENT -->"
+                    let tokenEst = max(10, fullSummary.count / 4)
+
+                    if isJsonMode {
+                        sendJSON(connection: connection, object: [
+                            "title": title,
+                            "url": url.absoluteString,
+                            "format": "pdf",
+                            "pages": pageCount,
+                            "elements": [],
+                            "summary": fullSummary,
+                            "tokenEstimate": tokenEst
+                        ], origin: origin)
+                    } else {
+                        sendResponse(connection: connection, status: "200 OK", body: fullSummary, origin: origin)
+                    }
+                    return true
+                }
+            }
+
             var limit: Int
             var snapshotWarning: String? = nil
             var isClamped = false
@@ -80,12 +122,15 @@ extension NomadAgentServer {
                 }
             }
 
+            let includeCoords = (queryItem("coords") == "true") || (queryItem("includeCoords") == "true") || (queryItem("box") == "true")
+
             do {
                 let snapshot = try await activeTab.getSemanticTree(
                     limit: limit,
                     offset: offset,
                     viewportOnly: viewportOnly,
                     includeText: includeText,
+                    includeCoords: includeCoords,
                     role: (roleFilter?.isEmpty == false) ? roleFilter : nil,
                     text: (textFilter?.isEmpty == false) ? textFilter : nil,
                     target: (target?.isEmpty == false) ? target : nil,

@@ -347,6 +347,7 @@ enum NomadCLIManager {
         var configuredPort: UInt16? = nil
         var configuredSocket: String? = nil
         var configuredProfile: String? = nil
+        var configuredProxy: String? = nil
         var configuredIdleTimeout: Double? = nil
         var noReap = false
         var stopWorkersOnly = false
@@ -451,6 +452,16 @@ enum NomadCLIManager {
                     exit(1)
                 }
 
+            case "--proxy":
+                i += 1
+                if i < rawArgs.count {
+                    configuredProxy = rawArgs[i]
+                    setenv("NOMAD_PROXY", rawArgs[i], 1)
+                } else {
+                    emitError("nomad: option '--proxy' requires a proxy URL (e.g. http://127.0.0.1:8080 or socks5://127.0.0.1:1080)")
+                    exit(1)
+                }
+
             case "--no-reap":
                 noReap = true
 
@@ -505,6 +516,10 @@ enum NomadCLIManager {
                     setenv("NOMAD_SOCKET_PATH", val, 1)
                 } else if token.hasPrefix("--profile=") {
                     configuredProfile = String(token.dropFirst(10))
+                } else if token.hasPrefix("--proxy=") {
+                    let val = String(token.dropFirst(8))
+                    configuredProxy = val
+                    setenv("NOMAD_PROXY", val, 1)
                 } else if token.hasPrefix("--idle-timeout=") {
                     if let sec = Double(token.dropFirst(15)) {
                         configuredIdleTimeout = sec
@@ -554,6 +569,7 @@ enum NomadCLIManager {
                 port: configuredPort,
                 socket: configuredSocket,
                 profile: configuredProfile,
+                proxy: configuredProxy,
                 idleTimeout: configuredIdleTimeout,
                 noReap: noReap
             )
@@ -583,6 +599,7 @@ enum NomadCLIManager {
             return handleHeadless(
                 isDaemonChild: isDaemonChild,
                 profile: configuredProfile,
+                proxy: configuredProxy,
                 idleTimeout: configuredIdleTimeout,
                 noReap: noReap
             )
@@ -690,6 +707,7 @@ enum NomadCLIManager {
         port: UInt16?,
         socket: String?,
         profile: String?,
+        proxy: String? = nil,
         idleTimeout: Double?,
         noReap: Bool
     ) {
@@ -711,6 +729,9 @@ enum NomadCLIManager {
         }
         if let s = socket {
             childArgs.append(contentsOf: ["--socket", s])
+        }
+        if let prx = proxy {
+            childArgs.append(contentsOf: ["--proxy", prx])
         }
         if noReap {
             childArgs.append("--no-reap")
@@ -898,11 +919,16 @@ enum NomadCLIManager {
     private static func handleHeadless(
         isDaemonChild: Bool,
         profile: String?,
+        proxy: String? = nil,
         idleTimeout: Double?,
         noReap: Bool
     ) -> Bool {
         NomadHeadlessManager.isHeadless = true
         NSApplication.shared.setActivationPolicy(.accessory)
+
+        if let prx = proxy {
+            NomadHeadlessManager.shared.proxyURLString = prx
+        }
 
         if let profName = profile, let p = NomadProfileType(rawValue: profName) {
             NomadHeadlessManager.shared.profile = p

@@ -78,8 +78,8 @@ enum NomadCLIClient {
     ]
 
     private static let allowedCommandOptions: [String: Set<String>] = [
-        "snap": ["--json", "-j", "--all", "--viewport", "-v", "--viewportOnly", "--target", "-t", "--role", "-r", "--text", "--depth", "--limit", "--offset", "--track", "--unrestricted", "--force", "-u", "--tab", "--labeled", "-l"],
-        "snapshot": ["--json", "-j", "--all", "--viewport", "-v", "--viewportOnly", "--target", "-t", "--role", "-r", "--text", "--depth", "--limit", "--offset", "--track", "--unrestricted", "--force", "-u", "--tab", "--labeled", "-l"],
+        "snap": ["--json", "-j", "--all", "--viewport", "-v", "--viewportOnly", "--target", "-t", "--role", "-r", "--text", "--depth", "--limit", "--offset", "--track", "--unrestricted", "--force", "-u", "--tab", "--labeled", "-l", "--coords"],
+        "snapshot": ["--json", "-j", "--all", "--viewport", "-v", "--viewportOnly", "--target", "-t", "--role", "-r", "--text", "--depth", "--limit", "--offset", "--track", "--unrestricted", "--force", "-u", "--tab", "--labeled", "-l", "--coords"],
         "open": ["--allow-local-files", "--local", "-l", "--wait", "-w", "--tab"],
         "nav": ["--allow-local-files", "--local", "-l", "--wait", "-w", "--tab"],
         "navigate": ["--allow-local-files", "--local", "-l", "--wait", "-w", "--tab"],
@@ -1012,6 +1012,7 @@ enum NomadCLIClient {
 
             Options:
               --profile <type>         Profile partition: agent (default), ephemeral, user
+              --proxy <url>            HTTP or SOCKS5 proxy URL (e.g. http://127.0.0.1:8080)
               --idle-timeout <s>       Auto-reap idle countdown in seconds (default: 60)
               --no-reap                Disable auto-reaping idle shutdown
               --port <port>            Explicit loopback HTTP port (default: auto-allocated)
@@ -1130,6 +1131,9 @@ enum NomadCLIClient {
         }
         if args.boolFlag(["--track"]) {
             queryItems.append("track=true")
+        }
+        if args.boolFlag(["--coords"]) {
+            queryItems.append("coords=true")
         }
         if args.boolFlag(["--unrestricted", "--force", "-u"]) {
             queryItems.append("unrestricted=true")
