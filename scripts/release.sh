@@ -24,6 +24,24 @@ RELEASE_SUCCESS=false
 ZIP_PATH=""
 BUILT_APP=""
 
+cleanup_build_artifacts() {
+  if [ -x "$LSREGISTER" ]; then
+    for target_dir in "$PROJECT_ROOT/build" "$PROJECT_ROOT/dist/staging" "$HOME/Library/Developer/Xcode/DerivedData"/dino-*; do
+      if [ -d "$target_dir" ]; then
+        find "$target_dir" -name "*.app" -type d -prune 2>/dev/null | while read -r app_path; do
+          if [ -n "$app_path" ]; then
+            "$LSREGISTER" -u "$app_path" 2>/dev/null || true
+          fi
+        done
+      fi
+    done
+    "$LSREGISTER" -gc 2>/dev/null || true
+  fi
+
+  rm -rf "$PROJECT_ROOT/dist/staging" "$PROJECT_ROOT/build"
+  rm -rf "$HOME/Library/Developer/Xcode/DerivedData"/dino-*
+}
+
 rollback_on_failure() {
   if [ "$RELEASE_SUCCESS" = "false" ]; then
     echo "" >&2
@@ -34,13 +52,10 @@ rollback_on_failure() {
     if [ -d "$TAP_DIR" ]; then
       (cd "$TAP_DIR" && git checkout -- Casks/dino.rb 2>/dev/null || true)
     fi
-    # Clean staging, packaging, and build directories
-    rm -rf "$PROJECT_ROOT/dist/staging" "$PROJECT_ROOT/build"
+    # Unregister and clean staging, build, and DerivedData directories
+    cleanup_build_artifacts
     if [ -n "$ZIP_PATH" ] && [ -f "$ZIP_PATH" ]; then
       rm -f "$ZIP_PATH"
-    fi
-    if [ -n "$BUILT_APP" ] && [ -f "$LSREGISTER" ]; then
-      "$LSREGISTER" -u "$BUILT_APP" 2>/dev/null || true
     fi
     echo "==> Working trees cleanly restored to pre-release state." >&2
   fi
@@ -98,9 +113,9 @@ sed -i '' -E "s/version \"[0-9.]+\"/version \"${NEW_VERSION}\"/g" packaging/home
 sed -i '' -E "s/version \"[0-9.]+\"/version \"${NEW_VERSION}\"/g" "$TAP_DIR/Casks/dino.rb"
 
 # 4. Clean & Build Release via Xcode (Zero Warnings & Zero Errors Enforcement)
-echo "==> Compiling Release binary with Xcode (strict: zero warnings, zero errors)..."
+echo "==> Cleaning old build artifacts and preparing fresh build directory..."
+cleanup_build_artifacts
 BUILD_DIR="$PROJECT_ROOT/build/DerivedData"
-rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
 BUILD_LOG="$BUILD_DIR/xcodebuild.log"
 
@@ -168,21 +183,8 @@ echo "==> Computed SHA-256: ${SHA256}"
 
 # 8. Unregister and delete uncompressed build artifacts
 # Prevents macOS LaunchServices and Spotlight from indexing duplicate Dino.app instances
-echo "==> Unregistering intermediate build artifacts from LaunchServices..."
-LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Versions/Current/Frameworks/LaunchServices.framework/Versions/Current/Support/lsregister"
-if [ -f "$LSREGISTER" ]; then
-  "$LSREGISTER" -u "$STAGING_DIR/Dino.app" 2>/dev/null || true
-  "$LSREGISTER" -u "$BUILT_APP" 2>/dev/null || true
-  # Also unregister any stray DerivedData builds
-  for stray in ~/Library/Developer/Xcode/DerivedData/*-*/Build/Products/*/*.app; do
-    if [ -d "$stray" ]; then
-      "$LSREGISTER" -u "$stray" 2>/dev/null || true
-    fi
-  done
-fi
-rm -rf "$STAGING_DIR"
-rm -rf "$PROJECT_ROOT/build"
-rm -rf ~/Library/Developer/Xcode/DerivedData/dino-*
+echo "==> Unregistering intermediate build artifacts and deleting build directories..."
+cleanup_build_artifacts
 
 # 9. Update Checksums in Casks & Sync appcast.json
 echo "==> Updating checksum in packaging/homebrew/dino.rb and tap..."
