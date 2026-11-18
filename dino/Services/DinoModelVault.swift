@@ -3,12 +3,14 @@
 //  dino
 //
 //  Created for Dino Browser.
-//  Hardware-backed model API key management via macOS Keychain (kSecClassGenericPassword).
-//  Zero plaintext disk storage. Supports Gemini, Claude, OpenAI, and Local Ollama.
+//  Zero-prompt, user-private model API key vault for Google Gemini, Anthropic Claude,
+//  OpenAI, and Local Ollama.
+//  Stored in ~/Library/Application Support/dino/agent_vault.json with POSIX 0600 permissions
+//  (user-private, encrypted at rest by FileVault).
+//  Zero Keychain authorization dialogs across binary updates and ad-hoc builds.
 //
 
 import Foundation
-import Security
 
 enum DinoModelProvider: String, CaseIterable, Identifiable, Codable {
     case gemini = "gemini"
@@ -43,9 +45,16 @@ enum DinoModelProvider: String, CaseIterable, Identifiable, Codable {
 
 final class DinoModelVault {
     static let shared = DinoModelVault()
-    private static let serviceLabel = "DinoAgentModel"
+    private var memoryCache: [DinoModelProvider: String] = [:]
+    private var isLoaded: Bool = false
 
-    private init() {}
+    private var vaultURL: URL {
+        FileManager.dinoApplicationSupportDirectory.appendingPathComponent("agent_vault.json")
+    }
+
+    private init() {
+        loadVault()
+    }
 
     // MARK: - Active Selection & Preferences
 
@@ -80,12 +89,12 @@ final class DinoModelVault {
         }
     }
 
-    // MARK: - Keychain CRUD
+    // MARK: - Key Storage & Retrieval (Zero-Prompt, User-Private 0600)
 
     func key(for provider: DinoModelProvider) -> String? {
         guard provider.requiresAPIKey else { return nil }
 
-        // Also check environment variable overrides (e.g. GEMINI_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY)
+        // 1. Environment variable override
         switch provider {
         case .gemini:
             if let env = ProcessInfo.processInfo.environment["GEMINI_API_KEY"], !env.isEmpty { return env }
@@ -97,66 +106,76 @@ final class DinoModelVault {
             break
         }
 
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.serviceLabel,
-            kSecAttrAccount as String: provider.rawValue,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
-
-        var result: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        guard status == errSecSuccess, let data = result as? Data else {
-            return nil
+        // 2. In-memory cache
+        if !isLoaded {
+            loadVault()
         }
-        return String(data: data, encoding: .utf8)
+        return memoryCache[provider]
+    }
+
+    func hasKey(for provider: DinoModelProvider) -> Bool {
+        if !provider.requiresAPIKey { return true }
+        return key(for: provider) != nil
     }
 
     @discardableResult
     func saveKey(_ secret: String, for provider: DinoModelProvider) -> Bool {
         let clean = secret.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !clean.isEmpty, let data = clean.data(using: .utf8) else {
+        guard !clean.isEmpty else {
             return deleteKey(for: provider)
         }
 
-        // Try updating
-        let updateQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.serviceLabel,
-            kSecAttrAccount as String: provider.rawValue
-        ]
-        let updateAttrs: [String: Any] = [
-            kSecValueData as String: data
-        ]
-
-        if SecItemUpdate(updateQuery as CFDictionary, updateAttrs as CFDictionary) == errSecSuccess {
-            return true
-        }
-
-        // Add fresh item
-        let addQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.serviceLabel,
-            kSecAttrAccount as String: provider.rawValue,
-            kSecValueData as String: data
-        ]
-        return SecItemAdd(addQuery as CFDictionary, nil) == errSecSuccess
+        memoryCache[provider] = clean
+        persistVault()
+        return true
     }
 
     @discardableResult
     func deleteKey(for provider: DinoModelProvider) -> Bool {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.serviceLabel,
-            kSecAttrAccount as String: provider.rawValue
-        ]
-        let status = SecItemDelete(query as CFDictionary)
-        return status == errSecSuccess || status == errSecItemNotFound
+        memoryCache.removeValue(forKey: provider)
+        persistVault()
+        return true
     }
 
     func isConfigured(provider: DinoModelProvider) -> Bool {
-        if provider == .ollama { return true }
-        return key(for: provider) != nil
+        hasKey(for: provider)
+    }
+
+    // MARK: - Persistence (User-Private POSIX 0600)
+
+    private func loadVault() {
+        isLoaded = true
+        let url = vaultURL
+        guard FileManager.default.fileExists(atPath: url.path),
+              let data = try? Data(contentsOf: url),
+              let dict = (try? JSONSerialization.jsonObject(with: data)) as? [String: String] else {
+            return
+        }
+
+        for (raw, key) in dict {
+            if let provider = DinoModelProvider(rawValue: raw) {
+                memoryCache[provider] = key
+            }
+        }
+    }
+
+    private func persistVault() {
+        var rawDict: [String: String] = [:]
+        for (provider, key) in memoryCache {
+            rawDict[provider.rawValue] = key
+        }
+
+        guard let data = try? JSONSerialization.data(withJSONObject: rawDict, options: [.prettyPrinted]) else { return }
+
+        let url = vaultURL
+        let folder = url.deletingLastPathComponent()
+        if !FileManager.default.fileExists(atPath: folder.path) {
+            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        }
+
+        // Save with 0600 permissions (read/write only by user)
+        FileManager.default.createFile(atPath: url.path, contents: data, attributes: [
+            .posixPermissions: 0o600
+        ])
     }
 }

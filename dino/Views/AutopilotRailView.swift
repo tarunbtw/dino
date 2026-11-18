@@ -96,9 +96,9 @@ struct AutopilotRailView: View {
             }
             .menuStyle(.borderlessButton)
 
-            // Keychain Key Status Badge
+            // Model Key Status Badge
             if vault.activeProvider.requiresAPIKey {
-                let hasKey = vault.key(for: vault.activeProvider) != nil
+                let hasKey = vault.hasKey(for: vault.activeProvider)
                 Button(action: {
                     tempAPIKey = vault.key(for: vault.activeProvider) ?? ""
                     isShowingKeyModal = true
@@ -117,7 +117,7 @@ struct AutopilotRailView: View {
                     .background(Color.white.opacity(0.04), in: Capsule())
                 }
                 .buttonStyle(.plain)
-                .help(hasKey ? "API Key is set in Keychain. Click to change." : "Click to enter your API key")
+                .help(hasKey ? "API Key is configured. Click to change." : "Click to enter your API key")
             }
 
             Spacer()
@@ -589,7 +589,7 @@ struct AutopilotRailView: View {
         }
 
         // Check if API key is required and missing
-        if vault.activeProvider.requiresAPIKey && vault.key(for: vault.activeProvider) == nil {
+        if vault.activeProvider.requiresAPIKey && !vault.hasKey(for: vault.activeProvider) {
             tempAPIKey = ""
             isShowingKeyModal = true
             return
@@ -620,7 +620,7 @@ struct AutopilotRailView: View {
             }
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("API Key (Stored in macOS Keychain)")
+                Text("API Key (Stored locally in private profile)")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.secondary)
 
@@ -628,13 +628,13 @@ struct AutopilotRailView: View {
                     .textFieldStyle(.roundedBorder)
                     .font(.system(size: 12))
 
-                Text("Your key is stored hardware-encrypted in your Mac's Keychain and never leaves your computer.")
+                Text("Stored with private 0600 permissions in ~/Library/Application Support/dino/agent_vault.json. Zero Keychain popups.")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
             }
 
             HStack {
-                if vault.key(for: vault.activeProvider) != nil {
+                if vault.hasKey(for: vault.activeProvider) {
                     Button("Remove Key", role: .destructive) {
                         vault.deleteKey(for: vault.activeProvider)
                         tempAPIKey = ""
