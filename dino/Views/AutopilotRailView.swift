@@ -2,68 +2,52 @@
 //  AutopilotRailView.swift
 //  dino
 //
-//  Created by tarun on 15/10/26.
+//  Created for Dino Browser.
+//  In-app Autonomous Copilot & Assistant Drawer (⌘⇧A).
+//  Supports dual-mode autonomous actions, live ReAct thought streaming,
+//  non-stealing virtual mouse tracking, zero-token playbooks, and HITL safety gates.
 //
 
 import SwiftUI
 import AppKit
-import Foundation
 
-struct AutopilotLogEntry: Identifiable, Hashable {
-    let id: UUID
-    let timestamp: Date
-    let text: String
-    let isSuccess: Bool
-
-    init(text: String, isSuccess: Bool) {
-        self.id = UUID()
-        self.timestamp = Date()
-        self.text = text
-        self.isSuccess = isSuccess
-    }
-}
-
-/// Slide-over assistant drawer (⌘⇧A) providing live natural language page instructions,
-/// deterministic zero-token macro playbook recording/replaying, and HITL security guardrails.
 struct AutopilotRailView: View {
     @ObservedObject var store: BrowserStore
+    @ObservedObject private var runtime = DinoAgentRuntime.shared
     @ObservedObject private var playbookManager = AgentPlaybookManager.shared
     @ObservedObject private var settings = SettingsStore.shared
+    private let vault = DinoModelVault.shared
 
-    @State private var newPlaybookName: String = ""
     @State private var instructionInput: String = ""
-    @State private var isExecuting: Bool = false
+    @State private var hitlInput: String = ""
+    @State private var isShowingKeyModal: Bool = false
+    @State private var tempAPIKey: String = ""
+    @State private var newPlaybookName: String = ""
     @State private var isReplayingPlaybook: String? = nil
-    @State private var statusLogs: [AutopilotLogEntry] = []
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header Bar
             headerBar
-
             Divider()
 
             ScrollView(.vertical, showsIndicators: false) {
-                VStack(spacing: 16) {
-                    // Security & HITL Status Banner
-                    hitlSection
+                VStack(spacing: 14) {
+                    modelSelectorCard
+                    activeTabContextCard
 
-                    // Active Tab Context Card
-                    tabContextCard
+                    if case .waitingHITL(let reason, let question) = runtime.status {
+                        hitlInterventionCard(reason: reason, question: question)
+                    }
 
-                    // Macro Playbooks Section
-                    playbooksSection
+                    autonomousExecutionCard
 
-                    // Intent Action Section
-                    intentSection
-
-                    // Live Log Feed
-                    logFeedSection
+                    macroPlaybooksSection
+                    stepHistorySection
                 }
                 .padding(14)
             }
         }
-        .frame(width: 320)
+        .frame(width: 330)
         .background(
             Color(nsColor: .windowBackgroundColor)
                 .opacity(0.97)
@@ -75,6 +59,9 @@ struct AutopilotRailView: View {
                 .foregroundStyle(Color.primary.opacity(0.08)),
             alignment: .leading
         )
+        .sheet(isPresented: $isShowingKeyModal) {
+            apiKeyModalView
+        }
     }
 
     // MARK: - Header Bar
@@ -85,10 +72,24 @@ struct AutopilotRailView: View {
                 .font(.system(size: 13, weight: .bold))
                 .foregroundStyle(settings.accentColor)
 
-            Text("Autopilot")
+            Text("Dino Copilot")
                 .font(.system(size: 13, weight: .semibold))
 
             Spacer()
+
+            if runtime.status.isRunning {
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(Color.green)
+                        .frame(width: 6, height: 6)
+                    Text("Step \(runtime.stepCount)")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color.green.opacity(0.12), in: Capsule())
+            }
 
             Button(action: {
                 withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
@@ -102,75 +103,76 @@ struct AutopilotRailView: View {
                     .background(Color.primary.opacity(0.05), in: Circle())
             }
             .buttonStyle(.plain)
-            .help("Close Autopilot Rail (⌘⇧A)")
+            .help("Close Copilot Drawer (⌘⇧A)")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
     }
 
-    // MARK: - HITL Security Status
+    // MARK: - Model Selector Card
 
-    @ViewBuilder
-    private var hitlSection: some View {
-        if let tab = store.activeTab {
-            if tab.isHitlActive {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "hand.raised.fill")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(.orange)
-                        Text("Security Challenge Active")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.orange)
-                    }
-
-                    if let type = tab.hitlChallengeType {
-                        Text("Type: \(type)")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Button("Check & Resume") {
-                        Task {
-                            let status = await tab.checkHitlStatus()
-                            if status.resolved {
-                                withAnimation {
-                                    tab.isHitlActive = false
-                                    tab.hitlChallengeType = nil
-                                }
-                                addLog("Challenge resolved. Automation resumed.", isSuccess: true)
-                            } else {
-                                addLog("Challenge still pending verification.", isSuccess: false)
+    private var modelSelectorCard: some View {
+        HStack {
+            Menu {
+                ForEach(DinoModelProvider.allCases) { provider in
+                    Button(action: {
+                        vault.activeProvider = provider
+                    }) {
+                        HStack {
+                            Text(provider.displayName)
+                            if vault.activeProvider == provider {
+                                Image(systemName: "checkmark")
                             }
                         }
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    .tint(.orange)
                 }
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.orange.opacity(0.25), lineWidth: 1))
-            } else {
+            } label: {
                 HStack(spacing: 6) {
-                    Circle()
-                        .fill(Color.green)
-                        .frame(width: 6, height: 6)
-                    Text("HITL Guard Active (Auto-Detecting)")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.secondary)
+                    Image(systemName: "cpu")
+                        .font(.system(size: 11))
+                    Text(vault.activeProvider.displayName)
+                        .font(.system(size: 11, weight: .medium))
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 9))
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            }
+            .menuStyle(.borderlessButton)
+
+            Spacer()
+
+            if vault.activeProvider.requiresAPIKey {
+                let hasKey = vault.key(for: vault.activeProvider) != nil
+                Button(action: {
+                    tempAPIKey = vault.key(for: vault.activeProvider) ?? ""
+                    isShowingKeyModal = true
+                }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: hasKey ? "key.fill" : "exclamationmark.triangle.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(hasKey ? Color.green : Color.orange)
+                        Text(hasKey ? "Key Set" : "Add Key")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(hasKey ? Color.secondary : Color.orange)
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(hasKey ? Color.primary.opacity(0.04) : Color.orange.opacity(0.12), in: Capsule())
+                }
+                .buttonStyle(.plain)
             }
         }
+        .padding(10)
+        .background(Color.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
-    // MARK: - Active Tab Context Card
+    // MARK: - Active Tab Context
 
-    private var tabContextCard: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("ACTIVE TARGET")
+    private var activeTabContextCard: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("TARGET PAGE")
                 .font(.system(size: 9, weight: .bold))
                 .foregroundStyle(.secondary)
 
@@ -188,12 +190,173 @@ struct AutopilotRailView: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(Color.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    // MARK: - HITL Intervention Card
+
+    private func hitlInterventionCard(reason: String, question: String?) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "hand.raised.fill")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.orange)
+                Text("Human Confirmation Needed")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.orange)
+            }
+
+            Text(question ?? reason)
+                .font(.system(size: 11))
+                .foregroundStyle(.primary)
+
+            if question != nil {
+                HStack(spacing: 6) {
+                    TextField("Your answer...", text: $hitlInput)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 11))
+
+                    Button("Submit") {
+                        let text = hitlInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                        hitlInput = ""
+                        runtime.resolveHITL(with: text)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                }
+            } else {
+                HStack(spacing: 8) {
+                    Button("Approve Action") {
+                        runtime.resolveHITL()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .tint(.orange)
+
+                    Button("Abort") {
+                        runtime.abort()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.orange.opacity(0.3), lineWidth: 1))
+    }
+
+    // MARK: - Autonomous Execution Card
+
+    private var autonomousExecutionCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("AUTONOMOUS ACTION")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 6) {
+                TextField("e.g. Fill this form with my resume details", text: $instructionInput)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 11))
+                    .disabled(runtime.status.isRunning)
+                    .onSubmit {
+                        submitInstruction()
+                    }
+
+                if runtime.status.isRunning {
+                    Button(action: { runtime.abort() }) {
+                        Image(systemName: "stop.circle.fill")
+                            .font(.system(size: 16))
+                            .foregroundStyle(.red)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Stop execution")
+                } else {
+                    Button(action: submitInstruction) {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.system(size: 16))
+                            .foregroundStyle(settings.accentColor)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(instructionInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+
+            // Quick suggestion chips
+            if !runtime.status.isRunning {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        suggestionChip("Fill form")
+                        suggestionChip("Summarize page")
+                        suggestionChip("Find checkout button")
+                        suggestionChip("Extract table")
+                    }
+                }
+            }
+
+            // Live Thought Stream Bubble
+            if !runtime.currentThought.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 4) {
+                        if runtime.status.isRunning {
+                            ProgressView()
+                                .controlSize(.mini)
+                        } else {
+                            Image(systemName: "brain.head.profile")
+                                .font(.system(size: 9))
+                                .foregroundStyle(settings.accentColor)
+                        }
+                        Text(runtime.status.isRunning ? "Dino is thinking..." : "Reasoning")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Text(runtime.currentThought)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func suggestionChip(_ label: String) -> some View {
+        Button(action: {
+            instructionInput = label
+            submitInstruction()
+        }) {
+            Text(label)
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(Color.primary.opacity(0.05), in: Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func submitInstruction() {
+        let text = instructionInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, let tab = store.activeTab else { return }
+
+        if vault.activeProvider.requiresAPIKey && vault.key(for: vault.activeProvider) == nil {
+            tempAPIKey = ""
+            isShowingKeyModal = true
+            return
+        }
+
+        instructionInput = ""
+        runtime.startTask(goal: text, tab: tab)
     }
 
     // MARK: - Macro Playbooks Section
 
-    private var playbooksSection: some View {
+    private var macroPlaybooksSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("MACRO PLAYBOOKS")
@@ -222,8 +385,7 @@ struct AutopilotRailView: View {
                     Spacer()
 
                     Button("Save") {
-                        let actions = playbookManager.stopRecording()
-                        addLog("Saved '\(playbookManager.activeRecordingName)' (\(actions.count) actions)", isSuccess: true)
+                        _ = playbookManager.stopRecording()
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
@@ -240,7 +402,6 @@ struct AutopilotRailView: View {
                     Button("Record") {
                         let name = newPlaybookName.trimmingCharacters(in: .whitespacesAndNewlines)
                         playbookManager.startRecording(name: name.isEmpty ? "playbook" : name)
-                        addLog("Started recording playbook '\(playbookManager.activeRecordingName)'", isSuccess: true)
                         newPlaybookName = ""
                     }
                     .controlSize(.small)
@@ -248,59 +409,42 @@ struct AutopilotRailView: View {
             }
 
             // Saved playbooks list
-            if !playbookManager.savedPlaybookNames.isEmpty {
+            let names = playbookManager.savedPlaybookNames
+            if !names.isEmpty {
                 VStack(spacing: 4) {
-                    ForEach(playbookManager.savedPlaybookNames, id: \.self) { name in
-                        HStack(spacing: 6) {
-                            Image(systemName: "bolt.fill")
-                                .font(.system(size: 9))
-                                .foregroundStyle(settings.accentColor)
-
+                    ForEach(names, id: \.self) { name in
+                        HStack {
                             Text(name)
                                 .font(.system(size: 11))
                                 .lineLimit(1)
 
                             Spacer()
 
-                            if isReplayingPlaybook == name {
-                                ProgressView()
-                                    .controlSize(.small)
-                            } else {
-                                Button(action: {
-                                    guard let tab = store.activeTab,
-                                          let actions = playbookManager.load(name: name) else { return }
-                                    Task {
-                                        isReplayingPlaybook = name
-                                        addLog("Replaying '\(name)' (\(actions.count) steps)...", isSuccess: true)
-                                        let res = try? await playbookManager.replay(actions: actions, on: tab)
-                                        isReplayingPlaybook = nil
-                                        if res?.success == true {
-                                            addLog("Playbook '\(name)' completed successfully (\(res?.executed ?? 0) steps, 0 tokens)", isSuccess: true)
-                                        } else {
-                                            addLog("Playbook '\(name)' failed at step \(res?.executed ?? 0): \(res?.error ?? "Unknown error")", isSuccess: false)
-                                        }
-                                    }
-                                }) {
-                                    Image(systemName: "play.fill")
-                                        .font(.system(size: 9))
+                            Button(action: {
+                                guard let tab = store.activeTab,
+                                      let actions = playbookManager.load(name: name) else { return }
+                                Task {
+                                    isReplayingPlaybook = name
+                                    _ = try? await playbookManager.replay(actions: actions, on: tab)
+                                    isReplayingPlaybook = nil
                                 }
-                                .buttonStyle(.plain)
-                                .help("Run Playbook")
-
-                                Button(action: {
-                                    playbookManager.delete(name: name)
-                                    addLog("Deleted playbook '\(name)'", isSuccess: true)
-                                }) {
-                                    Image(systemName: "trash")
-                                        .font(.system(size: 9))
-                                        .foregroundStyle(.secondary)
-                                }
-                                .buttonStyle(.plain)
-                                .help("Delete Playbook")
+                            }) {
+                                Image(systemName: "play.fill")
+                                    .font(.system(size: 9))
                             }
+                            .buttonStyle(.plain)
+
+                            Button(action: {
+                                playbookManager.delete(name: name)
+                            }) {
+                                Image(systemName: "trash")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
                         }
                         .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
+                        .padding(.vertical, 4)
                         .background(Color.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                     }
                 }
@@ -308,128 +452,48 @@ struct AutopilotRailView: View {
         }
     }
 
-    // MARK: - Natural Language Intent Section
+    // MARK: - Step History Section
 
-    private var intentSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("PAGE INSTRUCTION")
-                .font(.system(size: 9, weight: .bold))
-                .foregroundStyle(.secondary)
-
-            HStack(spacing: 6) {
-                TextField("e.g. Click checkout button", text: $instructionInput)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 11))
-                    .onSubmit {
-                        executeInstruction()
-                    }
-
-                Button(action: executeInstruction) {
-                    if isExecuting {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Image(systemName: "arrow.up.circle.fill")
-                            .font(.system(size: 14))
-                            .foregroundStyle(settings.accentColor)
-                    }
-                }
-                .buttonStyle(.plain)
-                .disabled(isExecuting || instructionInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-
-            HStack(spacing: 6) {
-                Button("Inspect Marks") {
-                    guard let tab = store.activeTab else { return }
-                    Task {
-                        _ = try? await tab.captureScreenshot(labeled: true)
-                        addLog("Labeled marks generated for page", isSuccess: true)
-                    }
-                }
-                .controlSize(.small)
-
-                Button("Page Diff") {
-                    guard let tab = store.activeTab else { return }
-                    Task {
-                        if let diff = try? await tab.getDiff(viewportOnly: true),
-                           let summary = diff["summary"] as? String {
-                            addLog("DOM Diff: \(summary.prefix(80))...", isSuccess: true)
-                        }
-                    }
-                }
-                .controlSize(.small)
-            }
-        }
-    }
-
-    private func executeInstruction() {
-        let text = instructionInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, let tab = store.activeTab else { return }
-        isExecuting = true
-        addLog("Resolving intent: \"\(text)\"...", isSuccess: true)
-
-        Task {
-            do {
-                let match = try await tab.findSemantic(query: text, role: nil, viewportOnly: true)
-                guard let ref = match["ref"] as? String else {
-                    addLog("No element matched intent: \"\(text)\"", isSuccess: false)
-                    isExecuting = false
-                    return
-                }
-
-                let action = DinoAction(action: "click", target: ref)
-                let result = try await tab.performAction(action)
-                if result.success {
-                    addLog("Successfully clicked [\(ref)] for intent \"\(text)\"", isSuccess: true)
-                    instructionInput = ""
-                } else {
-                    addLog("Action failed on [\(ref)]: \(result.message)", isSuccess: false)
-                }
-            } catch {
-                addLog("Execution error: \(error.localizedDescription)", isSuccess: false)
-            }
-            isExecuting = false
-        }
-    }
-
-    // MARK: - Live Log Feed
-
-    private var logFeedSection: some View {
+    private var stepHistorySection: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("ACTIVITY LOG")
+                Text("STEP HISTORY")
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(.secondary)
 
                 Spacer()
 
-                if !statusLogs.isEmpty {
-                    Button("Clear") {
-                        statusLogs.removeAll()
-                    }
-                    .font(.system(size: 9))
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
+                if !runtime.stepLogs.isEmpty {
+                    Text("\(runtime.stepLogs.count) steps")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tertiary)
                 }
             }
 
-            if statusLogs.isEmpty {
-                Text("No recent activity")
+            if runtime.stepLogs.isEmpty {
+                Text("No actions taken yet.")
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
                     .padding(.vertical, 4)
             } else {
                 VStack(alignment: .leading, spacing: 4) {
-                    ForEach(statusLogs) { entry in
-                        HStack(alignment: .top, spacing: 4) {
-                            Circle()
-                                .fill(entry.isSuccess ? Color.green : Color.red)
-                                .frame(width: 5, height: 5)
-                                .padding(.top, 3)
+                    ForEach(runtime.stepLogs) { log in
+                        HStack(alignment: .top, spacing: 6) {
+                            Text("\(log.stepNumber).")
+                                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 16, alignment: .leading)
 
-                            Text(entry.text)
-                                .font(.system(size: 10))
-                                .foregroundStyle(entry.isSuccess ? Color.primary : Color.red)
-                                .fixedSize(horizontal: false, vertical: true)
+                            Circle()
+                                .fill(log.isSuccess ? Color.green : Color.red)
+                                .frame(width: 5, height: 5)
+                                .padding(.top, 4)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(log.actionDescription)
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundStyle(log.isSuccess ? Color.primary : Color.red)
+                            }
                         }
                     }
                 }
@@ -440,12 +504,61 @@ struct AutopilotRailView: View {
         }
     }
 
-    private func addLog(_ message: String, isSuccess: Bool) {
-        withAnimation(.easeOut(duration: 0.15)) {
-            statusLogs.insert(AutopilotLogEntry(text: message, isSuccess: isSuccess), at: 0)
-            if statusLogs.count > 25 {
-                statusLogs.removeLast()
+    // MARK: - API Key Configuration Modal
+
+    private var apiKeyModalView: some View {
+        VStack(spacing: 16) {
+            HStack {
+                Image(systemName: "key.fill")
+                    .font(.system(size: 16))
+                    .foregroundStyle(settings.accentColor)
+
+                Text("Configure \(vault.activeProvider.displayName)")
+                    .font(.system(size: 14, weight: .semibold))
+
+                Spacer()
+
+                Button("Done") {
+                    isShowingKeyModal = false
+                }
+                .controlSize(.small)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("API Key (Stored in macOS Keychain)")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+
+                SecureField("Enter API Key...", text: $tempAPIKey)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 12))
+
+                Text("Your key is stored hardware-encrypted in your Mac's Keychain and never leaves your computer.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+            }
+
+            HStack {
+                if vault.key(for: vault.activeProvider) != nil {
+                    Button("Remove Key", role: .destructive) {
+                        vault.deleteKey(for: vault.activeProvider)
+                        tempAPIKey = ""
+                        isShowingKeyModal = false
+                    }
+                    .controlSize(.small)
+                }
+
+                Spacer()
+
+                Button("Save Key") {
+                    vault.saveKey(tempAPIKey, for: vault.activeProvider)
+                    isShowingKeyModal = false
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
             }
         }
+        .padding(20)
+        .frame(width: 380)
     }
 }

@@ -105,6 +105,14 @@ struct BrowserView: View {
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: Theme.pageCornerRadius, style: .continuous))
+            .overlay {
+                if store.activeTab?.isAgentDriving == true {
+                    RoundedRectangle(cornerRadius: Theme.pageCornerRadius, style: .continuous)
+                        .strokeBorder(Color(hex: 0x023121, opacity: 0.85), lineWidth: 2.5)
+                        .shadow(color: Color(hex: 0x023121, opacity: 0.45), radius: 8)
+                        .allowsHitTesting(false)
+                }
+            }
             .padding(.top, Theme.pageInset + store.menuBarDrop)
             .padding([.trailing, .bottom], Theme.pageInset)
             .padding(.leading, leadingPad)

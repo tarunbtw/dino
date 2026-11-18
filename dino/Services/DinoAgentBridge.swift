@@ -895,7 +895,7 @@ extension Tab {
                 }
             }
             if let up = upEvent { webView.mouseUp(with: up) }
-            _ = try? await webView.evaluateJavaScript("if (window.__dino && window.__dino.updateVirtualCursor) window.__dino.updateVirtualCursor(\(pt.x), \(pt.y));")
+            _ = try? await webView.evaluateJavaScript("if (window.__dino && window.__dino.pulseVirtualCursor) window.__dino.pulseVirtualCursor(\(pt.x), \(pt.y)); else if (window.__dino && window.__dino.updateVirtualCursor) window.__dino.updateVirtualCursor(\(pt.x), \(pt.y));")
             try? await Task.sleep(nanoseconds: 30_000_000)
 
             return DinoActionResult(
@@ -961,7 +961,7 @@ extension Tab {
             if let up2 = NSEvent.mouseEvent(with: .leftMouseUp, location: winPoint, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: windowNumber, context: nil, eventNumber: 0, clickCount: 2, pressure: 0.0) {
                 webView.mouseUp(with: up2)
             }
-            _ = try? await webView.evaluateJavaScript("if (window.__dino && window.__dino.updateVirtualCursor) window.__dino.updateVirtualCursor(\(pt.x), \(pt.y));")
+            _ = try? await webView.evaluateJavaScript("if (window.__dino && window.__dino.pulseVirtualCursor) window.__dino.pulseVirtualCursor(\(pt.x), \(pt.y)); else if (window.__dino && window.__dino.updateVirtualCursor) window.__dino.updateVirtualCursor(\(pt.x), \(pt.y));")
             try? await Task.sleep(nanoseconds: 30_000_000)
 
             return DinoActionResult(
@@ -1022,7 +1022,7 @@ extension Tab {
                 }
             }
             if let up = upEvent { webView.rightMouseUp(with: up) }
-            _ = try? await webView.evaluateJavaScript("if (window.__dino && window.__dino.updateVirtualCursor) window.__dino.updateVirtualCursor(\(pt.x), \(pt.y));")
+            _ = try? await webView.evaluateJavaScript("if (window.__dino && window.__dino.pulseVirtualCursor) window.__dino.pulseVirtualCursor(\(pt.x), \(pt.y)); else if (window.__dino && window.__dino.updateVirtualCursor) window.__dino.updateVirtualCursor(\(pt.x), \(pt.y));")
             try? await Task.sleep(nanoseconds: 30_000_000)
 
             return DinoActionResult(

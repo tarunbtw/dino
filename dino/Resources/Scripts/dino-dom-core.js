@@ -2630,20 +2630,45 @@
             },
 
             // In-app Virtual Cursor for Agent Actions (stays strictly inside Dino canvas)
-            updateVirtualCursor: function(x, y) {
+            updateVirtualCursor: function(x, y, label) {
                 try {
                     if (x === undefined || y === undefined) return;
                     var cursor = document.getElementById('__dino_virtual_cursor');
                     if (!cursor) {
                         cursor = document.createElement('div');
                         cursor.id = '__dino_virtual_cursor';
-                        cursor.style.cssText = 'position:fixed;width:24px;height:24px;pointer-events:none;z-index:2147483647;transition:left 0.08s ease-out,top 0.08s ease-out,opacity 0.2s;opacity:0.95;';
-                        cursor.innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" style="filter:drop-shadow(0 1px 3px rgba(0,0,0,0.6));"><path d="M2 2L18.5 13.5L11.5 15L9 21.5L2 2Z" fill="#ffffff" stroke="#111111" stroke-width="1.6" stroke-linejoin="round"/></svg>';
+                        cursor.style.cssText = 'position:fixed;width:auto;height:24px;pointer-events:none;z-index:2147483647;transition:left 0.12s cubic-bezier(0.2, 0.8, 0.2, 1),top 0.12s cubic-bezier(0.2, 0.8, 0.2, 1),opacity 0.2s;opacity:0.96;display:flex;align-items:center;gap:6px;';
+                        cursor.innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" style="filter:drop-shadow(0 2px 5px rgba(0,0,0,0.45));flex-shrink:0;"><path d="M2 2L18.5 13.5L11.5 15L9 21.5L2 2Z" fill="#023121" stroke="#ffe5cc" stroke-width="1.8" stroke-linejoin="round"/></svg><span id="__dino_cursor_label" style="display:none;background:#023121;color:#ffe5cc;font-size:11px;font-weight:600;font-family:-apple-system,BlinkMacSystemFont,sans-serif;padding:2px 7px;border-radius:6px;border:1px solid rgba(255,229,204,0.3);box-shadow:0 2px 6px rgba(0,0,0,0.3);white-space:nowrap;"></span>';
                         (document.body || document.documentElement).appendChild(cursor);
                     }
                     cursor.style.left = (Math.round(x) - 2) + 'px';
                     cursor.style.top = (Math.round(y) - 2) + 'px';
-                    cursor.style.display = 'block';
+                    cursor.style.display = 'flex';
+                    var lblEl = document.getElementById('__dino_cursor_label');
+                    if (lblEl) {
+                        if (label && label.length > 0) {
+                            lblEl.textContent = label;
+                            lblEl.style.display = 'inline-block';
+                        } else {
+                            lblEl.style.display = 'none';
+                        }
+                    }
+                } catch(e) {}
+            },
+
+            pulseVirtualCursor: function(x, y) {
+                try {
+                    this.updateVirtualCursor(x, y);
+                    var ripple = document.createElement('div');
+                    ripple.style.cssText = 'position:fixed;left:' + (Math.round(x) - 12) + 'px;top:' + (Math.round(y) - 12) + 'px;width:24px;height:24px;border-radius:50%;border:2px solid #023121;background:rgba(255,229,204,0.35);pointer-events:none;z-index:2147483646;animation:__dino_ripple 0.4s ease-out forwards;';
+                    if (!document.getElementById('__dino_ripple_style')) {
+                        var style = document.createElement('style');
+                        style.id = '__dino_ripple_style';
+                        style.textContent = '@keyframes __dino_ripple { 0% { transform:scale(0.5); opacity:1; } 100% { transform:scale(2.2); opacity:0; } }';
+                        document.head.appendChild(style);
+                    }
+                    (document.body || document.documentElement).appendChild(ripple);
+                    setTimeout(function() { if (ripple.parentNode) ripple.parentNode.removeChild(ripple); }, 450);
                 } catch(e) {}
             },
 
