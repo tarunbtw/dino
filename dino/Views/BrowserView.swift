@@ -121,14 +121,22 @@ struct BrowserView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .zIndex(0)
 
-            // Autopilot Rail (if visible)
+            // In-App Autonomous Copilot (Terax-style floating docked card)
             if store.isAutopilotRailVisible {
-                HStack {
+                VStack {
                     Spacer()
-                    AutopilotRailView(store: store)
-                        .transition(.move(edge: .trailing))
+                    HStack {
+                        Spacer()
+                        AutopilotRailView(store: store)
+                            .padding(.trailing, 16)
+                            .padding(.bottom, 16)
+                    }
                 }
-                .zIndex(60)
+                .transition(.asymmetric(
+                    insertion: .scale(scale: 0.94, anchor: .bottomTrailing).combined(with: .opacity),
+                    removal: .scale(scale: 0.94, anchor: .bottomTrailing).combined(with: .opacity)
+                ))
+                .zIndex(160)
             }
 
             // Docked Sidebar

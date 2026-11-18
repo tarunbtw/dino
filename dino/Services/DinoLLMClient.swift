@@ -162,22 +162,37 @@ final class DinoLLMClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
         let framedDOM = DinoDOMSanitizer.frameUntrustedContent(domTree: currentDOM, url: activeURL, title: pageTitle)
-        let systemPrompt = DinoDOMSanitizer.antiInjectionSystemPrompt
+        let systemPrompt = DinoAgentHarness.systemPrompt
 
         var contents: [[String: Any]] = []
-        contents.append([
-            "role": "user",
-            "parts": [
-                ["text": "System Instructions:\n\(systemPrompt)\n\nUser Goal:\n\(goal)\n\nCurrent Page State:\n\(framedDOM)"]
-            ]
-        ])
+        var mergedTurns: [(role: String, text: String)] = []
 
-        // Add execution history
-        for item in history {
-            if let role = item["role"] as? String, let text = item["text"] as? String {
+        if history.isEmpty {
+            mergedTurns.append(("user", "User Goal:\n\(goal)\n\nCurrent Page State:\n\(framedDOM)"))
+        } else {
+            mergedTurns.append(("user", "User Goal:\n\(goal)"))
+            for item in history {
+                let role = (item["role"] as? String) == "assistant" ? "model" : "user"
+                let text = (item["text"] as? String) ?? ""
+                if !text.isEmpty {
+                    mergedTurns.append((role, text))
+                }
+            }
+            mergedTurns.append(("user", "Current Page State:\n\(framedDOM)\n\nProvide the next action or complete."))
+        }
+
+        // Strictly enforce Gemini's alternating user/model requirement by merging consecutive turns
+        for turn in mergedTurns {
+            if let last = contents.last, (last["role"] as? String) == turn.role {
+                var updated = last
+                var parts = (updated["parts"] as? [[String: Any]]) ?? []
+                parts.append(["text": turn.text])
+                updated["parts"] = parts
+                contents[contents.count - 1] = updated
+            } else {
                 contents.append([
-                    "role": role == "assistant" ? "model" : "user",
-                    "parts": [["text": text]]
+                    "role": turn.role,
+                    "parts": [["text": turn.text]]
                 ])
             }
         }
@@ -195,6 +210,11 @@ final class DinoLLMClient {
         ]
 
         let payload: [String: Any] = [
+            "system_instruction": [
+                "parts": [
+                    ["text": systemPrompt]
+                ]
+            ],
             "contents": contents,
             "tools": geminiTools,
             "generationConfig": [
@@ -206,8 +226,15 @@ final class DinoLLMClient {
 
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            let msg = String(data: data, encoding: .utf8) ?? "HTTP \( (response as? HTTPURLResponse)?.statusCode ?? 500)"
-            throw DinoLLMError.invalidResponse(msg)
+            var errorMsg = "HTTP \( (response as? HTTPURLResponse)?.statusCode ?? 500)"
+            if let errJson = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let errObj = errJson["error"] as? [String: Any],
+               let m = errObj["message"] as? String {
+                errorMsg = m
+            } else if let raw = String(data: data, encoding: .utf8), !raw.isEmpty {
+                errorMsg = raw
+            }
+            throw DinoLLMError.invalidResponse(errorMsg)
         }
 
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -248,7 +275,7 @@ final class DinoLLMClient {
         request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
 
         let framedDOM = DinoDOMSanitizer.frameUntrustedContent(domTree: currentDOM, url: activeURL, title: pageTitle)
-        let systemPrompt = DinoDOMSanitizer.antiInjectionSystemPrompt
+        let systemPrompt = DinoAgentHarness.systemPrompt
 
         var messages: [[String: Any]] = []
         messages.append([
@@ -320,7 +347,7 @@ final class DinoLLMClient {
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
 
         let framedDOM = DinoDOMSanitizer.frameUntrustedContent(domTree: currentDOM, url: activeURL, title: pageTitle)
-        let systemPrompt = DinoDOMSanitizer.antiInjectionSystemPrompt
+        let systemPrompt = DinoAgentHarness.systemPrompt
 
         var messages: [[String: Any]] = [
             ["role": "system", "content": systemPrompt],

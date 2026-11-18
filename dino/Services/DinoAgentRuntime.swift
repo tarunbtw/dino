@@ -37,6 +37,21 @@ struct AgentStepLog: Identifiable, Hashable {
     let isSuccess: Bool
 }
 
+struct AgentChatMessage: Identifiable, Hashable {
+    enum Sender {
+        case user
+        case agent
+        case action
+        case error
+    }
+
+    let id = UUID()
+    let timestamp = Date()
+    let sender: Sender
+    let text: String
+    var details: String? = nil
+}
+
 @MainActor
 final class DinoAgentRuntime: ObservableObject {
     static let shared = DinoAgentRuntime()
@@ -44,6 +59,7 @@ final class DinoAgentRuntime: ObservableObject {
     @Published var status: AgentRuntimeStatus = .idle
     @Published var currentThought: String = ""
     @Published var stepLogs: [AgentStepLog] = []
+    @Published var messages: [AgentChatMessage] = []
     @Published var activeGoal: String = ""
     @Published var stepCount: Int = 0
 
@@ -66,6 +82,7 @@ final class DinoAgentRuntime: ObservableObject {
         self.stepCount = 0
         self.stepLogs = []
         self.history = []
+        self.messages.append(AgentChatMessage(sender: .user, text: cleanGoal))
         self.currentThought = "Analyzing page context and user goal..."
         self.status = .running(goal: cleanGoal, step: 0)
 
@@ -74,6 +91,14 @@ final class DinoAgentRuntime: ObservableObject {
         activeTask = Task { [weak self] in
             await self?.runReActLoop(goal: cleanGoal, tab: tab)
         }
+    }
+
+    func clearSession() {
+        abort()
+        messages.removeAll()
+        stepLogs.removeAll()
+        history.removeAll()
+        activeGoal = ""
     }
 
     func pause() {
@@ -138,25 +163,27 @@ final class DinoAgentRuntime: ObservableObject {
                 return
             }
 
-            // 2. Settle page
-            _ = try? await tab.waitForStability(quietMs: 150, timeoutMs: 3000)
-
-            // 3. Capture interactive DOM snapshot
+            // 2. Settle page & capture DOM
             let domSnapshot: String
-            do {
-                let treeResult = try await tab.getSemanticTree(viewportOnly: true)
-                if let s = treeResult.summary, !s.isEmpty {
-                    domSnapshot = s
-                } else if !treeResult.elements.isEmpty {
-                    domSnapshot = treeResult.elements.map { "[\($0.id)] <\($0.tag) role=\"\($0.role ?? "")\"> \($0.text)" }.joined(separator: "\n")
-                } else {
-                    domSnapshot = "Empty Page"
+            if tab.isBlank || tab.url == nil || tab.url?.absoluteString == "about:blank" {
+                domSnapshot = "<page url=\"about:blank\">Empty page. No interactive elements present. To fulfill the user's request, call navigate(url: \"https://...\") to open the target website.</page>"
+            } else {
+                _ = try? await tab.waitForStability(quietMs: 150, timeoutMs: 2500)
+                do {
+                    let treeResult = try await tab.getSemanticTree(viewportOnly: true)
+                    if let s = treeResult.summary, !s.isEmpty {
+                        domSnapshot = s
+                    } else if !treeResult.elements.isEmpty {
+                        domSnapshot = treeResult.elements.map { "[\($0.id)] <\($0.tag) role=\"\($0.role ?? "")\"> \($0.text)" }.joined(separator: "\n")
+                    } else {
+                        domSnapshot = "Page loaded with no interactable elements."
+                    }
+                } catch {
+                    appendLog(step: stepCount, thought: "Failed to read DOM", action: "Error reading page", isSuccess: false)
+                    status = .failed(error: "Could not inspect page: \(error.localizedDescription)")
+                    tab.isAgentDriving = false
+                    return
                 }
-            } catch {
-                appendLog(step: stepCount, thought: "Failed to read DOM", action: "Error reading page", isSuccess: false)
-                status = .failed(error: "Could not inspect page: \(error.localizedDescription)")
-                tab.isAgentDriving = false
-                return
             }
 
             let activeURL = tab.url
@@ -201,6 +228,7 @@ final class DinoAgentRuntime: ObservableObject {
             case "complete":
                 let summary = (args["summary"] as? String) ?? stepResponse.thought
                 appendLog(step: stepCount, thought: stepResponse.thought, action: "Completed: \(summary)", isSuccess: true)
+                messages.append(AgentChatMessage(sender: .agent, text: summary))
                 _ = try? await tab.webView.evaluateJavaScript("if (window.__dino && window.__dino.hideVirtualCursor) window.__dino.hideVirtualCursor();")
                 status = .completed(summary: summary)
                 tab.isAgentDriving = false
@@ -227,14 +255,16 @@ final class DinoAgentRuntime: ObservableObject {
                 let action = DinoAction(action: "click", target: ref)
                 _ = try? await tab.performAction(action)
                 history.append(["role": "user", "text": "Clicked element [\(ref)]."])
+                try? await Task.sleep(nanoseconds: 700_000_000)
 
             case "type":
                 guard let ref = args["ref"] as? String, let text = args["text"] as? String else { continue }
-                appendLog(step: stepCount, thought: stepResponse.thought, action: "Typing \"\(text.prefix(20))\" into [\(ref)]", isSuccess: true)
+                appendLog(step: stepCount, thought: stepResponse.thought, action: "Typed \"\(text.prefix(30))\" into [\(ref)]", isSuccess: true)
                 let pressEnter = (args["pressEnter"] as? Bool) ?? false
                 let action = DinoAction(action: "fill", target: ref, text: text, submit: pressEnter)
                 _ = try? await tab.performAction(action)
                 history.append(["role": "user", "text": "Typed into [\(ref)]."])
+                try? await Task.sleep(nanoseconds: 800_000_000)
 
             case "scroll":
                 let direction = (args["direction"] as? String) ?? "down"
@@ -245,10 +275,15 @@ final class DinoAgentRuntime: ObservableObject {
                 history.append(["role": "user", "text": "Scrolled \(direction)."])
 
             case "navigate":
-                guard let urlStr = args["url"] as? String, let targetURL = URL(string: urlStr) else { continue }
-                appendLog(step: stepCount, thought: stepResponse.thought, action: "Navigating to \(targetURL.host ?? urlStr)", isSuccess: true)
+                guard let urlStr = args["url"] as? String else { continue }
+                let clean = urlStr.trimmingCharacters(in: .whitespacesAndNewlines)
+                let normalized = (clean.hasPrefix("http://") || clean.hasPrefix("https://")) ? clean : "https://\(clean)"
+                guard let targetURL = URL(string: normalized) else { continue }
+                appendLog(step: stepCount, thought: stepResponse.thought, action: "Navigating to \(targetURL.host ?? normalized)", isSuccess: true)
                 tab.load(url: targetURL)
-                history.append(["role": "user", "text": "Navigated to \(urlStr)."])
+                history.append(["role": "user", "text": "Navigated to \(normalized)."])
+                try? await Task.sleep(nanoseconds: 1_200_000_000)
+                await tab.waitForNavigationSettled(timeout: 2.5)
 
             default:
                 appendLog(step: stepCount, thought: stepResponse.thought, action: "Unknown tool: \(toolName)", isSuccess: false)
@@ -267,5 +302,8 @@ final class DinoAgentRuntime: ObservableObject {
     private func appendLog(step: Int, thought: String, action: String, isSuccess: Bool) {
         let entry = AgentStepLog(stepNumber: step, thought: thought, actionDescription: action, isSuccess: isSuccess)
         stepLogs.append(entry)
+        if !action.isEmpty && !action.hasPrefix("Refining") {
+            messages.append(AgentChatMessage(sender: isSuccess ? .action : .error, text: action, details: thought.isEmpty ? nil : thought))
+        }
     }
 }
