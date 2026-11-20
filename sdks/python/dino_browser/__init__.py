@@ -12,7 +12,7 @@ import sys
 import urllib.parse
 from typing import Optional, Dict, Any, List, Union
 
-__version__ = "0.48.0"
+__version__ = "0.49.0"
 
 
 class UnixHTTPConnection(http.client.HTTPConnection):
