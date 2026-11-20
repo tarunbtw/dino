@@ -19,8 +19,6 @@ struct AutopilotRailView: View {
 
     @State private var instructionInput: String = ""
     @State private var hitlInput: String = ""
-    @State private var isShowingKeyModal: Bool = false
-    @State private var tempAPIKey: String = ""
     @State private var hoveredActionIndex: Int? = nil
 
     var body: some View {
@@ -56,95 +54,13 @@ struct AutopilotRailView: View {
         }
         .shadow(color: Color.black.opacity(0.35), radius: 24, y: 8)
         .shadow(color: Color.black.opacity(0.20), radius: 3, y: 1)
-        .sheet(isPresented: $isShowingKeyModal) {
-            apiKeyModalView
-        }
     }
 
     // MARK: - Top Header Bar (Firn Paired-Grey Style)
 
     private var topHeaderBar: some View {
         HStack(spacing: 8) {
-            // Model Selector Pill
-            Menu {
-                ForEach(DinoModelProvider.allCases) { provider in
-                    Button(action: {
-                        vault.activeProvider = provider
-                    }) {
-                        HStack {
-                            Text(provider.displayName)
-                            if vault.activeProvider == provider {
-                                Image(systemName: "checkmark")
-                            }
-                        }
-                    }
-                }
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(Theme.accent)
-
-                    Text(vault.activeProvider.displayName)
-                        .font(Theme.font(size: 11.5, weight: .medium))
-                        .foregroundStyle(Theme.ink)
-
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 8, weight: .semibold))
-                        .foregroundStyle(Theme.faint)
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(Theme.frame, in: RoundedRectangle(cornerRadius: Theme.tabRadius, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: Theme.tabRadius, style: .continuous)
-                        .strokeBorder(Theme.activeTabHairline, lineWidth: 0.5)
-                )
-            }
-            .menuStyle(.borderlessButton)
-
-            // Model Key Status Pill
-            if vault.activeProvider.requiresAPIKey {
-                let hasKey = vault.hasKey(for: vault.activeProvider)
-                Button(action: {
-                    tempAPIKey = vault.key(for: vault.activeProvider) ?? ""
-                    isShowingKeyModal = true
-                }) {
-                    HStack(spacing: 4) {
-                        Circle()
-                            .fill(hasKey ? Color(hex: 0x8FAE8B) : Color(hex: 0xD69268))
-                            .frame(width: 5, height: 5)
-
-                        Text(hasKey ? "Key Set" : "Add Key")
-                            .font(Theme.font(size: 10, weight: .medium))
-                            .foregroundStyle(hasKey ? Theme.faint : Color(hex: 0xD69268))
-                    }
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
-                    .background(Theme.hover, in: Capsule())
-                }
-                .buttonStyle(.plain)
-                .help(hasKey ? "API Key configured in local vault. Click to change." : "Click to enter your API key")
-            }
-
-            Spacer()
-
-            // Status Indicator (Step count when running)
-            if runtime.status.isRunning {
-                HStack(spacing: 4) {
-                    Circle()
-                        .fill(Color(hex: 0x8FAE8B))
-                        .frame(width: 5, height: 5)
-                    Text("Step \(runtime.stepCount)")
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        .foregroundStyle(Theme.muted)
-                }
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(Color(hex: 0x8FAE8B).opacity(0.12), in: Capsule())
-            }
-
-            // Multi-Chat Sessions Menu (Terax style "New chat ⌵")
+            // Chats Menu (New chat ⌵ / Chat History & Ops)
             Menu {
                 Button(action: {
                     withAnimation(Theme.glide) {
@@ -183,23 +99,72 @@ struct AutopilotRailView: View {
                     }) {
                         Label("Delete Current Chat", systemImage: "trash")
                     }
+
+                    Button(role: .destructive, action: {
+                        withAnimation(Theme.glide) {
+                            runtime.clearAllSessions()
+                        }
+                    }) {
+                        Label("Clear All Chats", systemImage: "trash.fill")
+                    }
                 }
             } label: {
-                HStack(spacing: 4) {
+                HStack(spacing: 5) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Theme.accent)
+
                     Text(currentSessionLabel)
-                        .font(Theme.font(size: 11, weight: .medium))
-                        .foregroundStyle(Theme.muted)
+                        .font(Theme.font(size: 12, weight: .medium))
+                        .foregroundStyle(Theme.ink)
                         .lineLimit(1)
+
                     Image(systemName: "chevron.down")
                         .font(.system(size: 7, weight: .semibold))
                         .foregroundStyle(Theme.faint)
                 }
-                .padding(.horizontal, 6)
-                .padding(.vertical, 3)
-                .background(Theme.hover, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Theme.hover, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .strokeBorder(Theme.activeTabHairline, lineWidth: 0.5)
+                )
             }
             .menuStyle(.borderlessButton)
-            .help("Chat sessions & history")
+            .help("Chat sessions & operations")
+
+            // Status Indicator (Step count when running)
+            if runtime.status.isRunning {
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(Color(hex: 0x8FAE8B))
+                        .frame(width: 5, height: 5)
+                    Text("Step \(runtime.stepCount)")
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundStyle(Theme.muted)
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color(hex: 0x8FAE8B).opacity(0.12), in: Capsule())
+            }
+
+            Spacer()
+
+            // Quick New Chat Button
+            Button(action: {
+                withAnimation(Theme.glide) {
+                    runtime.newSession()
+                }
+            }) {
+                Image(systemName: "plus")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Theme.faint)
+                    .frame(width: 20, height: 20)
+                    .background(Theme.hover, in: Circle())
+            }
+            .buttonStyle(.plain)
+            .help("New chat")
 
             // Minimize Button
             Button(action: {
@@ -230,7 +195,7 @@ struct AutopilotRailView: View {
                     .background(Theme.hover, in: Circle())
             }
             .buttonStyle(.plain)
-            .help("Close Copilot (⌘⇧A)")
+            .help("Close Agent (⌘⇧A)")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
@@ -260,9 +225,29 @@ struct AutopilotRailView: View {
                         .shadow(color: Color(hex: 0x023121, opacity: 0.25), radius: 6, y: 2)
                 }
 
-                Text("Copilot")
+                Text("Agent")
                     .font(.system(size: 22, weight: .regular, design: .serif))
                     .foregroundStyle(Theme.ink)
+
+                // Missing API key prompt if not configured
+                if vault.activeProvider.requiresAPIKey && !vault.hasKey(for: vault.activeProvider) {
+                    Button(action: {
+                        store.openSettings(section: "Agent")
+                    }) {
+                        HStack(spacing: 5) {
+                            Circle()
+                                .fill(Color(hex: 0xD69268))
+                                .frame(width: 5, height: 5)
+                            Text("Configure \(vault.activeProvider.displayName) key in Settings")
+                                .font(Theme.font(size: 11, weight: .medium))
+                                .foregroundStyle(Color(hex: 0xD69268))
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color(hex: 0xD69268).opacity(0.12), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
 
                 // Active Site Context Line
                 let activeSite = store.activeTab?.url.flatMap { WebAddress.site(of: $0) }
@@ -584,7 +569,7 @@ struct AutopilotRailView: View {
 
     private var bottomComposerBar: some View {
         HStack(spacing: 8) {
-            TextField("Ask Copilot to do something on this page...", text: $instructionInput)
+            TextField("Ask Agent to do something on this page...", text: $instructionInput)
                 .textFieldStyle(.plain)
                 .font(Theme.font(size: 12))
                 .foregroundStyle(Theme.ink)
@@ -659,77 +644,12 @@ struct AutopilotRailView: View {
 
         // Check API key requirement
         if vault.activeProvider.requiresAPIKey && !vault.hasKey(for: vault.activeProvider) {
-            tempAPIKey = ""
-            isShowingKeyModal = true
+            store.openSettings(section: "Agent")
             return
         }
 
         instructionInput = ""
         runtime.startTask(goal: text, tab: tab)
-    }
-
-    // MARK: - API Key Configuration Modal (Firn Sheet Style)
-
-    private var apiKeyModalView: some View {
-        VStack(spacing: 16) {
-            HStack {
-                Image(systemName: "key.fill")
-                    .font(.system(size: 15))
-                    .foregroundStyle(Theme.accent)
-
-                Text("Configure \(vault.activeProvider.displayName)")
-                    .font(Theme.font(size: 14, weight: .semibold))
-                    .foregroundStyle(Theme.ink)
-
-                Spacer()
-
-                Button("Done") {
-                    isShowingKeyModal = false
-                }
-                .controlSize(.small)
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("API Key")
-                    .font(Theme.font(size: 11, weight: .medium))
-                    .foregroundStyle(Theme.muted)
-
-                SecureField("Enter API Key...", text: $tempAPIKey)
-                    .textFieldStyle(.roundedBorder)
-                    .font(Theme.font(size: 12))
-
-                Text("Saved with private 0600 permissions in ~/Library/Application Support/dino/agent_vault.json.")
-                    .font(Theme.font(size: 10))
-                    .foregroundStyle(Theme.faint)
-            }
-
-            HStack {
-                if vault.hasKey(for: vault.activeProvider) {
-                    Button("Remove Key", role: .destructive) {
-                        vault.deleteKey(for: vault.activeProvider)
-                        tempAPIKey = ""
-                        isShowingKeyModal = false
-                    }
-                    .controlSize(.small)
-                }
-
-                Spacer()
-
-                Button("Save Key") {
-                    let trimmed = tempAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !trimmed.isEmpty {
-                        vault.saveKey(trimmed, for: vault.activeProvider)
-                    }
-                    isShowingKeyModal = false
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .disabled(tempAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-        }
-        .padding(20)
-        .frame(width: 380)
-        .background(Theme.page)
     }
 }
 
@@ -781,6 +701,6 @@ struct AutopilotMinimizedButton: View {
         .onHover { hovering in
             isHovered = hovering
         }
-        .help(runtime.status.isRunning ? "Dino Copilot is driving (Step \(runtime.stepCount)) — Click to expand" : "Dino Copilot (⌘⇧A) — Click to expand")
+        .help(runtime.status.isRunning ? "Dino Agent is driving (Step \(runtime.stepCount)) — Click to expand" : "Dino Agent (⌘⇧A) — Click to expand")
     }
 }

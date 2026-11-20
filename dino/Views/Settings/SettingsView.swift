@@ -41,7 +41,7 @@ struct SettingsView: View {
         case general = "General"
         case spaces = "Spaces"
         case passwords = "Passwords"
-        case agent = "Copilot & Agents"
+        case agent = "Agent"
         case history = "History"
         case bookmarks = "Bookmarks"
         case downloads = "Downloads"

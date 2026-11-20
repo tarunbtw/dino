@@ -144,9 +144,22 @@ final class DinoLLMClient {
             }
             return try await callClaude(key: key, model: model, goal: goal, history: history, currentDOM: currentDOM, activeURL: activeURL, pageTitle: pageTitle)
 
-        case .openai, .ollama:
-            let apiKey = vault.key(for: provider) ?? "ollama"
-            let endpoint = provider == .ollama ? "\(vault.ollamaEndpoint)/chat/completions" : "https://api.openai.com/v1/chat/completions"
+        case .openrouter, .openai, .ollama:
+            let apiKey = vault.key(for: provider) ?? (provider == .ollama ? "ollama" : "")
+            if provider != .ollama && apiKey.isEmpty {
+                throw DinoLLMError.missingAPIKey(provider.displayName)
+            }
+            let endpoint: String
+            switch provider {
+            case .openrouter:
+                endpoint = "https://openrouter.ai/api/v1/chat/completions"
+            case .ollama:
+                endpoint = "\(vault.ollamaEndpoint)/chat/completions"
+            case .openai:
+                endpoint = "https://api.openai.com/v1/chat/completions"
+            default:
+                endpoint = "https://openrouter.ai/api/v1/chat/completions"
+            }
             return try await callOpenAICompatible(endpoint: endpoint, apiKey: apiKey, model: model, goal: goal, history: history, currentDOM: currentDOM, activeURL: activeURL, pageTitle: pageTitle)
         }
     }
@@ -347,6 +360,11 @@ final class DinoLLMClient {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+
+        if endpoint.contains("openrouter.ai") {
+            request.setValue("https://dino.browser", forHTTPHeaderField: "HTTP-Referer")
+            request.setValue("Dino Browser", forHTTPHeaderField: "X-Title")
+        }
 
         let framedDOM = DinoDOMSanitizer.frameUntrustedContent(domTree: currentDOM, url: activeURL, title: pageTitle)
         let systemPrompt = DinoAgentHarness.systemPrompt

@@ -12,7 +12,8 @@
 
 import Foundation
 
-enum DinoModelProvider: String, CaseIterable, Identifiable, Codable {
+enum DinoModelProvider: String,CaseIterable, Identifiable, Codable {
+    case openrouter = "openrouter"
     case gemini = "gemini"
     case claude = "claude"
     case openai = "openai"
@@ -22,6 +23,7 @@ enum DinoModelProvider: String, CaseIterable, Identifiable, Codable {
 
     var displayName: String {
         switch self {
+        case .openrouter: return "OpenRouter"
         case .gemini: return "Google Gemini"
         case .claude: return "Anthropic Claude"
         case .openai: return "OpenAI"
@@ -31,6 +33,7 @@ enum DinoModelProvider: String, CaseIterable, Identifiable, Codable {
 
     var defaultModel: String {
         switch self {
+        case .openrouter: return "anthropic/claude-3.5-sonnet"
         case .gemini: return "gemini-2.5-flash"
         case .claude: return "claude-3-5-sonnet-20241022"
         case .openai: return "gpt-4o"
@@ -40,6 +43,13 @@ enum DinoModelProvider: String, CaseIterable, Identifiable, Codable {
 
     var availableModels: [String] {
         switch self {
+        case .openrouter: return [
+            "anthropic/claude-3.5-sonnet",
+            "openai/gpt-4o",
+            "google/gemini-2.5-flash",
+            "meta-llama/llama-3.3-70b-instruct",
+            "deepseek/deepseek-chat"
+        ]
         case .gemini: return ["gemini-2.5-flash", "gemini-flash-latest", "gemini-2.0-flash", "gemini-1.5-flash"]
         case .claude: return ["claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022", "claude-3-opus-20240229"]
         case .openai: return ["gpt-4o", "gpt-4o-mini", "o1-mini", "o1-preview"]
@@ -105,6 +115,8 @@ final class DinoModelVault {
 
         // 1. Environment variable override
         switch provider {
+        case .openrouter:
+            if let env = ProcessInfo.processInfo.environment["OPENROUTER_API_KEY"], !env.isEmpty { return env }
         case .gemini:
             if let env = ProcessInfo.processInfo.environment["GEMINI_API_KEY"], !env.isEmpty { return env }
         case .claude:

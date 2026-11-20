@@ -149,6 +149,16 @@ final class DinoAgentRuntime: ObservableObject {
         }
     }
 
+    func clearAllSessions() {
+        abort()
+        sessions.removeAll()
+        messages.removeAll()
+        stepLogs.removeAll()
+        history.removeAll()
+        activeGoal = ""
+        activeSessionId = nil
+    }
+
     func syncCurrentSession() {
         guard let id = activeSessionId, let idx = sessions.firstIndex(where: { $0.id == id }) else { return }
         sessions[idx].messages = messages
