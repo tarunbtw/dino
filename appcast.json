@@ -1,8 +1,8 @@
 {
-  "version": "0.50",
+  "version": "0.51",
   "build": 1,
-  "url": "https://github.com/tarunbtw/dino/releases/download/v0.50/Dino-0.50.zip",
-  "sha256": "0f58661e097eb7f19d5cb1cb08468ea9c13b5a801f86ac724f15d483f0682051",
-  "notes": "Dino 0.50 release.",
+  "url": "https://github.com/tarunbtw/dino/releases/download/v0.51/Dino-0.51.zip",
+  "sha256": "d8748e9c5b4eb5b0778f52376fcef77727d5115d124852bde89c28564e51a8be",
+  "notes": "Dino 0.51 release.",
   "minimumSystemVersion": "13.0"
 }
