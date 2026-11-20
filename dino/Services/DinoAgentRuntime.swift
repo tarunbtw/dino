@@ -77,6 +77,9 @@ final class DinoAgentRuntime: ObservableObject {
     private var history: [[String: Any]] = []
     private weak var currentTab: Tab? = nil
     private let maxSteps = 25
+    private var lastActionSignature: String = ""
+    private var repeatActionCount: Int = 0
+    private var consecutiveScrollCount: Int = 0
 
     private init() {}
 
@@ -103,6 +106,9 @@ final class DinoAgentRuntime: ObservableObject {
         self.stepCount = 0
         self.stepLogs = []
         self.history = []
+        self.lastActionSignature = ""
+        self.repeatActionCount = 0
+        self.consecutiveScrollCount = 0
         let userMsg = AgentChatMessage(sender: .user, text: cleanGoal)
         self.messages.append(userMsg)
         self.syncCurrentSession()
@@ -279,7 +285,6 @@ final class DinoAgentRuntime: ObservableObject {
 
             // 5. Execute Tool Call
             guard let toolCall = stepResponse.toolCall else {
-                // If model responded with text and no tool call, check if task is complete
                 appendLog(step: stepCount, thought: stepResponse.thought, action: "Refining plan...", isSuccess: true)
                 try? await Task.sleep(nanoseconds: 500_000_000)
                 continue
@@ -287,6 +292,37 @@ final class DinoAgentRuntime: ObservableObject {
 
             let toolName = toolCall.name
             let args = toolCall.arguments
+
+            // Stagnation / Loop Guard: Detect identical repeated actions
+            let currentSignature = "\(toolName):\(args)"
+            if currentSignature == lastActionSignature {
+                repeatActionCount += 1
+            } else {
+                repeatActionCount = 1
+                lastActionSignature = currentSignature
+            }
+
+            // Consecutive Scroll Guard: Prevent pointless vertical feed scrolling on web portals
+            if toolName == "scroll" {
+                consecutiveScrollCount += 1
+                if consecutiveScrollCount >= 3 {
+                    let failMsg = "Action 'scroll' executed 3 times without finding target section. Halting to prevent token loop. In web portals and dashboards, sections like attendance or profile are in the navigation menu (☰) or sidebar."
+                    appendLog(step: stepCount, thought: stepResponse.thought, action: failMsg, isSuccess: false)
+                    status = .failed(error: failMsg)
+                    tab.isAgentDriving = false
+                    return
+                }
+            } else {
+                consecutiveScrollCount = 0
+            }
+
+            if repeatActionCount >= 3 {
+                let failMsg = "Action '\(toolName)' repeated 3 times without effect. Halting mission to prevent token loop."
+                appendLog(step: stepCount, thought: stepResponse.thought, action: failMsg, isSuccess: false)
+                status = .failed(error: failMsg)
+                tab.isAgentDriving = false
+                return
+            }
 
             switch toolName {
             case "complete":
@@ -307,7 +343,8 @@ final class DinoAgentRuntime: ObservableObject {
                 return
 
             case "click":
-                guard let ref = args["ref"] as? String else { continue }
+                guard let rawRef = args["ref"] as? String else { continue }
+                let ref = rawRef.trimmingCharacters(in: CharacterSet(charactersIn: "[] \t\r\n"))
 
                 // Security Gate: Check for high-stakes action
                 if DinoDOMSanitizer.isHighStakesAction(elementText: ref) {
@@ -318,17 +355,35 @@ final class DinoAgentRuntime: ObservableObject {
 
                 appendLog(step: stepCount, thought: stepResponse.thought, action: "Clicking [\(ref)]", isSuccess: true)
                 let action = DinoAction(action: "click", target: ref)
-                _ = try? await tab.performAction(action)
-                history.append(["role": "user", "text": "Clicked element [\(ref)]."])
+                let result = (try? await tab.performAction(action)) ?? DinoActionResult(success: false, message: "Execution error")
+                if result.success {
+                    history.append(["role": "user", "text": "Clicked element [\(ref)]."])
+                } else {
+                    let errMsg = result.message.isEmpty ? "Could not click element." : result.message
+                    appendLog(step: stepCount, thought: stepResponse.thought, action: "Click failed: \(errMsg)", isSuccess: false)
+                    history.append(["role": "user", "text": "Click failed on [\(ref)]: \(errMsg). Try another element or action."])
+                }
                 try? await Task.sleep(nanoseconds: 700_000_000)
 
             case "type":
-                guard let ref = args["ref"] as? String, let text = args["text"] as? String else { continue }
-                appendLog(step: stepCount, thought: stepResponse.thought, action: "Typed \"\(text.prefix(30))\" into [\(ref)]", isSuccess: true)
-                let pressEnter = (args["pressEnter"] as? Bool) ?? false
-                let action = DinoAction(action: "fill", target: ref, text: text, submit: pressEnter)
-                _ = try? await tab.performAction(action)
-                history.append(["role": "user", "text": "Typed into [\(ref)]."])
+                guard let rawRef = args["ref"] as? String, let text = args["text"] as? String else { continue }
+                let ref = rawRef.trimmingCharacters(in: CharacterSet(charactersIn: "[] \t\r\n"))
+                let pressEnter = (args["pressEnter"] as? Bool)
+                    ?? (args["press_enter"] as? Bool)
+                    ?? (args["submit"] as? Bool)
+                    ?? (args["enter"] as? Bool)
+                    ?? (stepResponse.thought.localizedCaseInsensitiveContains("enter") || stepResponse.thought.localizedCaseInsensitiveContains("search"))
+
+                appendLog(step: stepCount, thought: stepResponse.thought, action: "Typed \"\(text.prefix(30))\" into [\(ref)]\(pressEnter ? " and pressed Enter" : "")", isSuccess: true)
+                let action = DinoAction(action: "type", target: ref, text: text, submit: pressEnter)
+                let result = (try? await tab.performAction(action)) ?? DinoActionResult(success: false, message: "Execution error")
+                if result.success {
+                    history.append(["role": "user", "text": "Typed into [\(ref)]\(pressEnter ? " and submitted" : "")."])
+                } else {
+                    let errMsg = result.message.isEmpty ? "Could not type into element." : result.message
+                    appendLog(step: stepCount, thought: stepResponse.thought, action: "Type failed: \(errMsg)", isSuccess: false)
+                    history.append(["role": "user", "text": "Typing failed on [\(ref)]: \(errMsg). Try clicking the search button or navigating directly to the URL."])
+                }
                 try? await Task.sleep(nanoseconds: 800_000_000)
 
             case "scroll":
@@ -337,7 +392,10 @@ final class DinoAgentRuntime: ObservableObject {
                 appendLog(step: stepCount, thought: stepResponse.thought, action: "Scrolling \(direction) \(amount)px", isSuccess: true)
                 let action = DinoAction(action: "scroll", direction: direction, amount: CGFloat(amount))
                 _ = try? await tab.performAction(action)
-                history.append(["role": "user", "text": "Scrolled \(direction)."])
+                let scrollFeedback = consecutiveScrollCount >= 2
+                    ? "Scrolled \(direction) \(amount)px. NOTE: You have scrolled multiple times. If you are searching for a specific portal feature or sub-page (e.g. Attendance, Profile, Grades, Settings), it is in the navigation menu (☰) or sidebar drawer. Look for a menu or navigation button instead of continuing to scroll."
+                    : "Scrolled \(direction)."
+                history.append(["role": "user", "text": scrollFeedback])
 
             case "navigate":
                 guard let urlStr = args["url"] as? String else { continue }

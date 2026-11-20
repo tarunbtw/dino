@@ -61,20 +61,20 @@ final class DinoLLMClient {
         ],
         [
             "name": "type",
-            "description": "Type text into an input field or textarea identified by its ref ID.",
+            "description": "Type text into an input field or search bar identified by its ref ID.",
             "parameters": [
                 "type": "object",
                 "properties": [
-                    "ref": ["type": "string", "description": "The reference ID of the input field."],
+                    "ref": ["type": "string", "description": "The reference ID of the input field (e.g. 'e4'). Do not include brackets."],
                     "text": ["type": "string", "description": "The text to type into the field."],
-                    "pressEnter": ["type": "boolean", "description": "Whether to press Enter after typing."]
+                    "pressEnter": ["type": "boolean", "description": "Whether to press Enter after typing to submit. ALWAYS set to true for search bars."]
                 ],
                 "required": ["ref", "text"]
             ]
         ],
         [
             "name": "scroll",
-            "description": "Scroll the page viewport up or down to reveal more content.",
+            "description": "Scroll the page viewport up or down to reveal more content. NOTE: Use only for long text articles, tables, or feeds. Do NOT use scroll repeatedly on dashboards/portals to find navigation sections; use click on the navigation menu or sidebar instead.",
             "parameters": [
                 "type": "object",
                 "properties": [
@@ -149,6 +149,17 @@ final class DinoLLMClient {
             if provider != .ollama && apiKey.isEmpty {
                 throw DinoLLMError.missingAPIKey(provider.displayName)
             }
+            var targetModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
+            if provider == .openrouter {
+                // Auto-correct numeral 1 typo in vision-language models (e.g. super-v1:free -> super-vl:free)
+                if targetModel.contains("super-v1") {
+                    targetModel = targetModel.replacingOccurrences(of: "super-v1", with: "super-vl")
+                }
+                // Fallback for sunsetted claude-3.5-sonnet on OpenRouter
+                if targetModel == "anthropic/claude-3.5-sonnet" {
+                    targetModel = "nvidia/nemotron-3.5-super-vl:free"
+                }
+            }
             let endpoint: String
             switch provider {
             case .openrouter:
@@ -160,7 +171,7 @@ final class DinoLLMClient {
             default:
                 endpoint = "https://openrouter.ai/api/v1/chat/completions"
             }
-            return try await callOpenAICompatible(endpoint: endpoint, apiKey: apiKey, model: model, goal: goal, history: history, currentDOM: currentDOM, activeURL: activeURL, pageTitle: pageTitle)
+            return try await callOpenAICompatible(endpoint: endpoint, apiKey: apiKey, model: targetModel, goal: goal, history: history, currentDOM: currentDOM, activeURL: activeURL, pageTitle: pageTitle)
         }
     }
 
@@ -186,7 +197,7 @@ final class DinoLLMClient {
             mergedTurns.append(("user", "User Goal:\n\(goal)\n\nCurrent Page State:\n\(framedDOM)"))
         } else {
             mergedTurns.append(("user", "User Goal:\n\(goal)"))
-            for item in history {
+            for item in history.suffix(6) {
                 let role = (item["role"] as? String) == "assistant" ? "model" : "user"
                 let text = (item["text"] as? String) ?? ""
                 if !text.isEmpty {
@@ -298,7 +309,7 @@ final class DinoLLMClient {
             "content": "User Goal: \(goal)\n\nCurrent Page State:\n\(framedDOM)"
         ])
 
-        for item in history {
+        for item in history.suffix(6) {
             if let role = item["role"] as? String, let text = item["text"] as? String {
                 messages.append(["role": role, "content": text])
             }
@@ -374,7 +385,7 @@ final class DinoLLMClient {
             ["role": "user", "content": "Goal: \(goal)\n\nPage State:\n\(framedDOM)"]
         ]
 
-        for item in history {
+        for item in history.suffix(6) {
             if let role = item["role"] as? String, let text = item["text"] as? String {
                 messages.append(["role": role, "content": text])
             }
@@ -413,7 +424,12 @@ final class DinoLLMClient {
             throw DinoLLMError.invalidResponse("Malformed OpenAI-compatible response")
         }
 
-        let thought = (message["content"] as? String) ?? ""
+        var thought = (message["content"] as? String) ?? ""
+        if thought.isEmpty, let reasoning = message["reasoning"] as? String {
+            thought = reasoning
+        } else if thought.isEmpty, let reasoningContent = message["reasoning_content"] as? String {
+            thought = reasoningContent
+        }
         var toolCall: AgentToolCall? = nil
 
         if let toolCalls = message["tool_calls"] as? [[String: Any]], let firstCall = toolCalls.first,

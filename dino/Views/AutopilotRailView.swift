@@ -229,6 +229,10 @@ struct AutopilotRailView: View {
                     .font(.system(size: 22, weight: .regular, design: .serif))
                     .foregroundStyle(Theme.ink)
 
+                Text("\(vault.activeProvider.displayName) • \(vault.selectedModel)")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(Theme.faint)
+
                 // Missing API key prompt if not configured
                 if vault.activeProvider.requiresAPIKey && !vault.hasKey(for: vault.activeProvider) {
                     Button(action: {

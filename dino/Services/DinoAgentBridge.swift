@@ -177,7 +177,7 @@ struct DinoAction: Codable {
         }
         let validActions: Set<String> = [
             "click", "dblclick", "double_click", "doubleclick", "right_click", "rightclick", "context_menu", "contextmenu",
-            "hover", "type", "clear", "press", "selectoption", "scroll", "wheel", "scrollwheel", "drag", "highlight", "upload",
+            "hover", "type", "fill", "clear", "press", "selectoption", "scroll", "wheel", "scrollwheel", "drag", "highlight", "upload",
             "native_click", "native_dblclick", "native_double_click", "native_right_click", "native_context_menu", "native_hover", "native_type", "native_press", "native_drag", "native_scroll", "native_wheel"
         ]
         guard validActions.contains(rawAction.lowercased()) else {

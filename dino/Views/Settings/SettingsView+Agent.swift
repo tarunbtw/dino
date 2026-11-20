@@ -104,59 +104,69 @@ private struct AgentSettingsContent: View {
                 .fill(Theme.activeTabHairline)
                 .frame(height: 0.5)
 
-            // Preset Model Picker Row
-            HStack {
-                Text("Model")
-                    .font(Theme.font(size: 13, weight: .medium))
-                    .foregroundStyle(Theme.ink)
+            // Model Identifier with Preset Picker & Immediate Sync
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("Model")
+                        .font(Theme.font(size: 13, weight: .medium))
+                        .foregroundStyle(Theme.ink)
 
-                Spacer()
+                    Spacer()
 
-                Menu {
-                    ForEach(activeProvider.availableModels, id: \.self) { m in
-                        Button(action: {
-                            selectedModel = m
-                            vault.selectedModel = m
-                        }) {
-                            if selectedModel == m {
-                                Label(m, systemImage: "checkmark")
-                            } else {
-                                Text(m)
+                    // Presets Dropdown
+                    Menu {
+                        Text("Presets")
+                        Divider()
+                        ForEach(activeProvider.availableModels, id: \.self) { m in
+                            Button(action: {
+                                selectedModel = m
+                                vault.selectedModel = m
+                                saveStatusMessage = "Model: \(m)"
+                            }) {
+                                HStack {
+                                    Text(m)
+                                    if selectedModel == m {
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
                             }
                         }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("Presets")
+                                .font(Theme.font(size: 11, weight: .medium))
+                                .foregroundStyle(Theme.muted)
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 8, weight: .semibold))
+                                .foregroundStyle(Theme.faint)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Theme.press, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
                     }
-                } label: {
-                    HStack(spacing: 6) {
-                        Text(selectedModel)
-                            .font(.system(size: 11.5, design: .monospaced))
-                            .foregroundStyle(Theme.ink)
-
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(.system(size: 9))
-                            .foregroundStyle(Theme.muted)
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(Theme.press, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .menuStyle(.borderlessButton)
                 }
-                .menuStyle(.borderlessButton)
-            }
 
-            // Custom Model Identifier Input
-            HStack(spacing: 12) {
-                Text("Custom Model")
-                    .font(Theme.font(size: 12, weight: .medium))
-                    .foregroundStyle(Theme.muted)
+                HStack(spacing: 8) {
+                    TextField("Enter model identifier...", text: $selectedModel)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 11.5, design: .monospaced))
+                        .onChange(of: selectedModel) { _, newValue in
+                            let clean = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                            if !clean.isEmpty {
+                                vault.selectedModel = clean
+                            }
+                        }
 
-                TextField("e.g. \(activeProvider.defaultModel)", text: $selectedModel)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 11.5, design: .monospaced))
-                    .onSubmit {
+                    Button("Save") {
                         let clean = selectedModel.trimmingCharacters(in: .whitespacesAndNewlines)
                         if !clean.isEmpty {
                             vault.selectedModel = clean
+                            saveStatusMessage = "Model saved: \(clean)"
                         }
                     }
+                    .controlSize(.small)
+                }
             }
 
             Rectangle()

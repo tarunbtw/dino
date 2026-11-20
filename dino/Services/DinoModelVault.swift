@@ -33,7 +33,7 @@ enum DinoModelProvider: String,CaseIterable, Identifiable, Codable {
 
     var defaultModel: String {
         switch self {
-        case .openrouter: return "anthropic/claude-3.5-sonnet"
+        case .openrouter: return "nvidia/nemotron-3.5-super-vl:free"
         case .gemini: return "gemini-2.5-flash"
         case .claude: return "claude-3-5-sonnet-20241022"
         case .openai: return "gpt-4o"
@@ -44,9 +44,10 @@ enum DinoModelProvider: String,CaseIterable, Identifiable, Codable {
     var availableModels: [String] {
         switch self {
         case .openrouter: return [
-            "anthropic/claude-3.5-sonnet",
-            "openai/gpt-4o",
+            "nvidia/nemotron-3.5-super-vl:free",
             "google/gemini-2.5-flash",
+            "openai/gpt-4o",
+            "anthropic/claude-3.7-sonnet",
             "meta-llama/llama-3.3-70b-instruct",
             "deepseek/deepseek-chat"
         ]
@@ -92,10 +93,19 @@ final class DinoModelVault {
 
     var selectedModel: String {
         get {
-            UserDefaults.standard.string(forKey: "dino_agent_model_\(activeProvider.rawValue)") ?? activeProvider.defaultModel
+            if let custom = UserDefaults.standard.string(forKey: "dino_agent_model_\(activeProvider.rawValue)"),
+               !custom.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return custom.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            return activeProvider.defaultModel
         }
         set {
-            UserDefaults.standard.set(newValue, forKey: "dino_agent_model_\(activeProvider.rawValue)")
+            let clean = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            if clean.isEmpty {
+                UserDefaults.standard.removeObject(forKey: "dino_agent_model_\(activeProvider.rawValue)")
+            } else {
+                UserDefaults.standard.set(clean, forKey: "dino_agent_model_\(activeProvider.rawValue)")
+            }
         }
     }
 

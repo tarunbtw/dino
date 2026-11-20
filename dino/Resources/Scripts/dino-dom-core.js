@@ -832,7 +832,7 @@
                     if (root.shadowRoot) {
                         collectNodes(root.shadowRoot, list);
                     }
-                    var selector = 'a, button, input, textarea, select, details, summary, h1, h2, h3, h4, h5, h6, img, li, p, td, th, pre, code, blockquote, canvas, [draggable], [ondragstart], [ondrop], [id*="hit"], [id*="drag"], [id*="drop"], [class*="drag"], [class*="drop"], [class*="dropzone"], [role="button"], [role="link"], [role="checkbox"], [role="radio"], [role="combobox"], [role="menuitem"], [role="tab"], [role="switch"], [role="option"], [role="heading"], [role="listitem"], [role="status"], [role="alert"], [role="cell"], [tabindex]:not([tabindex="-1"]), [contenteditable="true"], [oncontextmenu], [data-contextmenu], [data-context-menu], [contextmenu], [aria-haspopup="menu"], iframe';
+                    var selector = 'a, button, input, textarea, select, details, summary, h1, h2, h3, h4, h5, h6, img, li, p, td, th, pre, code, blockquote, canvas, [draggable], [ondragstart], [ondrop], [id*="hit"], [id*="drag"], [id*="drop"], [class*="drag"], [class*="drop"], [class*="dropzone"], [role="button"], [role="link"], [role="checkbox"], [role="radio"], [role="combobox"], [role="menuitem"], [role="tab"], [role="switch"], [role="option"], [role="heading"], [role="listitem"], [role="status"], [role="alert"], [role="cell"], [tabindex]:not([tabindex="-1"]), [contenteditable="true"], [oncontextmenu], [data-contextmenu], [data-context-menu], [contextmenu], [aria-haspopup="menu"], [onclick], [data-toggle], [data-action], [data-target], [data-pages], [class*="sidebar"], [class*="hamburger"], [class*="nav-toggle"], [class*="menu-toggle"], [class*="navbar-toggler"], iframe';
                     try {
                         var found = root.querySelectorAll(selector);
                         for (var i = 0; i < found.length; i++) {
@@ -904,6 +904,147 @@
                     return tag;
                 }
 
+                // Infers human-readable labels for icon-only buttons, menus, and controls
+                function resolveIconLabel(el, rawText) {
+                    if (!el) return '';
+                    var txt = (rawText || '').trim();
+
+                    // 1. Check known icon unicode characters and common ligatures
+                    if (/[\u2630\u2261\uE5D2\u268C]/.test(txt) || txt === 'menu' || txt === 'bars') {
+                        return 'Navigation Menu (☰)';
+                    }
+                    if (/[\uD83D\uDD0D\u2315]/.test(txt) || txt === 'search') {
+                        return 'Search';
+                    }
+                    if (/[\u2715\u2716\u00D7\u2573]/.test(txt) || txt === 'close' || txt === 'clear') {
+                        return 'Close';
+                    }
+                    if (/[\uD83D\uDD14\u220E]/.test(txt) || txt === 'notifications' || txt === 'bell' || txt === 'notifications_none') {
+                        return 'Notifications';
+                    }
+                    if (txt === 'account_circle' || txt === 'person' || txt === 'user') {
+                        return 'Profile / Account';
+                    }
+                    if (txt === 'settings' || txt === 'tune' || txt === 'gear') {
+                        return 'Settings';
+                    }
+                    if (txt === 'arrow_back' || txt === 'chevron_left' || txt === '←') {
+                        return 'Back';
+                    }
+                    if (txt === 'arrow_forward' || txt === 'chevron_right' || txt === '→') {
+                        return 'Next';
+                    }
+
+                    // If rawText already has meaningful alphanumeric content (>1 char), use it
+                    if (txt && /[a-zA-Z0-9]{2,}/.test(txt)) {
+                        return txt;
+                    }
+
+                    // 2. Check tooltip, data attributes, and titles
+                    var dataToggle = el.getAttribute ? (
+                        el.getAttribute('data-toggle') ||
+                        el.getAttribute('data-action') ||
+                        el.getAttribute('data-target') ||
+                        el.getAttribute('data-pages') ||
+                        el.getAttribute('data-init') ||
+                        ''
+                    ) : '';
+                    if (dataToggle) {
+                        var dtLow = dataToggle.toLowerCase();
+                        if (dtLow.indexOf('sidebar') !== -1 || dtLow.indexOf('menu') !== -1 || dtLow.indexOf('nav') !== -1) {
+                            return 'Navigation Menu (☰)';
+                        }
+                        if (dtLow.indexOf('dropdown') !== -1) return 'Dropdown Menu';
+                        if (dtLow.indexOf('collapse') !== -1) return 'Toggle Menu (☰)';
+                    }
+                    var origTitle = el.getAttribute ? (el.getAttribute('data-original-title') || el.getAttribute('title')) : null;
+                    if (origTitle && origTitle.trim()) return origTitle.trim();
+
+                    // 3. Check SVG title / desc / aria-label / data-icon
+                    if (el.querySelector) {
+                        var svg = el.querySelector('svg');
+                        if (svg) {
+                            var st = svg.querySelector('title, desc');
+                            if (st && st.textContent && st.textContent.trim()) return st.textContent.trim();
+                            if (svg.getAttribute('aria-label')) return svg.getAttribute('aria-label').trim();
+                            var dIcon = (svg.getAttribute('data-icon') || svg.getAttribute('id') || '').toLowerCase();
+                            if (dIcon.indexOf('bars') !== -1 || dIcon.indexOf('menu') !== -1) return 'Navigation Menu (☰)';
+                            if (dIcon.indexOf('search') !== -1) return 'Search';
+                            if (dIcon.indexOf('bell') !== -1) return 'Notifications';
+                            if (dIcon.indexOf('user') !== -1) return 'Profile / Account';
+                            if (dIcon.indexOf('cog') !== -1 || dIcon.indexOf('gear') !== -1) return 'Settings';
+                        }
+                    }
+
+                    // 4. Check class names of element and child icon tags (i, span, svg)
+                    var classAndId = (
+                        (el.className && typeof el.className === 'string' ? el.className : '') + ' ' +
+                        (el.id || '')
+                    ).toLowerCase();
+
+                    if (el.querySelectorAll) {
+                        var iconNodes = el.querySelectorAll('i, span, em, svg');
+                        for (var idx = 0; idx < iconNodes.length && idx < 6; idx++) {
+                            var inNode = iconNodes[idx];
+                            if (inNode.className && typeof inNode.className === 'string') {
+                                classAndId += ' ' + inNode.className.toLowerCase();
+                            }
+                            if (inNode.getAttribute) {
+                                var dIconSub = inNode.getAttribute('data-icon') || inNode.getAttribute('data-feather') || '';
+                                if (dIconSub) classAndId += ' ' + dIconSub.toLowerCase();
+                            }
+                        }
+                    }
+
+                    if (/hamburger|fa-bars|icon-bars|icon-menu|navbar-toggler|sidebar-toggle|sidebar-nav|nav-toggle|menu-toggle|drawer-toggle|\bmenu\b|\bnavigation\b|\bnav-item\b/.test(classAndId)) {
+                        return 'Navigation Menu (☰)';
+                    }
+                    if (/search|magnif/.test(classAndId)) {
+                        return 'Search';
+                    }
+                    if (/close|dismiss|clear|times/.test(classAndId)) {
+                        return 'Close';
+                    }
+                    if (/bell|notif|alert/.test(classAndId)) {
+                        return 'Notifications';
+                    }
+                    if (/user|avatar|profile|account/.test(classAndId)) {
+                        return 'Profile / Account';
+                    }
+                    if (/gear|cog|settings|config/.test(classAndId)) {
+                        return 'Settings';
+                    }
+                    if (/filter/.test(classAndId)) {
+                        return 'Filter';
+                    }
+                    if (/refresh|reload|sync/.test(classAndId)) {
+                        return 'Refresh';
+                    }
+                    if (/download/.test(classAndId)) {
+                        return 'Download';
+                    }
+                    if (/upload/.test(classAndId)) {
+                        return 'Upload';
+                    }
+                    if (/chevron-down|caret-down|angle-down|dropdown/.test(classAndId)) {
+                        return 'Dropdown';
+                    }
+                    if (/chevron-up|caret-up|angle-up/.test(classAndId)) {
+                        return 'Collapse';
+                    }
+                    if (/chevron-right|caret-right|angle-right|arrow-right/.test(classAndId)) {
+                        return 'Next';
+                    }
+                    if (/chevron-left|caret-left|angle-left|arrow-left/.test(classAndId)) {
+                        return 'Back';
+                    }
+                    if (/grid|apps|th-large/.test(classAndId)) {
+                        return 'Apps Grid';
+                    }
+
+                    return txt;
+                }
+
                 // Resolve accessible label using ARIA, label tags, placeholder, title, adjacent labels, and text
                 function getAccessibleLabel(el) {
                     try {
@@ -961,6 +1102,8 @@
                             if (el.tagName === 'CANVAS') return 'canvas';
                         }
                         if (isSensitiveValue(rawText)) return '';
+                        var resolvedIcon = resolveIconLabel(el, rawText);
+                        if (resolvedIcon) return resolvedIcon;
                         return rawText;
                     } catch(e) {
                         return '';
@@ -1063,7 +1206,14 @@
                     var isTextNode = (tag === 'li' || tag === 'p' || tag === 'td' || tag === 'th' || role === 'listitem' || role === 'status' || role === 'alert' || role === 'cell' || role === 'text' || role === 'paragraph' || isMeaningfulTextLeaf(el));
 
                     // Filter out meaningless whitespace links or empty non-interactive anchors
-                    if ((tag === 'a' || tag === 'button') && !text && !val && !el.querySelector('img, svg')) {
+                    var hasActionableAffordance = Boolean(
+                        text || val ||
+                        el.querySelector('img, svg') ||
+                        (el.getAttribute && (el.getAttribute('data-toggle') || el.getAttribute('data-action') || el.getAttribute('data-target') || el.getAttribute('data-pages') || el.getAttribute('aria-label') || el.getAttribute('title'))) ||
+                        (el.className && typeof el.className === 'string' && /menu|nav|sidebar|toggle|btn|icon|action|bars|hamburger/i.test(el.className)) ||
+                        (el.id && /menu|nav|sidebar|toggle|btn/i.test(el.id))
+                    );
+                    if ((tag === 'a' || tag === 'button') && !hasActionableAffordance) {
                         continue;
                     }
                     if (isHeading && !text) {
@@ -1704,6 +1854,9 @@
                     }
 
                     if (targetId) {
+                        if (typeof targetId === 'string') {
+                            targetId = targetId.replace(/^[\[\s]+|[\]\s]+$/g, '');
+                        }
                         if (this.elements && this.elements[targetId] && this.isNodeConnected(this.elements[targetId])) {
                             el = this.elements[targetId];
                         } else {
@@ -1716,7 +1869,7 @@
                         var isIncompatible = false;
                         if (el) {
                             var elTag = el.tagName ? el.tagName.toLowerCase() : '';
-                            if (action === 'type' || action === 'clear') {
+                            if (action === 'type' || action === 'fill' || action === 'clear') {
                                 if (!isTextEditable(el)) isIncompatible = true;
                             } else if (action === 'selectoption') {
                                 if (elTag !== 'select') isIncompatible = true;
@@ -2170,6 +2323,7 @@
                         el.dispatchEvent(new (elWinC.Event || Event)('change', { bubbles: true }));
                         return { success: true, message: 'Cleared value in ' + targetId, elementId: targetId };
 
+                    case 'fill':
                     case 'type':
                         if (!el) return { success: false, code: 'MISSING_TARGET', message: 'No target element for type action' };
                         if (!isTextEditable(el)) {
@@ -2198,8 +2352,10 @@
                             }
                             if (actionObj.submit) {
                                 var cEnterDown = new (elWinT.KeyboardEvent || KeyboardEvent)('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true });
+                                var cEnterPress = new (elWinT.KeyboardEvent || KeyboardEvent)('keypress', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true });
                                 var cEnterUp = new (elWinT.KeyboardEvent || KeyboardEvent)('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true });
                                 el.dispatchEvent(cEnterDown);
+                                el.dispatchEvent(cEnterPress);
                                 el.dispatchEvent(cEnterUp);
                             }
                             var ceMsg = shouldUpdateValue ? ('Typed into ' + (targetId || 'element')) : ('Submitted ' + (targetId || 'element'));
@@ -2225,11 +2381,17 @@
                         }
                         if (actionObj.submit) {
                             var enterDown = new (elWinT.KeyboardEvent || KeyboardEvent)('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true });
+                            var enterPress = new (elWinT.KeyboardEvent || KeyboardEvent)('keypress', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true });
                             var enterUp = new (elWinT.KeyboardEvent || KeyboardEvent)('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true });
                             el.dispatchEvent(enterDown);
+                            el.dispatchEvent(enterPress);
                             el.dispatchEvent(enterUp);
                             var f = el.form || (el.closest ? el.closest('form') : null);
                             if (f) {
+                                var submitBtn = f.querySelector('button[type="submit"], #search-icon-legacy, button#search-icon, button[aria-label*="Search"]');
+                                if (submitBtn) {
+                                    try { submitBtn.click(); } catch(e) {}
+                                }
                                 try {
                                     if (typeof f.requestSubmit === 'function') f.requestSubmit();
                                     else f.submit();
