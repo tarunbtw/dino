@@ -121,22 +121,43 @@ struct BrowserView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .zIndex(0)
 
-            // In-App Autonomous Copilot (Terax-style floating docked card)
+            // In-App Autonomous Copilot (Terax-style floating docked card & minimized pip)
             if store.isAutopilotRailVisible {
-                VStack {
-                    Spacer()
-                    HStack {
+                if store.isAutopilotMinimized {
+                    VStack {
                         Spacer()
+                        HStack {
+                            Spacer()
+                            AutopilotMinimizedButton(store: store)
+                                .padding(.trailing, 16)
+                                .padding(.bottom, 16)
+                        }
+                    }
+                    .transition(.scale(scale: 0.85, anchor: .bottomTrailing).combined(with: .opacity))
+                    .zIndex(160)
+                } else {
+                    ZStack(alignment: .bottomTrailing) {
+                        // Invisible click-outside catcher that minimizes the card
+                        Color.black.opacity(0.001)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                withAnimation(Theme.glide) {
+                                    store.isAutopilotMinimized = true
+                                }
+                            }
+
                         AutopilotRailView(store: store)
                             .padding(.trailing, 16)
                             .padding(.bottom, 16)
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .transition(.asymmetric(
+                        insertion: .scale(scale: 0.94, anchor: .bottomTrailing).combined(with: .opacity),
+                        removal: .scale(scale: 0.94, anchor: .bottomTrailing).combined(with: .opacity)
+                    ))
+                    .zIndex(160)
                 }
-                .transition(.asymmetric(
-                    insertion: .scale(scale: 0.94, anchor: .bottomTrailing).combined(with: .opacity),
-                    removal: .scale(scale: 0.94, anchor: .bottomTrailing).combined(with: .opacity)
-                ))
-                .zIndex(160)
             }
 
             // Docked Sidebar
@@ -304,8 +325,15 @@ struct BrowserView: View {
             Button("Space 2") { store.switchSpace(at: 1) }.keyboardShortcut("2", modifiers: .control)
             Button("Space 3") { store.switchSpace(at: 2) }.keyboardShortcut("3", modifiers: .control)
             Button("Toggle Autopilot") {
-                withAnimation(.spring(response: 0.26, dampingFraction: 0.86)) {
-                    store.isAutopilotRailVisible.toggle()
+                withAnimation(Theme.glide) {
+                    if !store.isAutopilotRailVisible {
+                        store.isAutopilotRailVisible = true
+                        store.isAutopilotMinimized = false
+                    } else if store.isAutopilotMinimized {
+                        store.isAutopilotMinimized = false
+                    } else {
+                        store.isAutopilotMinimized = true
+                    }
                 }
             }.keyboardShortcut("a", modifiers: [.command, .shift])
         }

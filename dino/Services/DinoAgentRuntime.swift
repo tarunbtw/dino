@@ -52,6 +52,14 @@ struct AgentChatMessage: Identifiable, Hashable {
     var details: String? = nil
 }
 
+struct AgentChatSession: Identifiable, Hashable {
+    let id: UUID
+    var title: String
+    let createdAt: Date
+    var messages: [AgentChatMessage]
+    var stepLogs: [AgentStepLog]
+}
+
 @MainActor
 final class DinoAgentRuntime: ObservableObject {
     static let shared = DinoAgentRuntime()
@@ -60,6 +68,8 @@ final class DinoAgentRuntime: ObservableObject {
     @Published var currentThought: String = ""
     @Published var stepLogs: [AgentStepLog] = []
     @Published var messages: [AgentChatMessage] = []
+    @Published var sessions: [AgentChatSession] = []
+    @Published var activeSessionId: UUID? = nil
     @Published var activeGoal: String = ""
     @Published var stepCount: Int = 0
 
@@ -77,12 +87,26 @@ final class DinoAgentRuntime: ObservableObject {
         let cleanGoal = goal.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanGoal.isEmpty else { return }
 
+        if let id = activeSessionId, let idx = sessions.firstIndex(where: { $0.id == id }) {
+            if sessions[idx].messages.isEmpty {
+                sessions[idx].title = String(cleanGoal.prefix(28))
+            }
+        } else {
+            let initialTitle = String(cleanGoal.prefix(28))
+            let session = AgentChatSession(id: UUID(), title: initialTitle, createdAt: Date(), messages: [], stepLogs: [])
+            sessions.insert(session, at: 0)
+            activeSessionId = session.id
+        }
+
         self.activeGoal = cleanGoal
         self.currentTab = tab
         self.stepCount = 0
         self.stepLogs = []
         self.history = []
-        self.messages.append(AgentChatMessage(sender: .user, text: cleanGoal))
+        let userMsg = AgentChatMessage(sender: .user, text: cleanGoal)
+        self.messages.append(userMsg)
+        self.syncCurrentSession()
+
         self.currentThought = "Analyzing page context and user goal..."
         self.status = .running(goal: cleanGoal, step: 0)
 
@@ -93,12 +117,42 @@ final class DinoAgentRuntime: ObservableObject {
         }
     }
 
-    func clearSession() {
+    func newSession() {
+        syncCurrentSession()
         abort()
         messages.removeAll()
         stepLogs.removeAll()
         history.removeAll()
         activeGoal = ""
+        activeSessionId = nil
+    }
+
+    func clearSession() {
+        newSession()
+    }
+
+    func selectSession(_ session: AgentChatSession) {
+        guard session.id != activeSessionId else { return }
+        syncCurrentSession()
+        abort()
+        activeSessionId = session.id
+        messages = session.messages
+        stepLogs = session.stepLogs
+        activeGoal = session.messages.first(where: { $0.sender == .user })?.text ?? ""
+        history.removeAll()
+    }
+
+    func deleteSession(id: UUID) {
+        sessions.removeAll { $0.id == id }
+        if activeSessionId == id {
+            newSession()
+        }
+    }
+
+    func syncCurrentSession() {
+        guard let id = activeSessionId, let idx = sessions.firstIndex(where: { $0.id == id }) else { return }
+        sessions[idx].messages = messages
+        sessions[idx].stepLogs = stepLogs
     }
 
     func pause() {
@@ -229,6 +283,7 @@ final class DinoAgentRuntime: ObservableObject {
                 let summary = (args["summary"] as? String) ?? stepResponse.thought
                 appendLog(step: stepCount, thought: stepResponse.thought, action: "Completed: \(summary)", isSuccess: true)
                 messages.append(AgentChatMessage(sender: .agent, text: summary))
+                syncCurrentSession()
                 _ = try? await tab.webView.evaluateJavaScript("if (window.__dino && window.__dino.hideVirtualCursor) window.__dino.hideVirtualCursor();")
                 status = .completed(summary: summary)
                 tab.isAgentDriving = false
@@ -305,5 +360,6 @@ final class DinoAgentRuntime: ObservableObject {
         if !action.isEmpty && !action.hasPrefix("Refining") {
             messages.append(AgentChatMessage(sender: isSuccess ? .action : .error, text: action, details: thought.isEmpty ? nil : thought))
         }
+        syncCurrentSession()
     }
 }

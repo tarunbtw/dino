@@ -41,6 +41,7 @@ struct SettingsView: View {
         case general = "General"
         case spaces = "Spaces"
         case passwords = "Passwords"
+        case agent = "Copilot & Agents"
         case history = "History"
         case bookmarks = "Bookmarks"
         case downloads = "Downloads"
@@ -53,6 +54,7 @@ struct SettingsView: View {
             case .general: return "gearshape"
             case .spaces: return "square.stack"
             case .passwords: return "key.fill"
+            case .agent: return "sparkles"
             case .history: return "clock.arrow.circlepath"
             case .bookmarks: return "bookmark"
             case .downloads: return "arrow.down.circle"
@@ -82,6 +84,8 @@ struct SettingsView: View {
                         spacesSection
                     case .passwords:
                         passwordsSection
+                    case .agent:
+                        agentSection
                     case .history:
                         historySection
                     case .bookmarks:

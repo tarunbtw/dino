@@ -144,43 +144,104 @@ struct AutopilotRailView: View {
                 .background(Color(hex: 0x8FAE8B).opacity(0.12), in: Capsule())
             }
 
-            // New Chat / Clear Button
-            Button(action: {
-                withAnimation(Theme.glide) {
-                    runtime.clearSession()
+            // Multi-Chat Sessions Menu (Terax style "New chat ⌵")
+            Menu {
+                Button(action: {
+                    withAnimation(Theme.glide) {
+                        runtime.newSession()
+                    }
+                }) {
+                    Label("New Chat", systemImage: "plus")
                 }
-            }) {
-                HStack(spacing: 4) {
-                    Image(systemName: "arrow.counterclockwise")
-                        .font(.system(size: 9))
-                    Text("New")
-                        .font(Theme.font(size: 11))
-                }
-                .foregroundStyle(Theme.faint)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 4)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help("Start new session")
 
-            // Close Button
+                if !runtime.sessions.isEmpty {
+                    Divider()
+                    ForEach(runtime.sessions) { session in
+                        Button(action: {
+                            withAnimation(Theme.glide) {
+                                runtime.selectSession(session)
+                            }
+                        }) {
+                            HStack {
+                                Text(session.title)
+                                if runtime.activeSessionId == session.id {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+                    }
+
+                    Divider()
+                    Button(role: .destructive, action: {
+                        withAnimation(Theme.glide) {
+                            if let activeId = runtime.activeSessionId {
+                                runtime.deleteSession(id: activeId)
+                            } else {
+                                runtime.clearSession()
+                            }
+                        }
+                    }) {
+                        Label("Delete Current Chat", systemImage: "trash")
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text(currentSessionLabel)
+                        .font(Theme.font(size: 11, weight: .medium))
+                        .foregroundStyle(Theme.muted)
+                        .lineLimit(1)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 7, weight: .semibold))
+                        .foregroundStyle(Theme.faint)
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(Theme.hover, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+            }
+            .menuStyle(.borderlessButton)
+            .help("Chat sessions & history")
+
+            // Minimize Button
             Button(action: {
                 withAnimation(Theme.glide) {
-                    store.isAutopilotRailVisible = false
+                    store.isAutopilotMinimized = true
                 }
             }) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .semibold))
+                Image(systemName: "minus")
+                    .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(Theme.muted)
                     .frame(width: 20, height: 20)
                     .background(Theme.hover, in: Circle())
             }
             .buttonStyle(.plain)
-            .help("Close (⌘⇧A)")
+            .help("Minimize (Click outside also minimizes)")
+
+            // Close Button
+            Button(action: {
+                withAnimation(Theme.glide) {
+                    store.isAutopilotRailVisible = false
+                    store.isAutopilotMinimized = false
+                }
+            }) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(Theme.muted)
+                    .frame(width: 20, height: 20)
+                    .background(Theme.hover, in: Circle())
+            }
+            .buttonStyle(.plain)
+            .help("Close Copilot (⌘⇧A)")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)
+    }
+
+    private var currentSessionLabel: String {
+        if let id = runtime.activeSessionId,
+           let session = runtime.sessions.first(where: { $0.id == id }) {
+            return session.title.isEmpty ? "Chat" : String(session.title.prefix(16))
+        }
+        return "New chat"
     }
 
     // MARK: - Resting Canvas State (Editorial, Clean, Firn-Native)
@@ -669,5 +730,57 @@ struct AutopilotRailView: View {
         .padding(20)
         .frame(width: 380)
         .background(Theme.page)
+    }
+}
+
+// MARK: - Minimized Floating Corner Button
+
+struct AutopilotMinimizedButton: View {
+    @ObservedObject var store: BrowserStore
+    @ObservedObject private var runtime = DinoAgentRuntime.shared
+    @State private var isHovered: Bool = false
+
+    var body: some View {
+        Button(action: {
+            withAnimation(Theme.glide) {
+                store.isAutopilotMinimized = false
+            }
+        }) {
+            ZStack(alignment: .topTrailing) {
+                Circle()
+                    .fill(Theme.page.opacity(0.96))
+                    .background(.ultraThinMaterial, in: Circle())
+                    .frame(width: 44, height: 44)
+                    .overlay(
+                        Circle()
+                            .strokeBorder(isHovered ? Theme.accent.opacity(0.6) : Theme.activeTabHairline, lineWidth: 1)
+                    )
+                    .shadow(color: Color.black.opacity(0.24), radius: 10, y: 4)
+                    .shadow(color: Color.black.opacity(0.12), radius: 2, y: 1)
+
+                Image(systemName: "sparkles")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(runtime.status.isRunning ? Theme.accent : Theme.ink)
+                    .frame(width: 44, height: 44)
+
+                if runtime.status.isRunning {
+                    Circle()
+                        .fill(Color(hex: 0x8FAE8B))
+                        .frame(width: 9, height: 9)
+                        .overlay(
+                            Circle()
+                                .stroke(Theme.page, lineWidth: 1.5)
+                        )
+                        .offset(x: -2, y: 2)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .scaleEffect(isHovered ? 1.05 : 1.0)
+        .animation(.spring(response: 0.2, dampingFraction: 0.7), value: isHovered)
+        .onHover { hovering in
+            isHovered = hovering
+        }
+        .help(runtime.status.isRunning ? "Dino Copilot is driving (Step \(runtime.stepCount)) — Click to expand" : "Dino Copilot (⌘⇧A) — Click to expand")
     }
 }

@@ -31,10 +31,19 @@ enum DinoModelProvider: String, CaseIterable, Identifiable, Codable {
 
     var defaultModel: String {
         switch self {
-        case .gemini: return "gemini-1.5-pro"
+        case .gemini: return "gemini-2.5-flash"
         case .claude: return "claude-3-5-sonnet-20241022"
         case .openai: return "gpt-4o"
         case .ollama: return "llama3.2"
+        }
+    }
+
+    var availableModels: [String] {
+        switch self {
+        case .gemini: return ["gemini-2.5-flash", "gemini-flash-latest", "gemini-2.0-flash", "gemini-1.5-flash"]
+        case .claude: return ["claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022", "claude-3-opus-20240229"]
+        case .openai: return ["gpt-4o", "gpt-4o-mini", "o1-mini", "o1-preview"]
+        case .ollama: return ["llama3.2", "mistral", "qwen2.5-coder", "deepseek-r1"]
         }
     }
 

@@ -43,6 +43,7 @@ final class BrowserStore: ObservableObject {
     @Published var peekTab: Tab? = nil
     @Published var peekFromTabId: UUID? = nil
     @Published var isAutopilotRailVisible: Bool = false
+    @Published var isAutopilotMinimized: Bool = false
     @Published var draggingTabId: UUID? = nil
 
     // MARK: - Split Picker State

@@ -154,7 +154,9 @@ final class DinoLLMClient {
     // MARK: - Gemini Implementation
 
     private func callGemini(key: String, model: String, goal: String, history: [[String: Any]], currentDOM: String, activeURL: URL?, pageTitle: String) async throws -> AgentStepResponse {
-        let endpoint = "https://generativelanguage.googleapis.com/v1beta/models/\(model):generateContent?key=\(key)"
+        let cleanModel = model.hasPrefix("models/") ? String(model.dropFirst(7)) : model
+        let targetModel = (cleanModel.isEmpty || cleanModel == "gemini-1.5-pro") ? "gemini-2.5-flash" : cleanModel
+        let endpoint = "https://generativelanguage.googleapis.com/v1beta/models/\(targetModel):generateContent?key=\(key)"
         guard let url = URL(string: endpoint) else { throw DinoLLMError.networkError("Invalid Gemini endpoint") }
 
         var request = URLRequest(url: url)
