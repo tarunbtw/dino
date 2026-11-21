@@ -2,7 +2,7 @@
 
 Official TypeScript/JavaScript SDK and CLI for [Dino](https://github.com/tarunbtw/dino) — the ultra-light native macOS WebKit browser engine built for AI agents.
 
-- **Zero Heavy Drivers**: <15MB native binary, <80ms startup, ~35MB RAM (vs 450MB+ Chromium).
+
 - **Auto-Download Engine**: Works out-of-the-box via `npx dino-browser` or `import { Dino } from 'dino-browser'`. Automatically finds `/Applications/Dino.app` or downloads the native engine from GitHub Releases into `~/.dino/bin/dino`.
 - **Token-Optimized Perception**: Compact accessibility tree (`dino snap -v`), DOM diffs (sub-50 tokens), and vision Set-of-Marks badges.
 - **Native Hardware Input**: Direct AppKit & CGEvent keyboard/mouse synthesis.
@@ -13,7 +13,7 @@ Official TypeScript/JavaScript SDK and CLI for [Dino](https://github.com/tarunbt
 
 ```bash
 # Navigate to a URL
-npx dino-browser goto https://example.com
+npx dino-browser goto https://github.com/tarunbtw/dino
 
 # Token-optimized perception (~400 tokens)
 npx dino-browser snap -v
