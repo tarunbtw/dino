@@ -96,6 +96,17 @@ final class DinoLLMClient {
             ]
         ],
         [
+            "name": "new_tab",
+            "description": "Open a new browser tab with the specified URL and switch focus to it. ALWAYS use this when the user asks to open another site while media is playing (e.g. YouTube, music) or for multi-site workflows to preserve the existing page.",
+            "parameters": [
+                "type": "object",
+                "properties": [
+                    "url": ["type": "string", "description": "The destination URL for the new tab."]
+                ],
+                "required": ["url"]
+            ]
+        ],
+        [
             "name": "ask_user",
             "description": "Pause execution and ask the human user a question or request manual input (e.g. OTP, 2FA, password, clarification).",
             "parameters": [

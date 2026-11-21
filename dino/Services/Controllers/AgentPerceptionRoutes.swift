@@ -424,6 +424,10 @@ extension DinoAgentServer {
             var isSomCrop = queryBool("somCrop") || queryBool("container") || queryBool("cropContainer")
             var elementId: String? = queryItem("elementId") ?? queryItem("ref")
             var clipRect: CGRect? = nil
+            var scaleFactor: CGFloat? = nil
+            if let scaleStr = queryItem("scale"), let sVal = Double(scaleStr), sVal > 0 {
+                scaleFactor = CGFloat(sVal)
+            }
             if let clipStr = queryItem("clip") {
                 let parts = clipStr.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
                 guard parts.count == 4, parts[2] > 0, parts[3] > 0, !parts[0].isNaN, !parts[1].isNaN, !parts[2].isNaN, !parts[3].isNaN else {
@@ -440,6 +444,11 @@ extension DinoAgentServer {
                 if let labeledBool = json["labeled"] as? Bool { isLabeled = labeledBool }
                 if let somBool = json["somCrop"] as? Bool ?? json["container"] as? Bool ?? json["cropContainer"] as? Bool { isSomCrop = somBool }
                 if let elId = json["elementId"] as? String { elementId = elId }
+                if let sNum = json["scale"] as? NSNumber, sNum.doubleValue > 0 {
+                    scaleFactor = CGFloat(sNum.doubleValue)
+                } else if let sStr = json["scale"] as? String, let sVal = Double(sStr), sVal > 0 {
+                    scaleFactor = CGFloat(sVal)
+                }
                 if let clipRaw = json["clip"] {
                     if let clipDict = clipRaw as? [String: Any],
                        let x = (clipDict["x"] as? NSNumber)?.doubleValue,
@@ -463,7 +472,7 @@ extension DinoAgentServer {
             }
             do {
                 let image = try await activeTab.captureScreenshot(labeled: isLabeled, elementId: elementId, clip: clipRect, somCrop: isSomCrop)
-                if let png = image.pngData {
+                if let png = image.pngData(scale: scaleFactor) {
                     sendRaw(connection: connection, contentType: "image/png", data: png, origin: origin)
                 } else {
                     sendResponse(connection: connection, status: "500 Internal Server Error", body: "{\"error\":\"Failed to encode PNG data\",\"code\":\"PNG_ENCODE_FAILED\",\"success\":false}", origin: origin)

@@ -246,6 +246,8 @@ extension Tab: WKNavigationDelegate {
         self.lastNavigationStartTime = Date()
         self.lastNavigationError = nil
         self.isShowingOfflinePage = false
+        self.isPlayingAudio = false
+        self.isAudioPausedByPlayer = false
 
         let targetUrl = webView.url?.absoluteString ?? self.url?.absoluteString ?? ""
         let docEntry = NetworkEntry(

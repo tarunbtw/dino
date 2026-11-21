@@ -359,17 +359,85 @@ struct AutopilotRailView: View {
 
     // MARK: - Conversation Feed View (Active Chat State)
 
+    private enum FeedItem: Identifiable {
+        case user(AgentChatMessage)
+        case actionGroup(id: UUID, actions: [AgentChatMessage])
+        case agent(AgentChatMessage)
+        case error(AgentChatMessage)
+
+        var id: UUID {
+            switch self {
+            case .user(let m): return m.id
+            case .actionGroup(let id, _): return id
+            case .agent(let m): return m.id
+            case .error(let m): return m.id
+            }
+        }
+    }
+
+    private var groupedFeedItems: [FeedItem] {
+        var items: [FeedItem] = []
+        var pendingActions: [AgentChatMessage] = []
+        var groupID: UUID? = nil
+
+        for message in runtime.messages {
+            if message.sender == .action {
+                if pendingActions.isEmpty {
+                    groupID = message.id
+                }
+                pendingActions.append(message)
+            } else {
+                if !pendingActions.isEmpty, let gid = groupID {
+                    items.append(.actionGroup(id: gid, actions: pendingActions))
+                    pendingActions.removeAll()
+                    groupID = nil
+                }
+                switch message.sender {
+                case .user:
+                    items.append(.user(message))
+                case .agent:
+                    items.append(.agent(message))
+                case .error:
+                    items.append(.error(message))
+                case .action:
+                    break
+                }
+            }
+        }
+
+        if !pendingActions.isEmpty, let gid = groupID {
+            items.append(.actionGroup(id: gid, actions: pendingActions))
+        }
+
+        return items
+    }
+
     private var conversationFeedView: some View {
         ScrollViewReader { proxy in
             ScrollView(.vertical, showsIndicators: false) {
                 LazyVStack(alignment: .leading, spacing: 10) {
-                    ForEach(runtime.messages) { message in
-                        chatBubble(for: message)
-                            .id(message.id)
+                    ForEach(groupedFeedItems) { item in
+                        switch item {
+                        case .user(let message):
+                            userChatBubble(message: message)
+                                .id(message.id)
+                        case .actionGroup(let id, let actions):
+                            CollapsibleStepGroupView(
+                                actions: actions,
+                                isRunning: runtime.status.isRunning && runtime.messages.last?.sender == .action
+                            )
+                            .id(id)
+                        case .agent(let message):
+                            agentChatBubble(message: message)
+                                .id(message.id)
+                        case .error(let message):
+                            errorChatBubble(message: message)
+                                .id(message.id)
+                        }
                     }
 
-                    // Live Thinking Stream
-                    if runtime.status.isRunning {
+                    // Live Thinking Stream (when running and no actions yet or thinking)
+                    if runtime.status.isRunning && (runtime.messages.last?.sender != .action) {
                         HStack(alignment: .top, spacing: 8) {
                             ProgressView()
                                 .controlSize(.mini)
@@ -417,91 +485,74 @@ struct AutopilotRailView: View {
         }
     }
 
-    @ViewBuilder
-    private func chatBubble(for message: AgentChatMessage) -> some View {
-        switch message.sender {
-        case .user:
+    private func userChatBubble(message: AgentChatMessage) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Spacer(minLength: 28)
+
+            CopyButton(text: message.text)
+                .padding(.top, 4)
+
+            Text(message.text)
+                .font(Theme.font(size: 12))
+                .foregroundStyle(Theme.ink)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 7)
+                .background(
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .fill(Theme.frame)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .strokeBorder(Theme.activeTabHairline, lineWidth: 0.5)
+                )
+                .textSelection(.enabled)
+        }
+    }
+
+    private func agentChatBubble(message: AgentChatMessage) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Spacer()
-                Text(message.text)
-                    .font(Theme.font(size: 12))
-                    .foregroundStyle(Theme.ink)
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 7)
-                    .background(
-                        RoundedRectangle(cornerRadius: 11, style: .continuous)
-                            .fill(Theme.frame)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 11, style: .continuous)
-                            .strokeBorder(Theme.activeTabHairline, lineWidth: 0.5)
-                    )
-            }
-
-        case .action:
-            HStack(alignment: .top, spacing: 7) {
-                Image(systemName: "bolt.fill")
-                    .font(.system(size: 10))
-                    .foregroundStyle(Theme.accent)
-                    .padding(.top, 2)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(message.text)
-                        .font(Theme.font(size: 11, weight: .medium))
-                        .foregroundStyle(Theme.muted)
-
-                    if let details = message.details, !details.isEmpty {
-                        Text(details)
-                            .font(Theme.font(size: 10))
-                            .foregroundStyle(Theme.faint)
-                            .lineLimit(2)
-                    }
-                }
-
-                Spacer()
-            }
-            .padding(.horizontal, 9)
-            .padding(.vertical, 5)
-            .background(Theme.hover, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-
-        case .agent:
-            VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 5) {
                     Image(systemName: "sparkles")
                         .font(.system(size: 10))
                         .foregroundStyle(Theme.accent)
-                    Text("Copilot")
+                    Text("Agent")
                         .font(Theme.font(size: 10.5, weight: .semibold))
                         .foregroundStyle(Theme.muted)
                 }
 
-                Text(message.text)
-                    .font(Theme.font(size: 12))
-                    .foregroundStyle(Theme.ink)
-                    .lineSpacing(3)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.frame.opacity(0.5), in: RoundedRectangle(cornerRadius: Theme.tabRadius, style: .continuous))
-
-        case .error:
-            HStack(alignment: .top, spacing: 7) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Color(hex: 0xD69268))
-                    .padding(.top, 2)
-
-                Text(message.text)
-                    .font(Theme.font(size: 11))
-                    .foregroundStyle(Color(hex: 0xD69268))
-
                 Spacer()
+
+                CopyButton(text: message.text)
             }
-            .padding(8)
-            .background(Color(hex: 0xD69268).opacity(0.12), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+
+            Text(message.text)
+                .font(Theme.font(size: 12))
+                .foregroundStyle(Theme.ink)
+                .lineSpacing(3)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
         }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.frame.opacity(0.5), in: RoundedRectangle(cornerRadius: Theme.tabRadius, style: .continuous))
+    }
+
+    private func errorChatBubble(message: AgentChatMessage) -> some View {
+        HStack(alignment: .top, spacing: 7) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 11))
+                .foregroundStyle(Color(hex: 0xD69268))
+                .padding(.top, 2)
+
+            Text(message.text)
+                .font(Theme.font(size: 11))
+                .foregroundStyle(Color(hex: 0xD69268))
+
+            Spacer()
+        }
+        .padding(8)
+        .background(Color(hex: 0xD69268).opacity(0.12), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
 
     // MARK: - HITL Human-In-The-Loop Card
@@ -653,7 +704,143 @@ struct AutopilotRailView: View {
         }
 
         instructionInput = ""
-        runtime.startTask(goal: text, tab: tab)
+        runtime.startTask(goal: text, tab: tab, store: store)
+    }
+}
+
+// MARK: - Collapsible Accordion Step Group (ChatGPT / Claude / Gemini Style)
+
+struct CollapsibleStepGroupView: View {
+    let actions: [AgentChatMessage]
+    let isRunning: Bool
+    @State private var isExpanded: Bool = false
+    @State private var isHovered: Bool = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button(action: {
+                withAnimation(.spring(response: 0.24, dampingFraction: 0.85)) {
+                    isExpanded.toggle()
+                }
+            }) {
+                HStack(spacing: 6) {
+                    if isRunning {
+                        ProgressView()
+                            .controlSize(.mini)
+                    } else {
+                        Image(systemName: "bolt.fill")
+                            .font(.system(size: 9.5))
+                            .foregroundStyle(Theme.accent)
+                    }
+
+                    let stepLabel = actions.count == 1 ? "1 step completed" : "\(actions.count) steps completed"
+                    Text(isRunning ? "Working on step \(actions.count)..." : stepLabel)
+                        .font(Theme.font(size: 11, weight: .medium))
+                        .foregroundStyle(Theme.muted)
+
+                    Spacer()
+
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 8.5, weight: .semibold))
+                        .foregroundStyle(Theme.faint)
+                }
+                .padding(.horizontal, 9)
+                .padding(.vertical, 6)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .onHover { isHovered = $0 }
+
+            if isExpanded {
+                Rectangle()
+                    .fill(Theme.activeTabHairline)
+                    .frame(height: 0.5)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(Array(actions.enumerated()), id: \.element.id) { index, action in
+                        HStack(alignment: .top, spacing: 6) {
+                            Text("\(index + 1).")
+                                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                .foregroundStyle(Theme.faint)
+                                .frame(width: 14, alignment: .trailing)
+                                .padding(.top, 1)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(action.text)
+                                    .font(Theme.font(size: 11, weight: .medium))
+                                    .foregroundStyle(Theme.ink)
+                                    .fixedSize(horizontal: false, vertical: true)
+
+                                if let details = action.details, !details.isEmpty {
+                                    Text(details)
+                                        .font(Theme.font(size: 10))
+                                        .foregroundStyle(Theme.faint)
+                                        .lineSpacing(2)
+                                        .textSelection(.enabled)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: Theme.tabRadius, style: .continuous)
+                .fill(isHovered ? Theme.hover.opacity(0.6) : Theme.hover.opacity(0.35))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.tabRadius, style: .continuous)
+                .strokeBorder(Theme.activeTabHairline, lineWidth: 0.5)
+        )
+    }
+}
+
+// MARK: - Copy Prompt & Response Button
+
+struct CopyButton: View {
+    let text: String
+    @State private var isCopied: Bool = false
+    @State private var isHovered: Bool = false
+
+    var body: some View {
+        Button(action: {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+            withAnimation(.spring(response: 0.2, dampingFraction: 0.7)) {
+                isCopied = true
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+                withAnimation {
+                    isCopied = false
+                }
+            }
+        }) {
+            HStack(spacing: 3) {
+                Image(systemName: isCopied ? "checkmark" : "doc.on.doc")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(isCopied ? Color(hex: 0x8FAE8B) : (isHovered ? Theme.ink : Theme.faint))
+
+                if isCopied {
+                    Text("Copied")
+                        .font(Theme.font(size: 9.5, weight: .medium))
+                        .foregroundStyle(Color(hex: 0x8FAE8B))
+                        .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                }
+            }
+            .padding(.horizontal, isCopied ? 5 : 3)
+            .padding(.vertical, 3)
+            .background(
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(isHovered ? Theme.hover : Color.clear)
+            )
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .help(isCopied ? "Copied to clipboard" : "Copy prompt")
     }
 }
 

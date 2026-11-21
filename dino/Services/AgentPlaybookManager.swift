@@ -85,7 +85,12 @@ final class AgentPlaybookManager: ObservableObject {
         var count = 0
         for action in actions {
             let activeAction = action.interpolated(with: variables)
-            let res = try await tab.performAction(activeAction)
+            var res = try await tab.performAction(activeAction)
+            if !res.success, let sel = activeAction.selector, !sel.isEmpty, activeAction.target != sel {
+                var fallbackAction = activeAction
+                fallbackAction.target = sel
+                res = try await tab.performAction(fallbackAction)
+            }
             if !res.success {
                 return (false, count, res.message)
             }

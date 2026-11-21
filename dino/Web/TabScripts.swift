@@ -309,4 +309,57 @@ enum TabScripts {
         }, true);
     })();
     """
+
+    // MARK: - Real-time HTML5 Media & Audio Playback Observer
+    static let mediaPlaybackScript = """
+    (function() {
+        if (window.__dino_media_active) return;
+        window.__dino_media_active = true;
+
+        function checkActiveMedia() {
+            try {
+                let isPlaying = false;
+                const elements = document.querySelectorAll('audio, video');
+                for (let i = 0; i < elements.length; i++) {
+                    const el = elements[i];
+                    if (!el.paused && !el.ended && (el.currentTime > 0 || el.readyState >= 2)) {
+                        isPlaying = true;
+                        break;
+                    }
+                }
+                if (!isPlaying && document.title && document.title.includes('▶')) {
+                    isPlaying = true;
+                }
+                if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.dinoMedia) {
+                    window.webkit.messageHandlers.dinoMedia.postMessage({
+                        playing: isPlaying
+                    });
+                }
+            } catch (e) {}
+        }
+
+        // Capture phase listeners catch non-bubbling events on any <audio> or <video> element
+        const mediaEvents = ['play', 'playing', 'pause', 'ended', 'emptied', 'ratechange', 'seeked'];
+        for (let i = 0; i < mediaEvents.length; i++) {
+            window.addEventListener(mediaEvents[i], checkActiveMedia, true);
+        }
+
+        // Also observe document title changes (e.g. YouTube prepending '▶ ')
+        if (window.MutationObserver) {
+            try {
+                const titleEl = document.querySelector('title');
+                if (titleEl) {
+                    const obs = new MutationObserver(checkActiveMedia);
+                    obs.observe(titleEl, { subtree: true, characterData: true, childList: true });
+                }
+            } catch (e) {}
+        }
+
+        if (document.readyState === 'complete' || document.readyState === 'interactive') {
+            checkActiveMedia();
+        } else {
+            document.addEventListener('DOMContentLoaded', checkActiveMedia, { once: true });
+        }
+    })();
+    """
 }

@@ -317,7 +317,7 @@ enum DinoCLIManager {
 
         // 3. Intercept browser automation driver subcommands (snap, click, type, etc.)
         let driverCommands: Set<String> = [
-            "snap", "snapshot", "open", "nav", "navigate", "goto",
+            "snap", "snapshot", "diff", "open", "nav", "navigate", "goto",
             "back", "forward", "reload", "click", "dblclick", "double-click", "type",
             "press", "drag", "hover", "select", "scroll",
             "wait", "tabs", "tab", "eval", "evaluate",
@@ -662,6 +662,7 @@ enum DinoCLIManager {
 
         Browser Automation Commands (Token-Optimized Driver):
           snap [options]      Capture compact semantic markdown snapshot
+          diff [options]      Read DOM mutations since last turn (~26 tokens)
           find [options]      Fast element lookup returning target ref (~15 tokens)
           open, goto <url>    Navigate active tab to URL
           click <ref>         Click element by reference (e.g. e5)

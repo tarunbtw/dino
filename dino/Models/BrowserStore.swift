@@ -81,10 +81,20 @@ final class BrowserStore: ObservableObject {
         spaces.first { $0.id == activeSpaceId } ?? spaces[0]
     }
 
-    /// Tab in the active space that is playing audio out of sight (for the Mini Player).
+    /// Tab playing audio out of sight (for the Mini Player capsule).
+    /// Prioritizes background tabs in the active space context (or pinned / unassigned), then any background tab across spaces.
     var miniPlayerTab: Tab? {
-        tabs.first {
-            $0.spaceId == activeSpaceId &&
+        if let currentSpaceTab = tabs.first(where: {
+            ($0.spaceId == activeSpaceId || $0.spaceId == nil || $0.isPinned) &&
+            ($0.isPlayingAudio || $0.isAudioPausedByPlayer) &&
+            $0.id != activeTabId &&
+            !$0.isBlank &&
+            !$0.isGhost
+        }) {
+            return currentSpaceTab
+        }
+
+        return tabs.first {
             ($0.isPlayingAudio || $0.isAudioPausedByPlayer) &&
             $0.id != activeTabId &&
             !$0.isBlank &&
@@ -350,6 +360,7 @@ final class BrowserStore: ObservableObject {
 
         let tab = Tab(initialURL: url, configuration: configuration, isIncognito: isIncognito, isGhost: isGhost, lazy: lazy)
         tab.spaceId = activeSpaceId
+        wireTabCallbacks(tab)
         
         tab.onOpenURLInNewTab = { [weak self, weak tab] targetURL in
             guard let self else { return }
@@ -435,7 +446,7 @@ final class BrowserStore: ObservableObject {
     /// while virtualizing oldest idle background tabs to Cold tier to cap RAM usage.
     func enforceMemoryGovernor() {
         guard tabs.count > Self.maxActiveWarmTabs else { return }
-        let inactiveTabs = tabs.filter { $0.id != activeTabId && !$0.isBlank && !$0.isInternalPage }
+        let inactiveTabs = tabs.filter { $0.id != activeTabId && !$0.isBlank && !$0.isInternalPage && !$0.isPlayingAudio }
             .sorted(by: { $0.lastActiveTime > $1.lastActiveTime })
         let demoteCandidates = inactiveTabs.dropFirst(Self.maxActiveWarmTabs - 1)
         for tab in demoteCandidates {
@@ -502,6 +513,16 @@ final class BrowserStore: ObservableObject {
         return newTab(url: snapshot.url, isIncognito: snapshot.isIncognito, select: true)
     }
 
+    func wireTabCallbacks(_ tab: Tab) {
+        tab.onMediaPlaybackStateChanged = { [weak self] in
+            Task { @MainActor [weak self] in
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) {
+                    self?.objectWillChange.send()
+                }
+            }
+        }
+    }
+
     /// Selects a tab by ID with smooth content transition.
     func selectTab(id: UUID) {
         if isPickingSplit, let anchor = splitPickAnchor {
@@ -514,14 +535,22 @@ final class BrowserStore: ObservableObject {
             }
         }
         if tabs.contains(where: { $0.id == id }), activeTabId != id {
+            let previousActiveId = activeTabId
             captureActiveTabSnapshot()
             withAnimation(.easeInOut(duration: 0.18)) {
                 activeTabId = id
             }
+            if let prev = tabs.first(where: { $0.id == previousActiveId }) {
+                prev.checkMediaPlayback()
+            }
             if let tab = tabs.first(where: { $0.id == id }) {
+                if let targetSpace = tab.spaceId, targetSpace != activeSpaceId {
+                    activeSpaceId = targetSpace
+                }
                 tab.ensureLoaded()
                 tab.hydrateToHot()
                 tab.lastActiveTime = Date()
+                tab.checkMediaPlayback()
                 ExtensionManager.shared.didActivateTab(tab)
             }
             enforceMemoryGovernor()
@@ -621,6 +650,7 @@ final class BrowserStore: ObservableObject {
     /// Promotes the peek preview to a full tab or split view pane.
     func keepPeek(beside: Bool = false) {
         guard let page = peekTab else { return }
+        wireTabCallbacks(page)
         let fromId = peekFromTabId
         closePeek()
         tabs.append(page)
@@ -872,6 +902,7 @@ final class BrowserStore: ObservableObject {
         guard let anchor = splitPickAnchor else { return nil }
         let newT = Tab(initialURL: nil, isIncognito: anchor.isIncognito)
         newT.spaceId = activeSpaceId
+        wireTabCallbacks(newT)
         tabs.append(newT)
         openSplit(newT, beside: anchor, on: splitPickSide.other)
         if selectAnchor {

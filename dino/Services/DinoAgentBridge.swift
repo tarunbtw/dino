@@ -275,6 +275,7 @@ struct DinoActionResult: Codable {
     let success: Bool
     var message: String
     var elementId: String? = nil
+    var selector: String? = nil
     var obscured: Bool? = nil
     var isObscured: Bool? = nil
     var interceptedBy: String? = nil
@@ -292,10 +293,11 @@ struct DinoActionResult: Codable {
     var lastDialog: String? = nil
     var hasPendingDialog: Bool? = nil
 
-    init(success: Bool, message: String, elementId: String? = nil, obscured: Bool? = nil, isObscured: Bool? = nil, interceptedBy: String? = nil, occludedBy: String? = nil, centerCoordinates: [String: Double]? = nil, healed: Bool? = nil, staleRef: Bool? = nil, code: String? = nil, stack: String? = nil, error: String? = nil, files: [String]? = nil, count: Int? = nil, native: Bool? = nil, isTrusted: Bool? = nil, lastDialog: String? = nil, hasPendingDialog: Bool? = nil) {
+    init(success: Bool, message: String, elementId: String? = nil, selector: String? = nil, obscured: Bool? = nil, isObscured: Bool? = nil, interceptedBy: String? = nil, occludedBy: String? = nil, centerCoordinates: [String: Double]? = nil, healed: Bool? = nil, staleRef: Bool? = nil, code: String? = nil, stack: String? = nil, error: String? = nil, files: [String]? = nil, count: Int? = nil, native: Bool? = nil, isTrusted: Bool? = nil, lastDialog: String? = nil, hasPendingDialog: Bool? = nil) {
         self.success = success
         self.message = message
         self.elementId = elementId
+        self.selector = selector
         self.obscured = obscured ?? isObscured
         self.isObscured = isObscured ?? obscured
         self.interceptedBy = interceptedBy ?? occludedBy
@@ -315,7 +317,7 @@ struct DinoActionResult: Codable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case success, message, elementId, obscured, isObscured, interceptedBy, occludedBy, centerCoordinates
+        case success, message, elementId, selector, obscured, isObscured, interceptedBy, occludedBy, centerCoordinates
         case healed, staleRef, code, stack, error, files, count, native, isTrusted, lastDialog, hasPendingDialog
     }
 
@@ -324,6 +326,7 @@ struct DinoActionResult: Codable {
         try container.encode(success, forKey: .success)
         try container.encode(message, forKey: .message)
         try container.encodeIfPresent(elementId, forKey: .elementId)
+        try container.encodeIfPresent(selector, forKey: .selector)
         if obscured == true || isObscured == true {
             try container.encode(true, forKey: .obscured)
             try container.encode(true, forKey: .isObscured)
@@ -690,6 +693,16 @@ extension Tab {
                             DinoRouteCache.shared.recordSuccess(domain: domain, intent: action.action, selector: target, action: action.action)
                         }
                     } else {
+                        if (res.code == "STALE_REF" || res.code == "ELEMENT_NOT_FOUND" || res.code == "SELECTOR_NOT_FOUND"),
+                           let fallbackSelector = action.selector, !fallbackSelector.isEmpty, fallbackSelector != action.target {
+                            var fallbackAction = action
+                            fallbackAction.target = fallbackSelector
+                            fallbackAction.selector = nil
+                            if let fallbackRes = try? await self.performAction(fallbackAction), fallbackRes.success {
+                                safeResume(fallbackRes)
+                                return
+                            }
+                        }
                         DinoRouteCache.shared.record(eventType: "actionError", message: "Action '\(action.action)' failed on \(action.target ?? "element"): \(res.message)", tabId: self.id.uuidString)
                     }
                     res.lastDialog = self.lastDialog
@@ -1604,6 +1617,12 @@ extension Tab {
                         try { el = document.querySelector('[data-dino-id="' + CSS.escape(tid) + '"]'); } catch(e) {}
                     }
                     if (!el) {
+                        try { el = document.getElementById(tid) || document.querySelector('#' + CSS.escape(tid)); } catch(e) {}
+                    }
+                    if (!el) {
+                        try { el = document.querySelector('[name="' + CSS.escape(tid) + '"]') || document.querySelector('[data-testid="' + CSS.escape(tid) + '"]'); } catch(e) {}
+                    }
+                    if (!el) {
                         try { el = document.querySelector(tid); } catch(e) {}
                     }
                     if (el) {
@@ -1792,10 +1811,43 @@ extension Tab {
 // MARK: - NSImage Image Helper
 
 extension NSImage {
-    /// Encodes NSImage to standard PNG data.
-    var pngData: Data? {
+    /// Encodes NSImage to standard PNG data, optionally scaled by a factor (e.g. 1.0 downsamples from Retina 2x to 1x logical resolution).
+    func pngData(scale: CGFloat? = nil) -> Data? {
         guard let tiffRepresentation = tiffRepresentation,
               let bitmapImage = NSBitmapImageRep(data: tiffRepresentation) else { return nil }
-        return bitmapImage.representation(using: .png, properties: [:])
+
+        let needsDownsample = (scale == 1.0 && bitmapImage.pixelsWide > Int(size.width))
+        guard let s = scale, s > 0, (s != 1.0 || needsDownsample) else {
+            return bitmapImage.representation(using: .png, properties: [:])
+        }
+
+        let targetSize = CGSize(width: max(1, round(size.width * s)), height: max(1, round(size.height * s)))
+        guard let scaledRep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int(targetSize.width),
+            pixelsHigh: Int(targetSize.height),
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else {
+            return bitmapImage.representation(using: .png, properties: [:])
+        }
+
+        scaledRep.size = targetSize
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: scaledRep)
+        NSGraphicsContext.current?.imageInterpolation = .high
+        draw(in: CGRect(origin: .zero, size: targetSize), from: CGRect(origin: .zero, size: size), operation: .copy, fraction: 1.0)
+        NSGraphicsContext.restoreGraphicsState()
+        return scaledRep.representation(using: .png, properties: [:])
+    }
+
+    /// Encodes NSImage to standard PNG data using native resolution.
+    var pngData: Data? {
+        pngData(scale: nil)
     }
 }

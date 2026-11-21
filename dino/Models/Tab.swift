@@ -364,6 +364,7 @@ final class Tab: NSObject, Identifiable, ObservableObject {
         ucc.removeScriptMessageHandler(forName: "dinoFrameBridge")
         ucc.removeScriptMessageHandler(forName: "dinoLinkHover")
         ucc.removeScriptMessageHandler(forName: "dinoAutofill")
+        ucc.removeScriptMessageHandler(forName: "dinoMedia")
         ucc.add(WeakScriptMessageHandler(delegate: self), name: "dinoConsole")
         ucc.add(WeakScriptMessageHandler(delegate: self), name: "dinoInspect")
         ucc.add(WeakScriptMessageHandler(delegate: self), contentWorld: .page, name: "dinoNetwork")
@@ -372,6 +373,7 @@ final class Tab: NSObject, Identifiable, ObservableObject {
         ucc.add(WeakScriptMessageHandler(delegate: self), name: "dinoFrameBridge")
         ucc.add(WeakScriptMessageHandler(delegate: self), name: "dinoLinkHover")
         ucc.add(WeakScriptMessageHandler(delegate: self), name: "dinoAutofill")
+        ucc.add(WeakScriptMessageHandler(delegate: self), name: "dinoMedia")
 
         let linkScript = WKUserScript(
             source: TabScripts.linkHoverAndAutofillScript,
@@ -379,6 +381,13 @@ final class Tab: NSObject, Identifiable, ObservableObject {
             forMainFrameOnly: false
         )
         ucc.addUserScript(linkScript)
+
+        let mediaScript = WKUserScript(
+            source: TabScripts.mediaPlaybackScript,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: false
+        )
+        ucc.addUserScript(mediaScript)
 
         setupObservers()
 
@@ -469,6 +478,7 @@ final class Tab: NSObject, Identifiable, ObservableObject {
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "dinoFrameBridge")
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "dinoLinkHover")
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "dinoAutofill")
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: "dinoMedia")
     }
 
     deinit {
@@ -792,21 +802,55 @@ final class Tab: NSObject, Identifiable, ObservableObject {
     }
 
     // MARK: - Media & Sound Playback
-    @Published var isPlayingAudio: Bool = false
-    @Published var isAudioPausedByPlayer: Bool = false
+    @Published var isPlayingAudio: Bool = false {
+        didSet {
+            if oldValue != isPlayingAudio {
+                onMediaPlaybackStateChanged?()
+            }
+        }
+    }
+    @Published var isAudioPausedByPlayer: Bool = false {
+        didSet {
+            if oldValue != isAudioPausedByPlayer {
+                onMediaPlaybackStateChanged?()
+            }
+        }
+    }
+    var onMediaPlaybackStateChanged: (() -> Void)?
 
     func toggleMediaPlayback() {
-        isAudioPausedByPlayer.toggle()
-        let shouldPause = isAudioPausedByPlayer
+        if isPlayingAudio {
+            isAudioPausedByPlayer = true
+            isPlayingAudio = false
+            executeMediaControl(pause: true)
+        } else {
+            isAudioPausedByPlayer = false
+            isPlayingAudio = true
+            executeMediaControl(pause: false)
+        }
+    }
+
+    private func executeMediaControl(pause: Bool) {
         let js = """
         (function() {
+            try {
+                const yt = document.getElementById('movie_player');
+                if (yt) {
+                    if (\(pause) && typeof yt.pauseVideo === 'function') yt.pauseVideo();
+                    else if (!\(pause) && typeof yt.playVideo === 'function') yt.playVideo();
+                }
+            } catch (e) {}
+
             const media = document.querySelectorAll('audio, video');
-            for (const el of media) {
-                if (\(shouldPause)) {
-                    el.pause();
+            for (let i = 0; i < media.length; i++) {
+                const el = media[i];
+                if (\(pause)) {
+                    try { el.pause(); } catch(e) {}
                 } else {
-                    var p = el.play();
-                    if (p) p.catch(function() {});
+                    try {
+                        var p = el.play();
+                        if (p && typeof p.catch === 'function') p.catch(function() {});
+                    } catch(e) {}
                 }
             }
         })();
@@ -816,7 +860,23 @@ final class Tab: NSObject, Identifiable, ObservableObject {
 
     func checkMediaPlayback() {
         guard !isBlank, !isInternalPage else { return }
-        let js = "Boolean(Array.from(document.querySelectorAll('audio, video')).find(el => !el.paused && !el.ended))"
+        let js = """
+        (function() {
+            try {
+                const elements = document.querySelectorAll('audio, video');
+                for (let i = 0; i < elements.length; i++) {
+                    const el = elements[i];
+                    if (!el.paused && !el.ended && (el.currentTime > 0 || el.readyState >= 2)) {
+                        return true;
+                    }
+                }
+                if (document.title && document.title.includes('▶')) {
+                    return true;
+                }
+            } catch(e) {}
+            return false;
+        })()
+        """
         webView.evaluateJavaScript(js) { [weak self] val, _ in
             Task { @MainActor in
                 if let playing = val as? Bool {
@@ -954,6 +1014,14 @@ final class Tab: NSObject, Identifiable, ObservableObject {
                     self.title = self.url?.host ?? "New Tab"
                 }
                 ExtensionManager.shared.tabDidChange(self, properties: [.title])
+
+                // Real-time title-based media playback observation (e.g. YouTube "▶ Title")
+                if newTitle.contains("▶") {
+                    self.isPlayingAudio = true
+                    self.isAudioPausedByPlayer = false
+                } else if self.isPlayingAudio {
+                    self.checkMediaPlayback()
+                }
             }
         })
 

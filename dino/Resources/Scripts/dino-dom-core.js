@@ -174,6 +174,52 @@
             return false;
         }
 
+        // Computes a deterministic, persistent CSS selector for an element
+        function getCssSelector(el) {
+            if (!el || el.nodeType !== 1) return null;
+            if (el.id) {
+                return '#' + (typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(el.id) : el.id);
+            }
+            var testId = el.getAttribute('data-testid') || el.getAttribute('data-test');
+            if (testId) {
+                var attr = el.hasAttribute('data-testid') ? 'data-testid' : 'data-test';
+                return '[' + attr + '="' + (typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(testId) : testId) + '"]';
+            }
+            var name = el.getAttribute('name');
+            if (name) {
+                return el.tagName.toLowerCase() + '[name="' + (typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(name) : name) + '"]';
+            }
+            var ariaLabel = el.getAttribute('aria-label');
+            if (ariaLabel) {
+                return el.tagName.toLowerCase() + '[aria-label="' + (typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(ariaLabel) : ariaLabel) + '"]';
+            }
+            var path = [];
+            var curr = el;
+            while (curr && curr.nodeType === 1 && curr !== document.body && curr !== document.documentElement) {
+                var tag = curr.tagName.toLowerCase();
+                if (curr.id) {
+                    path.unshift('#' + (typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(curr.id) : curr.id));
+                    break;
+                }
+                var parent = curr.parentElement;
+                if (parent) {
+                    var siblings = parent.children;
+                    var sameTag = 0;
+                    var index = 1;
+                    for (var i = 0; i < siblings.length; i++) {
+                        if (siblings[i] === curr) { index = sameTag + 1; break; }
+                        if (siblings[i].tagName === curr.tagName) sameTag++;
+                    }
+                    path.unshift(tag + (sameTag > 0 || siblings.length > 1 ? ':nth-of-type(' + index + ')' : ''));
+                } else {
+                    path.unshift(tag);
+                }
+                curr = parent;
+                if (path.length >= 4) break;
+            }
+            return path.join(' > ');
+        }
+
         // Dispatches full HTML5 Drag and Drop event sequence with DataTransfer
         function dispatchHtml5Drag(targetId, fromX, fromY, toX, toY, optEl, optDest) {
             var dino = (typeof window !== 'undefined' && window.__dino) ? window.__dino : (this || {});
@@ -670,7 +716,21 @@
             findInTree: function(root, sel) {
                 if (!root) return null;
                 try {
-                    var found = root.querySelector('[data-dino-id="' + sel + '"]') || root.querySelector(sel);
+                    var dinoId = root.querySelector('[data-dino-id="' + CSS.escape(sel) + '"]');
+                    if (dinoId) return dinoId;
+                } catch(e) {}
+                try {
+                    var byId = (root.getElementById ? root.getElementById(sel) : null) || root.querySelector('#' + CSS.escape(sel));
+                    if (byId) return byId;
+                } catch(e) {}
+                try {
+                    var byAttr = root.querySelector('[name="' + CSS.escape(sel) + '"]') ||
+                                 root.querySelector('[data-testid="' + CSS.escape(sel) + '"]') ||
+                                 root.querySelector('[aria-label="' + CSS.escape(sel) + '"]');
+                    if (byAttr) return byAttr;
+                } catch(e) {}
+                try {
+                    var found = root.querySelector(sel);
                     if (found) return found;
                 } catch(e) {}
                 try {
@@ -1857,8 +1917,11 @@
                         if (typeof targetId === 'string') {
                             targetId = targetId.replace(/^[\[\s]+|[\]\s]+$/g, '');
                         }
+                        var rawId = (typeof targetId === 'string' && targetId.indexOf('#') === 0) ? targetId.substring(1) : targetId;
                         if (this.elements && this.elements[targetId] && this.isNodeConnected(this.elements[targetId])) {
                             el = this.elements[targetId];
+                        } else if (this.elements && this.elements[rawId] && this.isNodeConnected(this.elements[rawId])) {
+                            el = this.elements[rawId];
                         } else {
                             el = this.findInTree(document, targetId);
                             if (el && this.elements) this.elements[targetId] = el;
@@ -2715,8 +2778,13 @@
                 }
             }).call(this, this);
 
-            if (actionOutcome && actionOutcome.success && wasHealed) {
-                actionOutcome.healed = true;
+            if (actionOutcome && actionOutcome.success) {
+                if (wasHealed) {
+                    actionOutcome.healed = true;
+                }
+                if (el && !actionOutcome.selector) {
+                    actionOutcome.selector = getCssSelector(el);
+                }
             }
             return actionOutcome;
         } catch (actionErr) {

@@ -80,6 +80,7 @@ enum DinoCLIClient {
     private static let allowedCommandOptions: [String: Set<String>] = [
         "snap": ["--json", "-j", "--all", "--viewport", "-v", "--viewportOnly", "--target", "-t", "--role", "-r", "--text", "--depth", "--limit", "--offset", "--track", "--unrestricted", "--force", "-u", "--tab", "--labeled", "-l", "--coords"],
         "snapshot": ["--json", "-j", "--all", "--viewport", "-v", "--viewportOnly", "--target", "-t", "--role", "-r", "--text", "--depth", "--limit", "--offset", "--track", "--unrestricted", "--force", "-u", "--tab", "--labeled", "-l", "--coords"],
+        "diff": ["--json", "-j", "--viewport", "-v", "--tab"],
         "open": ["--allow-local-files", "--local", "-l", "--wait", "-w", "--tab"],
         "nav": ["--allow-local-files", "--local", "-l", "--wait", "-w", "--tab"],
         "navigate": ["--allow-local-files", "--local", "-l", "--wait", "-w", "--tab"],
@@ -105,8 +106,8 @@ enum DinoCLIClient {
         "tabs": ["--close", "--new", "--switch", "--wait", "-w", "--incognito"],
         "eval": ["--world", "--tab"],
         "evaluate": ["--world", "--tab"],
-        "shot": ["--clip", "-c", "--element", "-e", "--labeled", "-l", "--output", "-o", "--tab", "--crop", "--som-crop"],
-        "screenshot": ["--clip", "-c", "--element", "-e", "--labeled", "-l", "--output", "-o", "--tab", "--crop", "--som-crop"],
+        "shot": ["--clip", "-c", "--element", "-e", "--labeled", "-l", "--output", "-o", "--tab", "--crop", "--som-crop", "--scale"],
+        "screenshot": ["--clip", "-c", "--element", "-e", "--labeled", "-l", "--output", "-o", "--tab", "--crop", "--som-crop", "--scale"],
         "upload": ["--tab"],
         "storage": ["--tab", "--json", "-j"],
         "console": ["--tab", "--level", "-l", "--clear", "-c", "--json", "-j"],
@@ -125,6 +126,8 @@ enum DinoCLIClient {
             return ["--tab", "--wait", "-w", "--port", "--socket"]
         case "snap", "snapshot":
             return ["--tab", "--target", "-t", "--role", "-r", "--text", "--depth", "--limit", "--offset", "--port", "--socket"]
+        case "diff":
+            return ["--tab", "--port", "--socket"]
         case "find":
             return ["--tab", "--role", "-r", "--text", "--selector", "-s", "--port", "--socket"]
         case "open", "nav", "navigate":
@@ -148,7 +151,7 @@ enum DinoCLIClient {
         case "eval", "evaluate":
             return ["--world", "--tab", "--port", "--socket"]
         case "shot", "screenshot":
-            return ["--clip", "-c", "--element", "-e", "--output", "-o", "--tab", "--port", "--socket"]
+            return ["--clip", "-c", "--element", "-e", "--output", "-o", "--tab", "--scale", "--port", "--socket"]
         case "console":
             return ["--tab", "--level", "-l", "--port", "--socket"]
         case "network":
@@ -484,6 +487,10 @@ enum DinoCLIClient {
             handleSnap(args: args, port: activePort, socketPath: activeSocket)
             return true
 
+        case "diff":
+            handleDiff(args: args, port: activePort, socketPath: activeSocket)
+            return true
+
         case "open", "nav", "navigate", "goto":
             handleOpen(args: args, port: activePort, socketPath: activeSocket)
             return true
@@ -621,6 +628,18 @@ enum DinoCLIClient {
               --track                  Track element mutations across snapshots (tags [NEW] and returns +/- counts)
               -u, --unrestricted       Bypass 250-element limit in JSON mode
               -j, --json               Output raw JSON AST instead of markdown accessibility text
+              --tab <id|idx>           Target specific tab by index or ID (default: active tab)
+            """)
+
+        case "diff":
+            emitOutput("""
+            Usage: dino diff [options]
+
+            Inspect DOM mutations (added, removed, changed elements) since the previous action.
+
+            Options:
+              -v, --viewport           Limit mutation diff to visible viewport
+              -j, --json               Output full structured diff JSON
               --tab <id|idx>           Target specific tab by index or ID (default: active tab)
             """)
 
@@ -811,6 +830,8 @@ enum DinoCLIClient {
               -l, --labeled            Annotate interactive elements with numbered visual badges
               -e, --element <ref|sel>  Capture only a specific element
               -c, --clip <x,y,w,h>     Capture a specific viewport bounding box
+              --crop                   Auto-crop to active container/modal (Set-of-Marks)
+              --scale <n>              Resolution scale factor (e.g. 1 for 1x logical downsampling)
               --tab <id|idx>           Target specific tab by index or ID (default: active tab)
             """)
 
@@ -1164,6 +1185,53 @@ enum DinoCLIClient {
 
         if let warning = json["warning"] as? String {
             emitError("warning: \(warning)")
+        }
+
+        if let summary = json["summary"] as? String {
+            let formatted = summary.replacingOccurrences(of: "\\n", with: "\n")
+            emitOutput(formatted)
+            exit(0)
+        } else {
+            emitOutput(resp.bodyString)
+            exit(0)
+        }
+    }
+
+    private static func handleDiff(args: ParsedArgs, port: UInt16?, socketPath: String?) {
+        var queryItems: [String] = []
+
+        let isJson = args.boolFlag(["--json", "-j"])
+        if isJson {
+            queryItems.append("mode=json")
+        }
+
+        let vpOnly = args.boolFlag(["--viewport", "-v"])
+        if vpOnly {
+            queryItems.append("viewportOnly=true")
+        }
+
+        if let tabArg = args.stringOption(["--tab"]),
+           let tid = resolveTabId(tabArg, port: port, socketPath: socketPath) {
+            queryItems.append("tabId=\(tid)")
+        }
+
+        let path = queryItems.isEmpty ? "/diff" : "/diff?" + queryItems.joined(separator: "&")
+        let resp = request(method: "GET", path: path, socketPath: socketPath, port: port)
+
+        guard resp.statusCode == 200 else {
+            let errMsg = (resp.jsonObject?["error"] as? String) ?? resp.bodyString
+            emitError("dino diff: \(errMsg)")
+            exit(1)
+        }
+
+        if isJson {
+            emitOutput(resp.bodyString)
+            exit(0)
+        }
+
+        guard let json = resp.jsonObject else {
+            emitOutput(resp.bodyString)
+            exit(0)
         }
 
         if let summary = json["summary"] as? String {
@@ -1963,6 +2031,9 @@ enum DinoCLIClient {
         }
         if let clip = args.stringOption(["--clip", "-c"]) {
             queryItems.append("clip=\(clip)")
+        }
+        if let scaleVal = args.stringOption(["--scale"]) {
+            queryItems.append("scale=\(scaleVal)")
         }
         if let tabArg = args.stringOption(["--tab"]),
            let tid = resolveTabId(tabArg, port: port, socketPath: socketPath) {

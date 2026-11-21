@@ -14,7 +14,7 @@ struct OmniboxModalView: View {
     @Binding var isPresented: Bool
     @State private var text: String = ""
     @State private var selectedIndex: Int = 0
-    @State private var liveSuggestions: [String] = []
+    @State private var liveSuggestions: [SearchSuggestion] = []
     @State private var suggestionTask: Task<Void, Never>? = nil
     @FocusState private var isFieldFocused: Bool
     @ObservedObject private var settings = SettingsStore.shared
@@ -41,7 +41,7 @@ struct OmniboxModalView: View {
                     list.append(CommandItem(
                         id: "tab:\(tab.id)",
                         kind: .tab,
-                        icon: "globe",
+                        icon: "arrow.right.circle",
                         title: tab.title.isEmpty ? (tab.url?.host ?? "Tab") : tab.title,
                         hint: "Open in Split",
                         action: {
@@ -57,15 +57,22 @@ struct OmniboxModalView: View {
         }
         let lower = trimmed.lowercased()
         var list: [CommandItem] = []
+        var addedIDs: Set<String> = []
+
+        func addUnique(_ item: CommandItem) {
+            if addedIDs.insert(item.id).inserted {
+                list.append(item)
+            }
+        }
 
         let isDirectAddress = URLParser.isAddress(trimmed)
         let searchURL = URL(string: "\(settings.searchEngineBaseURL)\(URLParser.encodeQueryComponent(trimmed))")
 
         if isDirectAddress {
-            // 1. Direct URL Navigation takes priority for addresses like "google.com", "apple.com"
+            // 1. Direct URL Navigation takes priority for addresses like "google.com", "apple.com", "youtube.com"
             let candidate = (trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://") || trimmed.hasPrefix("dino://")) ? trimmed : "https://\(trimmed)"
             if let url = URL(string: candidate) {
-                list.append(CommandItem(
+                addUnique(CommandItem(
                     id: "url:\(candidate)",
                     kind: .url,
                     icon: "globe",
@@ -76,7 +83,7 @@ struct OmniboxModalView: View {
             }
 
             // 2. Fallback Search query
-            list.append(CommandItem(
+            addUnique(CommandItem(
                 id: "search:\(trimmed)",
                 kind: .search,
                 icon: "magnifyingglass",
@@ -85,8 +92,37 @@ struct OmniboxModalView: View {
                 action: { if let u = searchURL { openURL(u) } }
             ))
         } else {
+            // Check for Top Hit: navigation match from live suggestions or local history
+            if !store.isPickingSplit, let navSuggestion = liveSuggestions.first(where: { $0.isNavigation && $0.url != nil }) {
+                if let url = navSuggestion.url {
+                    let displayTitle = navSuggestion.title ?? navSuggestion.text
+                    let hostHint = url.host ?? ""
+                    addUnique(CommandItem(
+                        id: "tophit:\(url.absoluteString)",
+                        kind: .url,
+                        icon: "globe",
+                        title: displayTitle,
+                        hint: hostHint.isEmpty ? "Top Hit" : "Top Hit — \(hostHint)",
+                        action: { openURL(url) }
+                    ))
+                }
+            } else if !store.isPickingSplit {
+                let historyMatches = history.suggestions(for: trimmed, limit: 1)
+                if let firstHist = historyMatches.first, let url = URL(string: firstHist.url) {
+                    let displayTitle = firstHist.title.isEmpty ? firstHist.host : firstHist.title
+                    addUnique(CommandItem(
+                        id: "tophit:\(firstHist.url)",
+                        kind: .url,
+                        icon: "globe",
+                        title: displayTitle,
+                        hint: "Top Hit — \(firstHist.host)",
+                        action: { openURL(url) }
+                    ))
+                }
+            }
+
             // Normal keywords like "google", "apple", "news" take user to search query
-            list.append(CommandItem(
+            addUnique(CommandItem(
                 id: "search:\(trimmed)",
                 kind: .search,
                 icon: "magnifyingglass",
@@ -96,24 +132,53 @@ struct OmniboxModalView: View {
             ))
         }
 
-        // Live Search Engine Suggestions
+        // Live Search Engine & Navigation Suggestions
         if !store.isPickingSplit {
-            for suggestion in liveSuggestions where suggestion.lowercased() != lower {
-                let sURL = URL(string: "\(settings.searchEngineBaseURL)\(URLParser.encodeQueryComponent(suggestion))")
-                list.append(CommandItem(
-                    id: "sugg:\(suggestion)",
-                    kind: .search,
-                    icon: "magnifyingglass",
-                    title: suggestion,
-                    hint: "",
-                    action: { if let u = sURL { openURL(u) } }
-                ))
+            for suggestion in liveSuggestions where suggestion.text.lowercased() != lower {
+                if suggestion.isNavigation, let targetURL = suggestion.url {
+                    let displayTitle = suggestion.title ?? suggestion.text
+                    addUnique(CommandItem(
+                        id: "nav:\(targetURL.absoluteString)",
+                        kind: .url,
+                        icon: "globe",
+                        title: displayTitle,
+                        hint: store.isPickingSplit ? "Open in Split" : "Open Address",
+                        action: { openURL(targetURL) }
+                    ))
+                } else {
+                    let sURL = URL(string: "\(settings.searchEngineBaseURL)\(URLParser.encodeQueryComponent(suggestion.text))")
+                    addUnique(CommandItem(
+                        id: "sugg:\(suggestion.text)",
+                        kind: .search,
+                        icon: "magnifyingglass",
+                        title: suggestion.text,
+                        hint: "",
+                        action: { if let u = sURL { openURL(u) } }
+                    ))
+                }
             }
         }
 
-        // Settings Action Row (matching Firn Image 2)
+        // Matching History items
+        if !store.isPickingSplit {
+            let histItems = history.suggestions(for: trimmed, limit: 4)
+            for item in histItems {
+                if let url = URL(string: item.url) {
+                    addUnique(CommandItem(
+                        id: "hist:\(item.url)",
+                        kind: .history,
+                        icon: "clock.arrow.circlepath",
+                        title: item.title.isEmpty ? item.host : item.title,
+                        hint: item.host,
+                        action: { openURL(url) }
+                    ))
+                }
+            }
+        }
+
+        // Settings Action Row
         if "settings".contains(lower) || "preferences".contains(lower) || lower.contains("setting") {
-            list.append(CommandItem(
+            addUnique(CommandItem(
                 id: "action:settings",
                 kind: .action,
                 icon: "command",
@@ -127,7 +192,7 @@ struct OmniboxModalView: View {
 
         // Bar Actions (New Space, etc.)
         if "new space".contains(lower) {
-            list.append(CommandItem(
+            addUnique(CommandItem(
                 id: "action:new-space",
                 kind: .action,
                 icon: "command",
@@ -143,10 +208,10 @@ struct OmniboxModalView: View {
         for tab in store.tabs where !tab.isBlank && !tab.isGhost {
             if let anchor = store.splitPickAnchor, tab.id == anchor.id { continue }
             if tab.title.localizedCaseInsensitiveContains(lower) || (tab.url?.absoluteString.localizedCaseInsensitiveContains(lower) ?? false) {
-                list.append(CommandItem(
+                addUnique(CommandItem(
                     id: "tab:\(tab.id)",
                     kind: .tab,
-                    icon: "globe",
+                    icon: "arrow.right.circle",
                     title: tab.title.isEmpty ? (tab.url?.host ?? "Tab") : tab.title,
                     hint: store.isPickingSplit ? "Open in Split" : "Switch to Tab",
                     action: {
@@ -157,11 +222,11 @@ struct OmniboxModalView: View {
                         }
                     }
                 ))
-                if list.count >= 6 { break }
+                if list.count >= 8 { break }
             }
         }
 
-        return list
+        return Array(list.prefix(8))
     }
 
     var body: some View {
@@ -369,7 +434,7 @@ struct OmniboxModalView: View {
     }
 }
 
-/// Intercepts ↑ and ↓ keys while typing in the text field.
+/// Intercepts ↑, ↓, Tab, and Shift+Tab keys while typing in the text field.
 struct ArrowCatcher: NSViewRepresentable {
     let onArrow: (Int) -> Void
 
@@ -395,13 +460,16 @@ struct ArrowCatcher: NSViewRepresentable {
         }
 
         private func catches(_ event: NSEvent) -> Bool {
-            let offset: Int = switch event.keyCode {
-            case 125: 1 // Down arrow
-            case 126: -1 // Up arrow
-            default: 0
+            let offset: Int
+            if event.keyCode == 125 || event.keyCode == 48 { // Down arrow or Tab
+                offset = (event.modifierFlags.contains(.shift) && event.keyCode == 48) ? -1 : 1
+            } else if event.keyCode == 126 { // Up arrow
+                offset = -1
+            } else {
+                offset = 0
             }
             guard offset != 0, let window, event.window === window,
-                  event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty,
+                  event.modifierFlags.intersection([.command, .option, .control]).isEmpty,
                   (window.firstResponder as? NSTextView)?.isFieldEditor == true,
                   let onArrow else { return false }
             onArrow(offset)

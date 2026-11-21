@@ -30,7 +30,12 @@ extension DinoAgentServer {
                 let resData = try JSONEncoder().encode(result)
                 let status: String
                 if result.success {
-                    AgentPlaybookManager.shared.record(action: action)
+                    var recordedAction = action
+                    if (recordedAction.selector == nil || recordedAction.selector?.isEmpty == true),
+                       let sel = result.selector, !sel.isEmpty {
+                        recordedAction.selector = sel
+                    }
+                    AgentPlaybookManager.shared.record(action: recordedAction)
                     status = "200 OK"
                 } else {
                     switch result.code {
@@ -98,7 +103,12 @@ extension DinoAgentServer {
                 let action = DinoAction(action: "upload", target: targetId, paths: paths)
                 let result = try await activeTab.performAction(action)
                 if result.success {
-                    AgentPlaybookManager.shared.record(action: action)
+                    var recordedAction = action
+                    if (recordedAction.selector == nil || recordedAction.selector?.isEmpty == true),
+                       let sel = result.selector, !sel.isEmpty {
+                        recordedAction.selector = sel
+                    }
+                    AgentPlaybookManager.shared.record(action: recordedAction)
                 }
                 let resData = try JSONEncoder().encode(result)
                 let status: String = result.success ? "200 OK" : ((result.code == "STALE_REF" || result.code == "SELECTOR_NOT_FOUND" || result.code == "ELEMENT_NOT_FOUND") ? "404 Not Found" : "400 Bad Request")

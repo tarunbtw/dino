@@ -130,6 +130,15 @@ extension Tab: WKScriptMessageHandler {
                let secret = dict["secret"] as? String {
                 KeychainVault.shared.save(host: host, user: user, secret: secret)
             }
+        } else if name == "dinoMedia", let dict = body as? [String: Any] {
+            if let playing = dict["playing"] as? Bool {
+                if playing {
+                    self.isPlayingAudio = true
+                    self.isAudioPausedByPlayer = false
+                } else {
+                    self.checkMediaPlayback()
+                }
+            }
         }
     }
 
