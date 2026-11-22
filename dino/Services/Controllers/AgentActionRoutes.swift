@@ -151,63 +151,31 @@ extension DinoAgentServer {
             let contentWorld: WKContentWorld = (worldParam == "page") ? .page : .defaultClient
 
             let trimmed = script.trimmingCharacters(in: .whitespacesAndNewlines)
-            let wrappedScript = """
-            return await (async (code) => {
-                try {
-                    const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
-                    let fn;
-                    // 1. If it parses as a direct expression, return it
-                    try {
-                        fn = new AsyncFunction("return (" + code + ");");
-                        const val = await fn.call(window);
-                        return { __dino_ok: true, value: val, isUndefined: (val === undefined), isNull: (val === null) };
-                    } catch (_) {}
-
-                    // 2. If it contains an explicit return statement, execute as function body
-                    if (code.includes("return ") || code.includes("return;")) {
-                        fn = new AsyncFunction(code);
-                        const val = await fn.call(window);
-                        return { __dino_ok: true, value: val, isUndefined: (val === undefined), isNull: (val === null) };
-                    }
-
-                    // 3. Multi-statement code without explicit return:
-                    // Try evaluating with eval to capture completion value of last expression
-                    try {
-                        const val = await window.eval(code);
-                        return { __dino_ok: true, value: val, isUndefined: (val === undefined), isNull: (val === null) };
-                    } catch (evalErr) {
-                        // 4. If window.eval fails (e.g. top-level await or strict CSP), try wrapping last statement in return
-                        let lastLineRetried = false;
-                        let val;
-                        let lines = code.trim().split("\\n");
-                        if (lines.length > 0) {
-                            let last = lines[lines.length - 1].trim();
-                            if (last && !last.startsWith("return ") && !last.startsWith("const ") && !last.startsWith("let ") && !last.startsWith("var ") && !last.startsWith("if ") && !last.startsWith("for ") && !last.startsWith("while ") && !last.startsWith("class ") && !last.startsWith("function ")) {
-                                let expr = last.endsWith(";") ? last.slice(0, -1) : last;
-                                let modified = lines.slice(0, -1).concat(["return (" + expr + ");"]);
-                                try {
-                                    let fnTry = new AsyncFunction(modified.join("\\n"));
-                                    val = await fnTry.call(window);
-                                    lastLineRetried = true;
-                                } catch (_) {}
-                            }
-                        }
-                        if (!lastLineRetried) {
-                            fn = new AsyncFunction(code);
-                            val = await fn.call(window);
-                        }
-                        return { __dino_ok: true, value: val, isUndefined: (val === undefined), isNull: (val === null) };
-                    }
-                } catch (err) {
-                    return {
-                        __dino_ok: false,
-                        error: (err && err.message) ? err.message : String(err),
-                        stack: (err && err.stack) ? err.stack : null,
-                        name: (err && err.name) ? err.name : 'Error'
-                    };
+            let scriptToRun: String
+            let hasExplicitReturn = trimmed.contains("return ") || trimmed.contains("return\n") || trimmed.contains("return;")
+            if hasExplicitReturn {
+                scriptToRun = trimmed
+            } else if !trimmed.contains(";") && !trimmed.contains("\n") {
+                scriptToRun = "return (\(trimmed));"
+            } else {
+                let parts: [String]
+                if trimmed.contains("\n") {
+                    parts = trimmed.split(separator: "\n").map(String.init)
+                } else {
+                    parts = trimmed.split(separator: ";").map(String.init)
                 }
-            })(code);
-            """
+                if let last = parts.last?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !last.isEmpty,
+                   !last.hasPrefix("const ") && !last.hasPrefix("let ") && !last.hasPrefix("var ") && !last.hasPrefix("if ") && !last.hasPrefix("for ") && !last.hasPrefix("while ") && !last.hasPrefix("function ") && !last.hasPrefix("class ") {
+                    let cleanLast = last.hasSuffix(";") ? String(last.dropLast()) : last
+                    let separator = trimmed.contains("\n") ? "\n" : "; "
+                    let prefix = parts.dropLast().joined(separator: separator)
+                    scriptToRun = prefix.isEmpty ? "return (\(cleanLast));" : "\(prefix)\(separator)return (\(cleanLast));"
+                } else {
+                    scriptToRun = trimmed
+                }
+            }
+
             enum EvalRaceResult {
                 case evaluated(Any?)
                 case dialogAppeared(Tab.PendingDialog)
@@ -228,16 +196,35 @@ extension DinoAgentServer {
                         }
                     }
 
-                    activeTab.webView.callAsyncJavaScript(wrappedScript, arguments: ["code": trimmed], in: nil, in: contentWorld) { result in
+                    activeTab.webView.callAsyncJavaScript(scriptToRun, arguments: [:], in: nil, in: contentWorld) { result in
                         lock.lock()
                         defer { lock.unlock() }
                         if !resumed {
-                            resumed = true
-                            activeTab.onDialogAppeared = nil
                             switch result {
                             case .success(let val):
+                                resumed = true
+                                activeTab.onDialogAppeared = nil
                                 continuation.resume(returning: .evaluated(val))
                             case .failure(let error):
+                                let nsErr = error as NSError
+                                let isSyntax = (nsErr.userInfo["WKJavaScriptExceptionMessage"] as? String ?? "").contains("SyntaxError")
+                                if isSyntax && scriptToRun != trimmed {
+                                    activeTab.webView.callAsyncJavaScript(trimmed, arguments: [:], in: nil, in: contentWorld) { retryResult in
+                                        lock.lock()
+                                        defer { lock.unlock() }
+                                        resumed = true
+                                        activeTab.onDialogAppeared = nil
+                                        switch retryResult {
+                                        case .success(let rVal):
+                                            continuation.resume(returning: .evaluated(rVal))
+                                        case .failure(let rErr):
+                                            continuation.resume(throwing: rErr)
+                                        }
+                                    }
+                                    return
+                                }
+                                resumed = true
+                                activeTab.onDialogAppeared = nil
                                 continuation.resume(throwing: error)
                             }
                         }
@@ -266,58 +253,12 @@ extension DinoAgentServer {
                     evalResult = val
                 }
 
-                if let dict = evalResult as? [String: Any], dict["__dino_ok"] as? Bool == false {
-                    let errMsg = dict["error"] as? String ?? "JavaScript evaluation failed"
-                    let errStack = dict["stack"] as? String
-                    let rawName = dict["name"] as? String ?? "Error"
-
-                    let isCSP = rawName == "EvalError" || errMsg.contains("Content Security Policy") || errMsg.contains("CSP") || errMsg.contains("Refused to evaluate")
-                    let isSyntax = rawName == "SyntaxError" || errMsg.contains("SyntaxError") || errMsg.contains("Unexpected token")
-                    let isType = rawName == "TypeError"
-                    let isRef = rawName == "ReferenceError"
-
-                    let errCode: String
-                    if isCSP {
-                        errCode = "EVAL_CSP"
-                    } else if isSyntax {
-                        errCode = "SYNTAX_ERROR"
-                    } else if isType {
-                        errCode = "TYPE_ERROR"
-                    } else if isRef {
-                        errCode = "REFERENCE_ERROR"
-                    } else {
-                        errCode = "EVAL_ERROR"
-                    }
-
-                    var resp: [String: Any] = [
-                        "success": false,
-                        "error": errMsg,
-                        "code": errCode,
-                        "name": rawName
-                    ]
-                    if let stack = errStack { resp["stack"] = stack }
-                    sendJSON(connection: connection, object: resp, origin: origin)
-                    return true
-                }
-
-                var rawValue: Any? = evalResult
-                var isUndefined = false
-                var isNull = false
-                if let dict = evalResult as? [String: Any], dict["__dino_ok"] as? Bool == true {
-                    rawValue = dict["value"]
-                    isUndefined = (dict["isUndefined"] as? Bool) ?? false
-                    isNull = (dict["isNull"] as? Bool) ?? false
-                }
-
                 var responseObj: [String: Any] = ["success": true]
-                if isUndefined {
-                    responseObj["result"] = "undefined"
-                    responseObj["isUndefined"] = true
-                } else if isNull {
-                    responseObj["result"] = NSNull()
-                    responseObj["isNull"] = true
-                } else if let val = rawValue {
-                    if let strVal = val as? String {
+                if let val = evalResult {
+                    if val is NSNull {
+                        responseObj["result"] = NSNull()
+                        responseObj["isNull"] = true
+                    } else if let strVal = val as? String {
                         if strVal.count > 50_000 {
                             responseObj["result"] = String(strVal.prefix(50_000)) + "\n... [truncated by Dino: result exceeded 50,000 chars]"
                         } else {
@@ -334,7 +275,8 @@ extension DinoAgentServer {
                         }
                     }
                 } else {
-                    responseObj["result"] = NSNull()
+                    responseObj["result"] = "undefined"
+                    responseObj["isUndefined"] = true
                 }
                 sendJSON(connection: connection, object: responseObj, origin: origin)
             } catch {

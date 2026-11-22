@@ -262,9 +262,10 @@ extension DinoAgentServer {
             if shouldRedact {
                 func redactDict(_ dict: [String: String]) -> [String: String] {
                     var out: [String: String] = [:]
+                    let sensKeywords = ["api_key", "apikey", "secret", "password", "passwd", "passcode", "access_token", "auth_token", "refresh_token", "session_token", "sessionid", "private_key", "id_token"]
                     for (k, v) in dict {
                         let lk = k.lowercased()
-                        let isSens = lk.contains("token") || lk.contains("jwt") || lk.contains("auth") || lk.contains("secret") || lk.contains("key") || lk.contains("password") || lk.contains("pass") || lk.contains("credential") || lk.contains("session") || v.hasPrefix("eyJ")
+                        let isSens = sensKeywords.contains(where: { lk.contains($0) }) || lk == "key" || lk == "pass" || lk == "token" || lk == "jwt" || lk == "secret" || lk == "auth" || v.hasPrefix("eyJ")
                         out[k] = isSens ? "[REDACTED]" : v
                     }
                     return out

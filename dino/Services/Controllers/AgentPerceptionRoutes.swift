@@ -223,6 +223,9 @@ extension DinoAgentServer {
                 });
                 var elements = (snap && snap.elements) ? snap.elements : [];
 
+                var bestCandidate = null;
+                var bestScore = -999999;
+
                 for (var i = 0; i < elements.length; i++) {
                     var el = elements[i];
                     if (vpOnly && !el.inViewport) continue;
@@ -243,14 +246,42 @@ extension DinoAgentServer {
                             if (!domEl || !domEl.matches(selector)) continue;
                         } catch(e) { continue; }
                     }
+
+                    // Heuristic relevance scoring:
+                    var score = 0;
+                    var t = (el.tag || '').toLowerCase();
+                    var r = (el.role || '').toLowerCase();
+                    var isActionable = (t === 'a' || t === 'button' || t === 'input' || t === 'textarea' || t === 'select' || r === 'button' || r === 'link' || r === 'checkbox' || r === 'radio' || r === 'tab' || r === 'menuitem');
+                    if (isActionable) score += 100;
+                    if (t === 'td' || t === 'th' || t === 'tr' || t === 'table') score -= 50;
+
+                    if (text) {
+                        var rawT = ((el.text || '') + ' ' + (el.value || '')).trim().toLowerCase();
+                        var qT = text.trim().toLowerCase();
+                        if (rawT === qT) {
+                            score += 200; // Exact match bonus
+                        } else if (rawT.indexOf(qT) === 0) {
+                            score += 50;  // Prefix match bonus
+                        }
+                        // Penalize overly long text containers (e.g. td containing 500 chars)
+                        score -= Math.min(60, Math.floor(rawT.length / 10));
+                    }
+
+                    if (score > bestScore) {
+                        bestScore = score;
+                        bestCandidate = el;
+                    }
+                }
+
+                if (bestCandidate) {
                     return {
                         success: true,
-                        ref: el.id,
-                        role: el.role,
-                        tag: el.tag,
-                        text: el.text || el.value || '',
-                        inViewport: el.inViewport,
-                        bounds: el.bounds
+                        ref: bestCandidate.id,
+                        role: bestCandidate.role,
+                        tag: bestCandidate.tag,
+                        text: bestCandidate.text || bestCandidate.value || '',
+                        inViewport: bestCandidate.inViewport,
+                        bounds: bestCandidate.bounds
                     };
                 }
                 return { success: false, code: "ELEMENT_NOT_FOUND", message: "No element found matching query" };

@@ -115,9 +115,11 @@ extension DinoAgentServer {
                         navError = err
                         break
                     }
-                    if activeTab.committedNavigationSeq >= mySeq {
-                        // Navigation successfully committed or finished
-                        break
+                    if activeTab.finishedNavigationSeq >= mySeq || (activeTab.committedNavigationSeq >= mySeq && !activeTab.webView.isLoading) {
+                        let readyState = (try? await activeTab.webView.evaluateJavaScript("document.readyState")) as? String
+                        if readyState == "interactive" || readyState == "complete" || readyState == nil {
+                            break
+                        }
                     }
                 }
                 if superseded {
@@ -194,6 +196,23 @@ extension DinoAgentServer {
             case "auto", "default":
                 let startTime = Date()
                 let maxTimeoutSec = Double(timeoutMs) / 1000.0
+
+                // Quick short-circuit: if page is already loaded, not navigating, and quiescent
+                if !activeTab.isLoading && selector.isEmpty {
+                    let quickState = (try? await activeTab.webView.evaluateJavaScript("document.readyState")) as? String
+                    let inflight = (try? await activeTab.webView.evaluateJavaScript("window.__dino_inflight_count || 0")) as? Int ?? 0
+                    if (quickState == "complete" || quickState == "interactive") && inflight == 0 {
+                        let stabilityResult = try? await activeTab.waitForStability(quietMs: 60, timeoutMs: 250)
+                        let response: [String: Any] = [
+                            "success": true,
+                            "mode": "auto",
+                            "message": "Page settled (quiescent)",
+                            "mutations": (stabilityResult?["mutations"] as? Int) ?? 0
+                        ]
+                        sendJSON(connection: connection, object: response, origin: origin)
+                        return true
+                    }
+                }
 
                 // 1. Navigation check: if active page is navigating, wait for it to settle
                 if activeTab.isLoading {

@@ -906,11 +906,6 @@
                             if (depthLimit !== null && getNodeDepth(n, scopeRoot) > depthLimit) continue;
                             if (n.shadowRoot) {
                                 collectNodes(n.shadowRoot, list);
-                            } else if (n.tagName === 'IFRAME') {
-                                try {
-                                    var fDoc = n.contentDocument || (n.contentWindow ? n.contentWindow.document : null);
-                                    if (fDoc) collectNodes(fDoc, list);
-                                } catch(e) {}
                             } else if (n.tagName === 'CANVAS' || n.draggable === true || n.id === 'hit' || (n.id && (n.id.indexOf('hit') !== -1 || n.id.indexOf('drag') !== -1 || n.id.indexOf('drop') !== -1)) || isMeaningfulTextLeaf(n) || isDropzone(n)) {
                                 if (list.indexOf(n) === -1) list.push(n);
                             }
@@ -1728,7 +1723,7 @@
                 }
 
                 if (offset + limit < totalCount) {
-                    summaryLines.push('[... and ' + (totalCount - (offset + limit)) + ' more elements. Call dino_snap with offset=' + (offset + limit) + ']');
+                    summaryLines.push('[... and ' + (totalCount - (offset + limit)) + ' more elements. Use offset=' + (offset + limit) + ']');
                 }
 
                 var bodyText = summaryLines.join('\\n');
@@ -3546,6 +3541,16 @@
                             }
                         }
                     }
+                    // 5. Main content landmark / container (#main, main, #hnmain, etc.)
+                    if (!container) {
+                        var mainEl = document.querySelector('main:not([hidden]), [role="main"]:not([hidden]), #main, #content, #hnmain, [class*="main-content"]');
+                        if (mainEl) {
+                            var mr = mainEl.getBoundingClientRect();
+                            if (mr.width >= 100 && mr.height >= 50 && mr.top < window.innerHeight && mr.bottom > 0) {
+                                container = mainEl;
+                            }
+                        }
+                    }
                 }
 
                 if (container) {
@@ -3581,6 +3586,38 @@
                             width: Math.round(eright - eleft),
                             height: Math.round(ebottom - etop),
                             containerTag: el.tagName ? el.tagName.toLowerCase() : 'element',
+                            isModal: false
+                        };
+                    }
+                }
+
+                // 6. Viewport fallback: bounding box of visible interactive elements
+                if (this.elementsBounds) {
+                    var minX = window.innerWidth, minY = window.innerHeight, maxX = 0, maxY = 0, count = 0;
+                    for (var bId in this.elementsBounds) {
+                        var b = this.elementsBounds[bId];
+                        if (b && b.width > 0 && b.height > 0) {
+                            if (b.right > 0 && b.left < window.innerWidth && b.bottom > 0 && b.top < window.innerHeight) {
+                                if (b.left < minX) minX = Math.max(0, b.left);
+                                if (b.top < minY) minY = Math.max(0, b.top);
+                                if (b.right > maxX) maxX = Math.min(window.innerWidth, b.right);
+                                if (b.bottom > maxY) maxY = Math.min(window.innerHeight, b.bottom);
+                                count++;
+                            }
+                        }
+                    }
+                    if (count > 0 && maxX > minX && maxY > minY) {
+                        var vpad = 16;
+                        var vLeft = Math.max(0, Math.round(minX - vpad));
+                        var vTop = Math.max(0, Math.round(minY - vpad));
+                        var vRight = Math.min(window.innerWidth, Math.round(maxX + vpad));
+                        var vBottom = Math.min(window.innerHeight, Math.round(maxY + vpad));
+                        return {
+                            x: vLeft,
+                            y: vTop,
+                            width: Math.round(vRight - vLeft),
+                            height: Math.round(vBottom - vTop),
+                            containerTag: 'viewport-content',
                             isModal: false
                         };
                     }

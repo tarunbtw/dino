@@ -151,6 +151,7 @@ extension Tab: WKNavigationDelegate {
         self.allowNextFileNavigation = false
         self.isLoading = false
         self.committedNavigationSeq = navSeq
+        self.finishedNavigationSeq = navSeq
         self.lastNavigationError = nil
         self.lastNavigationFinishTime = Date()
         self.syncMockRoutes()
