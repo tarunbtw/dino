@@ -99,32 +99,6 @@ final class SettingsStore: ObservableObject {
         }
     }
 
-    @AppStorage("dino.backgroundStyle") var backgroundStyle: String = "default" {
-        didSet { objectWillChange.send() }
-    }
-
-    @AppStorage("dino.customBgHex") var customBgHex: String = "#1E1E2E" {
-        didSet { objectWillChange.send() }
-    }
-
-    @AppStorage("dino.customBgPath") var customBgPath: String = "" {
-        didSet {
-            loadCustomBgImage()
-            objectWillChange.send()
-        }
-    }
-
-    /// Pre-loaded and cached background image to eliminate disk read thrashing during rendering
-    @Published var cachedCustomBgImage: NSImage? = nil
-
-    func loadCustomBgImage() {
-        guard !customBgPath.isEmpty, FileManager.default.fileExists(atPath: customBgPath) else {
-            cachedCustomBgImage = nil
-            return
-        }
-        cachedCustomBgImage = NSImage(contentsOfFile: customBgPath)
-    }
-
     @AppStorage("dino.searchEngine") var searchEngine: String = "duckduckgo" {
         didSet { objectWillChange.send() }
     }
@@ -133,24 +107,12 @@ final class SettingsStore: ObservableObject {
     }
 
     // MARK: - Tab Layout & Sidebar Preferences
-    @AppStorage("dino.tabLayout") var tabLayout: String = "vertical" {
-        didSet { objectWillChange.send() }
-    }
-
     @AppStorage("dino.isSidebarCollapsed") var isSidebarCollapsed: Bool = false {
         didSet { objectWillChange.send() }
     }
 
     @AppStorage("dino.sidebarWidth") var sidebarWidth: Double = 240 {
         didSet { objectWillChange.send() }
-    }
-
-    var isVerticalTabs: Bool {
-        true
-    }
-
-    func toggleTabLayout() {
-        // Permanently vertical (Firn layout)
     }
 
     func toggleSidebarCollapsed() {
@@ -184,7 +146,6 @@ final class SettingsStore: ObservableObject {
 
     init() {
         loadBookmarks()
-        loadCustomBgImage()
         applyTheme()
 
         DistributedNotificationCenter.default().addObserver(
@@ -220,10 +181,6 @@ final class SettingsStore: ObservableObject {
 
     var accentColor: Color {
         Color.accentColor
-    }
-
-    var customBgColor: Color {
-        Color(hex: customBgHex)
     }
 
     var searchEngineName: String {

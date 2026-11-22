@@ -89,7 +89,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        FloatingVideoManager.shared.land()
         DinoAgentServer.shared.stop()
         DinoCLIManager.cleanupOnExit()
     }

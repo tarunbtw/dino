@@ -126,7 +126,6 @@ final class Tab: NSObject, Identifiable, ObservableObject {
     @Published var isReaderModeActive: Bool = false
     @Published var isShowingOfflinePage: Bool = false
     @Published var isAgentDriving: Bool = false
-    @Published var isFloatingVideo: Bool = false
     @Published var wantsNextNewTabInSplit: Bool = false
     // MARK: - Phase 1: Tab Lifecycle, Grouping & Basecamp
     public enum TabPlace: String, Codable, Sendable {
@@ -137,7 +136,6 @@ final class Tab: NSObject, Identifiable, ObservableObject {
     @Published var homeURL: URL? = nil
     @Published var groupId: UUID? = nil
     @Published var driftedAt: Date? = nil
-    @Published var faviconPNGData: Data? = nil
 
     var isAwayFromHome: Bool {
         guard place == .basecamp, let home = homeURL, let current = url else { return false }
@@ -147,11 +145,6 @@ final class Tab: NSObject, Identifiable, ObservableObject {
     func goHome() {
         guard let target = homeURL ?? url else { return }
         load(url: target)
-    }
-
-    var siteColors: IconColor.Colors? {
-        guard let data = faviconPNGData else { return nil }
-        return IconColor.from(png: data)
     }
 
     @Published var wantsNextNewTabIncognito: Bool = false
@@ -467,7 +460,6 @@ final class Tab: NSObject, Identifiable, ObservableObject {
 
     /// Tear down observers and script handlers when tab is explicitly closed
     func cleanup() {
-        FloatingVideoManager.shared.landIfTab(id: id)
         observers.forEach { $0.invalidate() }
         observers.removeAll()
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "dinoConsole")
@@ -758,7 +750,8 @@ final class Tab: NSObject, Identifiable, ObservableObject {
     @Published var findCount: Int? = nil
 
     func findInPage(_ query: String, forward: Bool = true) {
-        let cleanQuery = FindOnPage.query(query)
+        let line = query.split(whereSeparator: \.isNewline).joined(separator: " ")
+        let cleanQuery = String(line.prefix(200))
         self.findQuery = cleanQuery
         guard !cleanQuery.isEmpty else {
             clearFind()
@@ -777,11 +770,20 @@ final class Tab: NSObject, Identifiable, ObservableObject {
         }
 
         // Count occurrences
-        let js = "\(FindOnPage.countScript)(\(cleanQuery.debugDescription), \(FindOnPage.countLimit));"
+        let js = """
+        (function(q, limit) {
+            const t = document.body ? document.body.innerText.toLocaleLowerCase() : "";
+            const n = String(q).toLocaleLowerCase();
+            if (!n) return 0;
+            let c = 0, at = t.indexOf(n);
+            while (at !== -1 && c < limit) { c++; at = t.indexOf(n, at + n.length); }
+            return c;
+        })(\(cleanQuery.debugDescription), 1000);
+        """
         webView.evaluateJavaScript(js) { [weak self] val, _ in
             Task { @MainActor in
                 if let num = val as? NSNumber {
-                    self?.findCount = min(max(num.intValue, 1), FindOnPage.countLimit)
+                    self?.findCount = min(max(num.intValue, 1), 1000)
                 } else {
                     self?.findCount = nil
                 }
@@ -992,7 +994,25 @@ final class Tab: NSObject, Identifiable, ObservableObject {
 
     // MARK: - Picture-in-Picture (Floating Video ⇧⌘P)
     func togglePictureInPicture() {
-        FloatingVideoManager.shared.toggle(tab: self)
+        let js = """
+        (function() {
+            const v = document.querySelector('video');
+            if (!v) return false;
+            if (document.pictureInPictureElement) {
+                document.exitPictureInPicture();
+                return false;
+            } else if (v.requestPictureInPicture) {
+                v.requestPictureInPicture();
+                return true;
+            } else if (v.webkitSetPresentationMode) {
+                const current = v.webkitPresentationMode;
+                v.webkitSetPresentationMode(current === 'picture-in-picture' ? 'inline' : 'picture-in-picture');
+                return true;
+            }
+            return false;
+        })()
+        """
+        webView.evaluateJavaScript(js, completionHandler: nil)
     }
 
 
@@ -1096,15 +1116,11 @@ final class Tab: NSObject, Identifiable, ObservableObject {
     func fetchFavicon(for url: URL) {
         guard url.scheme == "http" || url.scheme == "https", let host = url.host, !host.isEmpty else {
             self.favicon = nil
-            self.faviconPNGData = nil
             return
         }
 
         if let cached = FaviconService.shared.cachedFavicon(for: host) {
             self.favicon = cached
-            if let tiff = cached.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) {
-                self.faviconPNGData = rep.representation(using: .png, properties: [:])
-            }
             return
         }
 
@@ -1113,9 +1129,6 @@ final class Tab: NSObject, Identifiable, ObservableObject {
             if let image = await FaviconService.shared.loadFavicon(for: url) {
                 if self.url?.host == host || self.webView.url?.host == host {
                     self.favicon = image
-                    if let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) {
-                        self.faviconPNGData = rep.representation(using: .png, properties: [:])
-                    }
                 }
             }
         }

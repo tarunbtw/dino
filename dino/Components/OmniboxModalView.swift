@@ -274,7 +274,7 @@ struct OmniboxModalView: View {
                                 suggestionTask = Task {
                                     try? await Task.sleep(nanoseconds: 100_000_000)
                                     guard !Task.isCancelled else { return }
-                                    let results = await SearchSuggestions.fetch(newText)
+                                    let results = await SearchSuggestions.fetch(newText, engine: settings.searchEngine)
                                     guard !Task.isCancelled else { return }
                                     await MainActor.run {
                                         self.liveSuggestions = results

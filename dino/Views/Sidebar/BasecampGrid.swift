@@ -16,20 +16,9 @@ struct BasecampGrid: View {
     var body: some View {
         let tiles = store.basecampTabs
         if !tiles.isEmpty {
-            let layout = BasecampLayout.make(count: tiles.count, width: Double(sidebarWidth - 16))
-            VStack(spacing: CGFloat(BasecampLayout.gap)) {
-                var index = 0
-                ForEach(0..<layout.rows.count, id: \.self) { rowIndex in
-                    let rowCount = layout.rows[rowIndex]
-                    HStack(spacing: CGFloat(BasecampLayout.gap)) {
-                        ForEach(0..<rowCount, id: \.self) { _ in
-                            if index < tiles.count {
-                                let tab = tiles[index]
-                                BasecampTileView(store: store, tab: tab, width: CGFloat(layout.tileWidth))
-                            }
-                            let _ = { index += 1 }()
-                        }
-                    }
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 44, maximum: 56), spacing: 6)], spacing: 6) {
+                ForEach(tiles) { tab in
+                    BasecampTileView(store: store, tab: tab)
                 }
             }
             .padding(.horizontal, 8)
@@ -41,12 +30,10 @@ struct BasecampGrid: View {
 private struct BasecampTileView: View {
     @ObservedObject var store: BrowserStore
     @ObservedObject var tab: Tab
-    let width: CGFloat
     @State private var isHovering = false
 
     var body: some View {
         let isFocused = tab.id == store.activeTabId
-        let siteColors = tab.siteColors
 
         Button(action: {
             store.selectTab(id: tab.id)
@@ -71,12 +58,12 @@ private struct BasecampTileView: View {
                         .foregroundStyle(isFocused ? Theme.ink : Theme.muted)
                 }
             }
-            .frame(width: width, height: CGFloat(BasecampLayout.tileHeight))
+            .frame(height: 40)
             .overlay {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .strokeBorder(
                         isFocused
-                            ? (siteColors?.main.color.opacity(0.8) ?? Theme.frost)
+                            ? Theme.frost
                             : (isHovering ? Theme.activeTabHairline : Color.clear),
                         lineWidth: isFocused ? 1.5 : 0.5
                     )

@@ -44,13 +44,24 @@ public enum SearchSuggestions {
         return !trimmed.isEmpty && trimmed.count <= longestQuery && !URLParser.isAddress(trimmed)
     }
 
-    public static func fetch(_ text: String) async -> [SearchSuggestion] {
+    public static func fetch(_ text: String, engine: String? = nil) async -> [SearchSuggestion] {
         let query = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard mayAsk(about: query),
-              let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-              let url = URL(string: "https://suggestqueries.google.com/complete/search?client=chrome&q=\(encoded)") else {
+              let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
             return []
         }
+
+        let selected = engine ?? "duckduckgo"
+        let endpoint: String
+        switch selected.lowercased() {
+        case "duckduckgo":
+            endpoint = "https://duckduckgo.com/ac/?q=\(encoded)&type=list"
+        case "bing":
+            endpoint = "https://api.bing.com/osjson.aspx?query=\(encoded)"
+        default:
+            endpoint = "https://suggestqueries.google.com/complete/search?client=chrome&q=\(encoded)"
+        }
+        guard let url = URL(string: endpoint) else { return [] }
 
         guard let (data, response) = try? await session.data(from: url),
               let http = response as? HTTPURLResponse, http.statusCode == 200 else {

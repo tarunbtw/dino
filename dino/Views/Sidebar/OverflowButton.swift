@@ -67,35 +67,45 @@ struct ArchiveBoxIcon: View {
 
 private struct BoxShape: Shape {
     func path(in rect: CGRect) -> Path {
-        Self.path.applying(fitGrid(rect))
-    }
+        var p = Path()
+        let s = min(rect.width, rect.height) / 24
+        let ox = rect.midX - 12 * s
+        let oy = rect.midY - 12 * s
+        func pt(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: ox + x * s, y: oy + y * s) }
 
-    private static let path: Path = {
-        var path = Path()
-        for data in [
-            "M5.5 9.5v8a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-8",
-            "M10 13.5h4"
-        ] {
-            path.addPath(Path(SVGPath.cgPath(data)))
-        }
-        return path
-    }()
+        p.move(to: pt(5.5, 9.5))
+        p.addLine(to: pt(5.5, 17.5))
+        p.addQuadCurve(to: pt(7.5, 19.5), control: pt(5.5, 19.5))
+        p.addLine(to: pt(16.5, 19.5))
+        p.addQuadCurve(to: pt(18.5, 17.5), control: pt(18.5, 19.5))
+        p.addLine(to: pt(18.5, 9.5))
+
+        p.move(to: pt(10, 13.5))
+        p.addLine(to: pt(14, 13.5))
+        return p
+    }
 }
 
 private struct LidShape: Shape {
     static let hinge = UnitPoint(x: 19 / 24, y: 9.5 / 24)
 
     func path(in rect: CGRect) -> Path {
-        Self.path.applying(fitGrid(rect))
+        var p = Path()
+        let s = min(rect.width, rect.height) / 24
+        let ox = rect.midX - 12 * s
+        let oy = rect.midY - 12 * s
+        func pt(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: ox + x * s, y: oy + y * s) }
+
+        p.move(to: pt(5.5, 4.5))
+        p.addLine(to: pt(18.5, 4.5))
+        p.addQuadCurve(to: pt(20, 6), control: pt(20, 4.5))
+        p.addLine(to: pt(20, 9.5))
+        p.addLine(to: pt(4, 9.5))
+        p.addLine(to: pt(4, 6))
+        p.addQuadCurve(to: pt(5.5, 4.5), control: pt(4, 4.5))
+        p.closeSubpath()
+        return p
     }
-
-    private static let path = Path(SVGPath.cgPath("M5.5 4.5h13a1.5 1.5 0 0 1 1.5 1.5v3.5H4V6a1.5 1.5 0 0 1 1.5-1.5Z"))
-}
-
-private func fitGrid(_ rect: CGRect) -> CGAffineTransform {
-    let scale = min(rect.width, rect.height) / 24
-    return CGAffineTransform(translationX: rect.midX - 12 * scale, y: rect.midY - 12 * scale)
-        .scaledBy(x: scale, y: scale)
 }
 
 // MARK: - Overflow Panel Popover

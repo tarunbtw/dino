@@ -1031,6 +1031,11 @@ final class DinoAgentServer: ObservableObject {
         return tab
     }
 
+    nonisolated static func queryBool(_ name: String, from queryItem: (String) -> String?, default defaultValue: Bool = false) -> Bool {
+        guard let val = queryItem(name) else { return defaultValue }
+        return val == "true" || val == "1"
+    }
+
     // MARK: - HTTP Network Response Serialization
 
     nonisolated func sendJSON(connection: NWConnection, status: String = "200 OK", object: Any, origin: String? = nil) {

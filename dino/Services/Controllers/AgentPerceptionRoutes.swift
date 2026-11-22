@@ -14,8 +14,7 @@ import PDFKit
 extension DinoAgentServer {
     func handlePerceptionRoute(method: String, cleanPath: String, bodyData: Data?, queryItem: (String) -> String?, connection: NWConnection, origin: String?) async -> Bool {
         func queryBool(_ name: String, default defaultValue: Bool = false) -> Bool {
-            guard let val = queryItem(name) else { return defaultValue }
-            return val == "true" || val == "1"
+            Self.queryBool(name, from: queryItem, default: defaultValue)
         }
 
         switch (method, cleanPath) {

@@ -54,7 +54,7 @@ struct SpaceRow: View {
             } label: {
                 Text(space.name)
                     .font(Theme.font(size: 13, weight: .semibold))
-                    .foregroundStyle(Theme.spaceInk(space.colorHex))
+                    .foregroundStyle(Theme.spaceColor(space.colorHex))
                     .lineLimit(1)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 4)

@@ -41,7 +41,8 @@ struct FindInPageView: View {
 
             if !tab.findQuery.isEmpty {
                 let count = tab.findCount ?? (tab.findHasMatches ? 1 : 0)
-                Text(FindOnPage.label(count: count))
+                let label = count < 1 ? "No matches" : (count == 1 ? "1 match" : (count >= 1000 ? "1,000+ matches" : "\(count.formatted()) matches"))
+                Text(label)
                     .font(Theme.font(size: 11))
                     .foregroundStyle(tab.findHasMatches ? Theme.muted : Theme.faint)
                     .monospacedDigit()

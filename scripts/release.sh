@@ -15,7 +15,7 @@ set -euo pipefail
 # Ensure script is run from project root
 cd "$(dirname "$0")/.."
 PROJECT_ROOT="$(pwd)"
-TAP_DIR="/Users/tarun/projects/homebrew-tap"
+TAP_DIR="${TAP_DIR:-$HOME/projects/homebrew-tap}"
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Versions/Current/Frameworks/LaunchServices.framework/Versions/Current/Support/lsregister"
 
 export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"

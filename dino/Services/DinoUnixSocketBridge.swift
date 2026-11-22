@@ -36,15 +36,10 @@ final class DinoUnixSocketBridge: @unchecked Sendable {
         if let custom = configuredSocketPath, !custom.isEmpty {
             return resolvePath(custom)
         }
-        if let envPath = ProcessInfo.processInfo.environment["DINO_SOCKET_PATH"] ?? ProcessInfo.processInfo.environment["DINO_SOCKET_PATH"], !envPath.isEmpty {
+        if let envPath = ProcessInfo.processInfo.environment["DINO_SOCKET_PATH"], !envPath.isEmpty {
             return resolvePath(envPath)
         }
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        let dinoSock = "\(home)/.dino/dino.sock"
-        if FileManager.default.fileExists(atPath: dinoSock) { return dinoSock }
-        let legacySock = "\(home)/.dino/dino.sock"
-        if FileManager.default.fileExists(atPath: legacySock) { return legacySock }
-        return dinoSock
+        return resolvePath("~/.dino/dino.sock")
     }
 
     static func resolvePath(_ raw: String) -> String {

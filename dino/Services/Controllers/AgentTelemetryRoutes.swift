@@ -67,8 +67,7 @@ extension DinoAgentServer {
 
     func handleTelemetryRoute(method: String, cleanPath: String, bodyData: Data?, queryItem: (String) -> String?, connection: NWConnection, origin: String?) async -> Bool {
         func queryBool(_ name: String, default defaultValue: Bool = false) -> Bool {
-            guard let val = queryItem(name) else { return defaultValue }
-            return val == "true" || val == "1"
+            Self.queryBool(name, from: queryItem, default: defaultValue)
         }
 
         switch (method, cleanPath) {
@@ -646,48 +645,6 @@ extension DinoAgentServer {
             activeTab.blockedURLPatterns.removeAll()
             activeTab.mockRoutes.removeAll(where: { ($0["block"] as? Bool ?? false) })
             activeTab.syncMockRoutes()
-            sendJSON(connection: connection, object: ["success": true, "cleared": true], origin: origin)
-            return true
-
-        case ("GET", "/cache/routes"):
-            let domain = queryItem("domain")
-            let intent = queryItem("intent")
-            let routes: [CachedRoute]
-            if let d = domain, !d.isEmpty {
-                routes = DinoRouteCache.shared.lookup(domain: d, intent: intent)
-            } else {
-                routes = DinoRouteCache.shared.allRoutes()
-            }
-            let routeList: [[String: Any]] = routes.map { r in
-                [
-                    "id": r.id.uuidString,
-                    "domain": r.domain,
-                    "intent": r.intent,
-                    "selector": r.selector,
-                    "action": r.action,
-                    "successCount": r.successCount,
-                    "lastUsed": r.lastUsed.timeIntervalSince1970 * 1000.0
-                ]
-            }
-            sendJSON(connection: connection, object: ["success": true, "routes": routeList, "count": routeList.count], origin: origin)
-            return true
-
-        case ("POST", "/cache/routes"):
-            guard let bodyData = bodyData,
-                  let json = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any],
-                  let domain = json["domain"] as? String, !domain.isEmpty,
-                  let intent = json["intent"] as? String, !intent.isEmpty,
-                  let selector = json["selector"] as? String, !selector.isEmpty else {
-                sendResponse(connection: connection, status: "400 Bad Request", body: "{\"error\":\"Missing domain, intent, or selector in /cache/routes\",\"code\":\"INVALID_PAYLOAD\",\"success\":false}", origin: origin)
-                return true
-            }
-            let action = json["action"] as? String ?? "click"
-            DinoRouteCache.shared.recordSuccess(domain: domain, intent: intent, selector: selector, action: action)
-            sendJSON(connection: connection, object: ["success": true, "cached": true, "domain": domain, "intent": intent], origin: origin)
-            return true
-
-        case ("DELETE", "/cache/routes"):
-            DinoRouteCache.shared.clearRoutes()
             sendJSON(connection: connection, object: ["success": true, "cleared": true], origin: origin)
             return true
 

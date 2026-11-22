@@ -274,7 +274,6 @@ final class BrowserStore: ObservableObject {
             $0.place == .open &&
             !$0.isPinned &&
             $0.groupId == nil &&
-            !$0.isFloatingVideo &&
             $0.lastActiveTime < cutoff &&
             $0.id != activeTabId
         }

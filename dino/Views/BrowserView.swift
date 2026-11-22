@@ -395,30 +395,6 @@ private struct TabStageView: View {
                     store.openNewTabOmnibox()
                 }
                 .transition(.opacity)
-            } else if tab.isFloatingVideo {
-                VStack(spacing: 14) {
-                    Image(systemName: "pip.fill")
-                        .font(.system(size: 32))
-                        .foregroundStyle(settings.accentColor)
-
-                    VStack(spacing: 4) {
-                        Text("Video is Playing in Floating Window")
-                            .font(.system(size: 15, weight: .semibold))
-                        Text("The video continues playing in a borderless window above other apps.")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Button("Return to Tab") {
-                        FloatingVideoManager.shared.land()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.regular)
-                    .tint(settings.accentColor)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color(nsColor: .windowBackgroundColor))
-                .transition(.opacity)
             } else {
                 VStack(spacing: 0) {
                     if tab.isHitlActive {

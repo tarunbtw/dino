@@ -110,13 +110,24 @@ All endpoints require `Authorization: Bearer <token>` (or `X-Dino-Token`). Read 
 | `/tabs/new` | `POST` | `{"url": "...", "isGhost": false, "select": true}` | Create new tab |
 | `/tabs/switch` | `POST` | `{"tabId": "..."}` or `{"index": 1}` | Switch focused tab |
 | `/tabs/close` | `POST` | `{"tabId": "..."}` or `{"index": 1}` | Close tab |
+| `/tabs/tier` | `POST` | `{"tabId": "...", "tier": "hot"\|"warm"\|"cold"}` | Manage tab memory tier |
+| `/tabs/split` | `POST` | `{"leftTabId": "...", "rightTabId": "..."}` | Open split pair side-by-side |
+| `/tabs/promote` | `POST` | `{"tabId": "..."}` | Promote ghost tab to visible user space |
 | `/navigate` | `POST` | `{"url": "...", "action": "url"\|"back"\|"forward"}`| Navigate or history traversal |
 | `/snapshot` | `GET` | `?mode=text&limit=50&viewportOnly=true` | Semantic markdown AST |
 | `/diff` | `GET` | `?tabId=...` | Delta DOM mutations (added, removed, changed) |
+| `/find` | `GET` | `?text=...&role=...` | Find element and return ref ID |
 | `/action` | `POST` | `{"action": "click"\|"type", "target": "e2", ...}` | Interaction dispatch |
 | `/screenshot` | `GET` | `?labeled=true&somCrop=true` | GPU snapshot with Set-of-Marks badges |
 | `/evaluate` | `POST` | `{"expression": "...", "world": "isolated"\|"page"}`| Execute JavaScript |
 | `/playbook/replay`| `POST` | `{"name": "...", "variables": {"key": "val"}}` | Deterministic macro replay |
 | `/route` | `POST` | `{"pattern": "...", "action": "abort"\|"mock"}` | Block or mock network routes |
+| `/cookies` | `GET` / `DELETE` | `?domain=...` | Query or clear cookies |
+| `/storage` | `GET` / `POST` / `DELETE` | `{"key": "...", "value": "..."}` | Local/session storage manipulation |
+| `/console` | `GET` / `DELETE` | `?tabId=...` | Read or clear page console logs |
+| `/network` | `GET` / `DELETE` | `?tabId=...` | Read or clear network request telemetry |
+| `/downloads` | `GET` | — | Track active and completed downloads |
+| `/trace` | `GET` / `DELETE` | `?tabId=...` | Trajectory trace log for agent debugging |
+| `/events` | `GET` | — | Real-time Server-Sent Events (SSE) stream |
 | `/hitl/status` | `GET` | — | Inspect security challenge state |
 | `/hitl/resolve`| `POST` | — | Unblock paused automation |

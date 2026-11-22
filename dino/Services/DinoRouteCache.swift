@@ -2,31 +2,10 @@
 //  DinoRouteCache.swift
 //  dino
 //
-//  Created by tarun on 27/10/26.
+//  Deterministic session trajectory journal for agent automation debugging.
 //
 
 import Foundation
-
-/// Represents a learned action selector cached for recurring agent tasks.
-struct CachedRoute: Codable, Identifiable, Sendable {
-    let id: UUID
-    let domain: String
-    let intent: String
-    let selector: String
-    let action: String
-    var successCount: Int
-    var lastUsed: Date
-
-    init(id: UUID = UUID(), domain: String, intent: String, selector: String, action: String = "click", successCount: Int = 1, lastUsed: Date = Date()) {
-        self.id = id
-        self.domain = domain.lowercased()
-        self.intent = intent.lowercased()
-        self.selector = selector
-        self.action = action
-        self.successCount = successCount
-        self.lastUsed = lastUsed
-    }
-}
 
 /// An individual trace event captured in the deterministic trajectory journal.
 struct TrajectoryEntry: Codable, Identifiable, Sendable {
@@ -47,66 +26,15 @@ struct TrajectoryEntry: Codable, Identifiable, Sendable {
     }
 }
 
-/// Manages agentic runtime route caching and deterministic session trajectories.
+/// Thread-safe trajectory journal recording agent steps and navigation events.
 final class DinoRouteCache: @unchecked Sendable {
     static let shared = DinoRouteCache()
 
     private let lock = NSLock()
-    private var routes: [CachedRoute] = []
     private var trajectories: [TrajectoryEntry] = []
     private let maxTrajectoryCount = 1000
 
     private init() {}
-
-    // MARK: - Learned Route Cache
-
-    /// Stores or updates a learned selector for recurring action intents.
-    func recordSuccess(domain: String, intent: String, selector: String, action: String = "click") {
-        lock.lock()
-        defer { lock.unlock() }
-
-        let cleanDomain = domain.lowercased()
-        let cleanIntent = intent.lowercased()
-
-        if let idx = routes.firstIndex(where: { $0.domain == cleanDomain && $0.intent == cleanIntent && $0.selector == selector }) {
-            routes[idx].successCount += 1
-            routes[idx].lastUsed = Date()
-        } else {
-            let route = CachedRoute(domain: cleanDomain, intent: cleanIntent, selector: selector, action: action)
-            routes.append(route)
-        }
-    }
-
-    /// Queries learned routes matching an intent on a specific domain.
-    func lookup(domain: String, intent: String? = nil) -> [CachedRoute] {
-        lock.lock()
-        defer { lock.unlock() }
-
-        let cleanDomain = domain.lowercased()
-        return routes.filter { r in
-            guard r.domain == cleanDomain || cleanDomain.hasSuffix("." + r.domain) else { return false }
-            if let targetIntent = intent?.lowercased(), !targetIntent.isEmpty {
-                return r.intent == targetIntent
-            }
-            return true
-        }.sorted(by: { $0.successCount > $1.successCount })
-    }
-
-    /// Returns all cached routes.
-    func allRoutes() -> [CachedRoute] {
-        lock.lock()
-        defer { lock.unlock() }
-        return routes
-    }
-
-    /// Clears cached routes.
-    func clearRoutes() {
-        lock.lock()
-        defer { lock.unlock() }
-        routes.removeAll()
-    }
-
-    // MARK: - Trajectory Recording
 
     /// Records an execution step into the trajectory journal.
     func record(eventType: String, message: String, tabId: String? = nil, metadata: [String: String] = [:]) {

@@ -388,10 +388,11 @@ final class DinoAgentRuntime: ObservableObject {
             case "click":
                 guard let rawRef = args["ref"] as? String else { continue }
                 let ref = rawRef.trimmingCharacters(in: CharacterSet(charactersIn: "[] \t\r\n"))
+                let actionContext = (args["reason"] as? String) ?? stepResponse.thought
 
                 // Security Gate: Check for high-stakes action
-                if DinoDOMSanitizer.isHighStakesAction(elementText: ref) {
-                    status = .waitingHITL(reason: "High-stakes action detected: clicking '\(ref)'. Confirm to proceed.", question: nil)
+                if DinoDOMSanitizer.isHighStakesAction(elementText: actionContext) {
+                    status = .waitingHITL(reason: "High-stakes action detected: '\(actionContext)'. Confirm to proceed.", question: nil)
                     drivingTab.isAgentDriving = false
                     self.currentTab?.isAgentDriving = false
                     return

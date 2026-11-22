@@ -72,30 +72,8 @@ enum Theme {
         Color(hex: hex)
     }
 
-    static func spaceInk(_ hex: String) -> Color {
-        spaceColor(hex)
-    }
-
     // MARK: - First Light
     enum FirstLight {
-        static let skyTop = Color(hex: 0x2E2F31)
-        static let cool = Color(hex: 0x6E98B2, opacity: 0.24)
-        static let warm = Color(hex: 0xD69268, opacity: 0.16)
-        static let warm2 = Color(hex: 0xA0786E, opacity: 0.10)
-        static let sun = Color(hex: 0xD68C60, opacity: 0.32)
-        static let sunMid = Color(hex: 0xD68C60, opacity: 0.10)
-        static let flake = NSColor(hex: 0x7F9CB0, opacity: 1)
-        static let flakeOpacity: Float = 0.22
-        static let grainOpacity: Double = 0.50
-
-        static func mix(_ a: UInt32, _ b: UInt32, _ amount: Double) -> UInt32 {
-            func channel(_ shift: UInt32) -> UInt32 {
-                let x = Double((a >> shift) & 0xFF), y = Double((b >> shift) & 0xFF)
-                return UInt32((x + (y - x) * amount).rounded()) << shift
-            }
-            return channel(16) | channel(8) | channel(0)
-        }
-
         static func spaceHex(_ nameOrHex: String) -> UInt32 {
             switch nameOrHex.lowercased() {
             case "sand": return 0xC9A27E
@@ -110,16 +88,6 @@ enum Theme {
                 let clean = nameOrHex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
                 if let val = UInt32(clean, radix: 16) { return val }
                 return 0x7F9CB0
-            }
-        }
-
-        static func snow(_ space: String) -> [Color] {
-            let tint = spaceHex(space)
-            if tint == 0x7F9CB0 {
-                return [0x34353A, 0x3A3F46, 0x414B55, 0x495865, 0x536777].map { Color(hex: $0) }
-            }
-            return [0.12, 0.20, 0.29, 0.38, 0.48].map {
-                Color(hex: mix(0x2B2826, tint, $0))
             }
         }
     }
@@ -141,14 +109,6 @@ enum WebAddress {
 extension Color {
     init(hex: UInt32, opacity: CGFloat = 1) {
         self.init(nsColor: NSColor(hex: hex, opacity: opacity))
-    }
-
-    init(light: UInt32, dark: UInt32, opacity: CGFloat = 1) {
-        self.init(hex: dark, opacity: opacity)
-    }
-
-    init(light: UInt32, lightOpacity: CGFloat, dark: UInt32, darkOpacity: CGFloat) {
-        self.init(hex: dark, opacity: darkOpacity)
     }
 }
 

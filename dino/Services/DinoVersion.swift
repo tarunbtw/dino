@@ -44,9 +44,6 @@ public enum DinoVersion {
         if let fallback = Bundle(url: URL(fileURLWithPath: "/Applications/Dino.app")), fallback.infoDictionary?["CFBundleShortVersionString"] != nil {
             return fallback
         }
-        if let legacy = Bundle(url: URL(fileURLWithPath: "/Applications/Dino.app")), legacy.infoDictionary?["CFBundleShortVersionString"] != nil {
-            return legacy
-        }
         return Bundle.main
     }
 }

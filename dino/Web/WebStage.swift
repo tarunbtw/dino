@@ -23,13 +23,6 @@ struct WebStage: NSViewRepresentable {
         hostView.appearance = currentApp
         hostView.activeView?.appearance = currentApp
 
-        if tab?.isFloatingVideo == true {
-            if hostView.activeView?.superview === hostView {
-                hostView.activeView?.removeFromSuperview()
-            }
-            hostView.activeView = nil
-            return
-        }
         hostView.show(tab?.webView)
     }
 }

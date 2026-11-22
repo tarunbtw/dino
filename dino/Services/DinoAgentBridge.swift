@@ -689,9 +689,6 @@ extension Tab {
                         } else {
                             DinoRouteCache.shared.record(eventType: "action", message: "Action '\(action.action)' succeeded on \(action.target ?? "element")", tabId: self.id.uuidString)
                         }
-                        if let domain = self.url?.host, let target = action.target, !target.isEmpty {
-                            DinoRouteCache.shared.recordSuccess(domain: domain, intent: action.action, selector: target, action: action.action)
-                        }
                     } else {
                         if (res.code == "STALE_REF" || res.code == "ELEMENT_NOT_FOUND" || res.code == "SELECTOR_NOT_FOUND"),
                            let fallbackSelector = action.selector, !fallbackSelector.isEmpty, fallbackSelector != action.target {
