@@ -1,5 +1,5 @@
 cask "dino" do
-  version "0.54"
+  version "0.55"
   sha256 :no_check
 
   url "https://github.com/tarunbtw/dino/releases/download/v#{version}/Dino-#{version}.zip"
