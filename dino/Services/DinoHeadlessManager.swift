@@ -102,6 +102,9 @@ final class DinoHeadlessManager: ObservableObject {
             } else {
                 self.idleTimeoutSeconds = sec
             }
+        } else if self.profile == .agent {
+            // Ponytail: Keep worker alive across multi-turn agent reasoning unless explicitly reaped
+            self.autoReapEnabled = false
         }
 
         // Proxy configuration

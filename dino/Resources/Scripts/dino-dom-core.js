@@ -1910,7 +1910,9 @@
 
                     if (targetId) {
                         if (typeof targetId === 'string') {
-                            targetId = targetId.replace(/^[\[\s]+|[\]\s]+$/g, '');
+                            if (/^\[(f[0-9]+:)?[e][0-9]+\]$/i.test(targetId.trim())) {
+                                targetId = targetId.trim().slice(1, -1);
+                            }
                         }
                         var rawId = (typeof targetId === 'string' && targetId.indexOf('#') === 0) ? targetId.substring(1) : targetId;
                         if (this.elements && this.elements[targetId] && this.isNodeConnected(this.elements[targetId])) {
@@ -1919,6 +1921,9 @@
                             el = this.elements[rawId];
                         } else {
                             el = this.findInTree(document, targetId);
+                            if (!el) {
+                                try { el = document.querySelector(targetId); } catch(e) {}
+                            }
                             if (el && this.elements) this.elements[targetId] = el;
                         }
 
@@ -2649,6 +2654,25 @@
                         return { success: false, code: 'OPTION_NOT_FOUND', message: 'Option not found in ' + targetId };
 
                     case 'scroll':
+                        if (targetId) {
+                            if (!el) {
+                                try { el = document.querySelector(targetId); } catch(e) {}
+                            }
+                            if (!el) {
+                                return {
+                                    success: false,
+                                    code: 'ELEMENT_NOT_FOUND',
+                                    message: "Target element '" + targetId + "' not found to scroll into view.",
+                                    elementId: targetId
+                                };
+                            }
+                            if (el.ownerDocument && el.ownerDocument !== document && el.ownerDocument.defaultView && el.ownerDocument.defaultView.frameElement) {
+                                try { el.ownerDocument.defaultView.frameElement.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch(e) {}
+                            }
+                            el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
+                            return { success: true, message: 'Scrolled ' + targetId + ' into view', elementId: targetId };
+                        }
+
                         var dx = 0;
                         var dy = 0;
                         if (actionObj.scrollDeltaY !== undefined && actionObj.scrollDeltaY !== null) {

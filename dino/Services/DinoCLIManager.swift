@@ -716,22 +716,17 @@ enum DinoCLIManager {
         exit(0)
     }
 
-    private static func handleStart(
-        port: UInt16?,
-        socket: String?,
-        profile: String?,
+    @discardableResult
+    static func spawnWorker(
+        port: UInt16? = nil,
+        socket: String? = nil,
+        profile: String? = nil,
         proxy: String? = nil,
-        idleTimeout: Double?,
-        noReap: Bool
-    ) {
+        idleTimeout: Double? = nil,
+        noReap: Bool = false
+    ) -> DinoWorkerDescriptor? {
         ensureDinoDirectory()
-        let guiPid = getRunningGUIPID()
         let selectedProfile = profile ?? "agent"
-
-        if let gui = guiPid {
-            print("[dino] GUI instance detected (PID \(gui)). Spawning isolated headless agent worker...")
-        }
-
         let execURL = Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0])
         let proc = Process()
         proc.executableURL = execURL
@@ -785,27 +780,58 @@ enum DinoCLIManager {
             }
 
             if kill(childPid, 0) == 0 {
-                let activePort = workerDesc?.port ?? port ?? (guiPid != nil ? 9223 : DinoAgentServer.defaultPort)
-                let activeSocket = workerDesc?.socketPath ?? socket ?? workerSocketPath(for: childPid)
-
-                print("[dino] Headless worker started (PID \(childPid), Profile: \(selectedProfile))")
-                print("[dino] HTTP: http://127.0.0.1:\(activePort)")
-                print("[dino] Socket: \(activeSocket)")
-                if noReap {
-                    print("[dino] Auto-reaper: disabled")
-                } else {
-                    let to = idleTimeout ?? 60.0
-                    print("[dino] Auto-reaper: active (\(Int(to))s idle timeout)")
-                }
-                exit(0)
-            } else {
-                emitError("[dino] Failed to start headless worker. Check \(logPath) for details.")
-                exit(1)
+                return workerDesc ?? DinoWorkerDescriptor(
+                    pid: childPid,
+                    port: port ?? (getRunningGUIPID() != nil ? 9223 : DinoAgentServer.defaultPort),
+                    socketPath: socket ?? workerSocketPath(for: childPid),
+                    profile: selectedProfile,
+                    createdAt: Date().timeIntervalSince1970
+                )
             }
+            return nil
         } catch {
-            emitError("[dino] Error starting headless worker: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    private static func handleStart(
+        port: UInt16?,
+        socket: String?,
+        profile: String?,
+        proxy: String? = nil,
+        idleTimeout: Double?,
+        noReap: Bool
+    ) {
+        ensureDinoDirectory()
+        let guiPid = getRunningGUIPID()
+        let selectedProfile = profile ?? "agent"
+
+        if let gui = guiPid {
+            print("[dino] GUI instance detected (PID \(gui)). Spawning isolated headless agent worker...")
+        }
+
+        guard let workerDesc = spawnWorker(
+            port: port,
+            socket: socket,
+            profile: profile,
+            proxy: proxy,
+            idleTimeout: idleTimeout,
+            noReap: noReap
+        ) else {
+            emitError("[dino] Failed to start headless worker. Check \(logFilePath) for details.")
             exit(1)
         }
+
+        print("[dino] Headless worker started (PID \(workerDesc.pid), Profile: \(selectedProfile))")
+        print("[dino] HTTP: http://127.0.0.1:\(workerDesc.port)")
+        print("[dino] Socket: \(workerDesc.socketPath)")
+        if noReap || (idleTimeout == nil && selectedProfile == "agent") {
+            print("[dino] Auto-reaper: disabled")
+        } else {
+            let to = idleTimeout ?? 60.0
+            print("[dino] Auto-reaper: active (\(Int(to))s idle timeout)")
+        }
+        exit(0)
     }
 
     private static func handleStop(stopAll: Bool = false, stopWorkersOnly: Bool = false, stopGUIOnly: Bool = false) {

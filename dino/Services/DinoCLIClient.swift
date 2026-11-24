@@ -96,7 +96,7 @@ enum DinoCLIClient {
         "drag": ["--native", "--to-target", "--to-selector", "--to-x", "--to-y", "--wait", "-w", "--tab"],
         "hover": ["--tab"],
         "select": ["--text", "--value", "--wait", "-w", "--tab"],
-        "scroll": ["--up", "--down", "--left", "--right", "--top", "--bottom", "--pixels", "--tab", "--native", "-n"],
+        "scroll": ["--up", "--down", "--left", "--right", "--top", "--bottom", "--pixels", "--tab", "--native", "-n", "--target", "-t", "--selector", "-s", "--to"],
         "wait": ["--mode", "-m", "--duration", "--timeout", "--selector", "-s", "--target", "-t", "--url", "--text", "--state", "--tab"],
         "find": ["--role", "-r", "--text", "--selector", "-s", "--viewport", "-v", "--viewportOnly", "--ref-only", "--tab"],
         "dialog": ["--policy", "--response", "--tab"],
@@ -109,7 +109,7 @@ enum DinoCLIClient {
         "shot": ["--clip", "-c", "--element", "-e", "--labeled", "-l", "--output", "-o", "--tab", "--crop", "--som-crop", "--scale"],
         "screenshot": ["--clip", "-c", "--element", "-e", "--labeled", "-l", "--output", "-o", "--tab", "--crop", "--som-crop", "--scale"],
         "upload": ["--tab"],
-        "storage": ["--tab", "--json", "-j"],
+        "storage": ["--tab", "--json", "-j", "--raw"],
         "console": ["--tab", "--level", "-l", "--clear", "-c", "--json", "-j"],
         "network": ["--tab", "--filter", "-f", "--clear", "-c", "--json", "-j"],
         "downloads": ["--wait", "-w", "--timeout", "-t", "--delete", "-d", "--clear", "--json", "-j"],
@@ -143,7 +143,7 @@ enum DinoCLIClient {
         case "select":
             return ["--text", "--value", "--tab", "--wait", "-w", "--port", "--socket"]
         case "scroll":
-            return ["--pixels", "--tab", "--port", "--socket"]
+            return ["--pixels", "--tab", "--port", "--socket", "--target", "-t", "--selector", "-s", "--to"]
         case "wait":
             return ["--mode", "-m", "--duration", "--timeout", "--selector", "-s", "--target", "-t", "--url", "--text", "--state", "--tab", "--port", "--socket"]
         case "dialog":
@@ -177,7 +177,7 @@ enum DinoCLIClient {
         while i < args.count {
             let token = args[i]
 
-            if token.hasPrefix("--") || token.hasPrefix("-") {
+            if (token.hasPrefix("--") || token.hasPrefix("-")) && token != "-" {
                 if let eqIdx = token.firstIndex(of: "=") {
                     let key = String(token[..<eqIdx])
                     let val = String(token[token.index(after: eqIdx)...])
@@ -226,6 +226,18 @@ enum DinoCLIClient {
         let p = port ?? DinoAgentServer.defaultPort
         if let resp = sendHTTPRequest(method: method, path: path, body: body, port: p, timeoutSeconds: timeoutSeconds) {
             return resp
+        }
+
+        // Auto-spawn an isolated headless worker in RAM if Dino is not running
+        if DinoCLIManager.getRunningWorkers().isEmpty && DinoCLIManager.getRunningGUIPID() == nil {
+            if let desc = DinoCLIManager.spawnWorker(profile: "agent", noReap: true) {
+                if let resp = sendUnixSocketRequest(method: method, path: path, body: body, socketPath: desc.socketPath, timeoutSeconds: timeoutSeconds) {
+                    return resp
+                }
+                if let resp = sendHTTPRequest(method: method, path: path, body: body, port: desc.port, timeoutSeconds: timeoutSeconds) {
+                    return resp
+                }
+            }
         }
 
         emitError("dino: Dino is not running. Start it with 'dino start' or launch the Dino app.")
@@ -1586,12 +1598,18 @@ enum DinoCLIClient {
     private static func handleScroll(args: ParsedArgs, port: UInt16?, socketPath: String?) {
         var direction = "down"
         var amount: CGFloat = 300
+        var targetElement: String? = args.stringOption(["--target", "-t", "--selector", "-s", "--to"])
 
-        if args.positionals.count == 1 {
-            if let num = Double(args.positionals[0]) {
+        if args.positionals.count >= 2 && args.positionals[0].lowercased() == "to" {
+            targetElement = args.positionals[1]
+        } else if args.positionals.count == 1 {
+            let first = args.positionals[0]
+            if let num = Double(first) {
                 amount = CGFloat(num)
+            } else if ["down", "up", "left", "right", "top", "bottom"].contains(first.lowercased()) {
+                direction = first.lowercased()
             } else {
-                direction = args.positionals[0].lowercased()
+                targetElement = first
             }
         } else if args.positionals.count >= 2 {
             direction = args.positionals[0].lowercased()
@@ -1608,6 +1626,9 @@ enum DinoCLIClient {
             "amount": amount,
             "native": isNative
         ]
+        if let target = targetElement {
+            bodyObj["target"] = target
+        }
         if let tabArg = args.stringOption(["--tab"]),
            let tid = resolveTabId(tabArg, port: port, socketPath: socketPath) {
             bodyObj["tabId"] = tid
@@ -1621,7 +1642,11 @@ enum DinoCLIClient {
         let resp = request(method: "POST", path: "/action", body: bodyData, socketPath: socketPath, port: port)
         _ = validateActionResponse(resp, command: "scroll")
 
-        emitOutput("Scrolled \(direction) \(Int(amount))px\(isNative ? " (native)" : "")")
+        if let target = targetElement {
+            emitOutput("Scrolled \(target) into view")
+        } else {
+            emitOutput("Scrolled \(direction) \(Int(amount))px\(isNative ? " (native)" : "")")
+        }
         exit(0)
     }
 
@@ -2052,7 +2077,16 @@ enum DinoCLIClient {
         let outTarget = args.positionals.first
 
         if outTarget == "-" {
-            FileHandle.standardOutput.write(resp.body)
+            resp.body.withUnsafeBytes { rawBuffer in
+                if let base = rawBuffer.baseAddress {
+                    var totalWritten = 0
+                    while totalWritten < rawBuffer.count {
+                        let written = Darwin.write(STDOUT_FILENO, base + totalWritten, rawBuffer.count - totalWritten)
+                        if written <= 0 { break }
+                        totalWritten += written
+                    }
+                }
+            }
             exit(0)
         }
 
