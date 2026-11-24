@@ -25,7 +25,7 @@ All commands run via `dino <command> [options]`. Add `--worker` for headless dae
 
 | Command | Syntax | Description | Token Footprint |
 | :--- | :--- | :--- | :--- |
-| **Navigate** | `dino goto <url>` (or `open`) | Navigates active tab to URL | Minimal |
+| **Navigate** | `dino goto <url> [-s, --snap]` | Navigates active tab (`-s` returns semantic AST immediately) | Minimal |
 | **Perception** | `dino snap -v` | Semantic tree of viewport elements with `[eN]` refs | ~400–900 tokens |
 | **Subtree Scan**| `dino snap -t <selector> -v` | Scopes scan strictly to target subtree (e.g. `#main`) | ~100–300 tokens |
 | **Differential** | `dino diff` (or `GET /diff`) | Returns only added/removed/changed DOM elements | **26–45 tokens** |
@@ -42,12 +42,13 @@ All commands run via `dino <command> [options]`. Add `--worker` for headless dae
 | **PDF Export**  | `dino pdf [file\|-]` | Exports vector PDF artifact (`-` for stdout pipe) | **0 tokens** |
 | **Extract**     | `dino extract [sel] [--mode <mode>]` | Extracts structured data (`table`, `jsonld`, `records`) directly | **0 tokens** |
 | **Session**     | `dino session <save\|restore> [name]`| Exports / restores cookies & storage in Playwright format | Minimal |
+| **Cookies**     | `dino cookies [get\|set\|clear]` | Inspect or manage domain cookies (`-d <domain>`, `--all-domains`) | Minimal |
 | **Wait**        | `dino wait [--mode <mode>]` | Awaits settlement (`auto` default, `stability`, `selector`) | Minimal |
 | **Dialog** | `dino dialog [accept\|dismiss\|wait]`| Inspect or configure JavaScript alert/confirm/prompt handling | Minimal |
 | **Upload** | `dino upload <eN> <filepath...>`| Stage and set files on file input | Minimal |
 | **Storage** | `dino storage [get\|set\|clear] [--raw]`| Inspect or set web storage (`--raw` to bypass masking) | Minimal |
 | **Console** | `dino console [level]` | Inspect page console entries (`log`, `warn`, `error`) | Minimal |
-| **Network** | `dino network [filter]` | Inspect in-flight & completed HTTP/XHR network requests | Minimal |
+| **Network** | `dino network [filter] [--body]` | Inspect in-flight & completed HTTP requests (`--body` for response payloads) | Minimal |
 | **Downloads** | `dino downloads [--wait]` | Track active and completed file downloads | Minimal |
 | **Tabs** | `dino tabs` | Lists open tabs in clean tabular format | Minimal |
 | **Tab Actions**| `dino tab <new\|switch\|close>` | `new [url]`, `switch <id\|idx>`, `close [id\|idx]` | Minimal |

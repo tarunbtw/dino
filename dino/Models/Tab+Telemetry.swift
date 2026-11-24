@@ -76,7 +76,8 @@ extension Tab: WKScriptMessageHandler {
             let duration = dict["duration"] as? Int ?? 0
             let type = dict["type"] as? String ?? "fetch"
             let error = dict["error"] as? String
-            let entry = NetworkEntry(method: method, url: url, status: status, durationMs: duration, type: type, error: error)
+            let responseBody = dict["body"] as? String
+            let entry = NetworkEntry(method: method, url: url, status: status, durationMs: duration, type: type, error: error, responseBody: responseBody)
             if self.networkEntries.count > 400 {
                 self.networkEntries.removeFirst(50)
             }
@@ -90,6 +91,7 @@ extension Tab: WKScriptMessageHandler {
                 "type": type
             ]
             if let err = error { netPayload["error"] = err }
+            if let b = responseBody { netPayload["body"] = b }
             DinoAgentServer.shared.broadcastEvent(name: "network", payload: netPayload)
         } else if name == "dinoZapper", let dict = body as? [String: Any] {
             if dict["cancel"] as? Bool == true {

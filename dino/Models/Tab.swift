@@ -54,10 +54,11 @@ struct NetworkEntry: Identifiable, Sendable {
     let timestamp: Date
     let type: String
     let error: String?
+    let responseBody: String?
 
     var isError: Bool { status >= 400 || status == 0 }
 
-    init(id: UUID = UUID(), method: String, url: String, status: Int, durationMs: Int, timestamp: Date = Date(), type: String = "fetch", error: String? = nil) {
+    init(id: UUID = UUID(), method: String, url: String, status: Int, durationMs: Int, timestamp: Date = Date(), type: String = "fetch", error: String? = nil, responseBody: String? = nil) {
         self.id = id
         self.method = method
         self.url = url
@@ -66,6 +67,7 @@ struct NetworkEntry: Identifiable, Sendable {
         self.timestamp = timestamp
         self.type = type
         self.error = error
+        self.responseBody = responseBody
     }
 }
 

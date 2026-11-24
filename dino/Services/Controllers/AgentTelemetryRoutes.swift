@@ -581,14 +581,15 @@ extension DinoAgentServer {
             guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin, errorMessage: "Tab not found") else { return true }
             let clear = queryBool("clear")
             let filter = queryItem("statusFilter") ?? "all"
+            let includeBody = queryBool("includeBody")
             let filtered = activeTab.networkEntries.filter { entry in
                 if filter == "errors" { return entry.isError }
                 if filter == "success" { return !entry.isError }
                 if let code = Int(filter) { return entry.status == code }
                 return true
             }
-            let entries = filtered.map { entry in
-                [
+            let entries = filtered.map { entry -> [String: Any] in
+                var d: [String: Any] = [
                     "id": entry.id.uuidString,
                     "method": entry.method,
                     "url": entry.url,
@@ -598,7 +599,11 @@ extension DinoAgentServer {
                     "isError": entry.isError,
                     "error": (entry.error as Any?) ?? NSNull(),
                     "timestamp": entry.timestamp.timeIntervalSince1970 * 1000.0
-                ] as [String: Any]
+                ]
+                if includeBody {
+                    d["body"] = (entry.responseBody as Any?) ?? NSNull()
+                }
+                return d
             }
             if clear {
                 activeTab.networkEntries.removeAll()

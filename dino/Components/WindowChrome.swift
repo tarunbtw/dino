@@ -17,6 +17,14 @@ final class WindowCorners: ObservableObject {
     @Published var radius: CGFloat? = nil
 }
 
+final class DinoMainWindowDelegate: NSObject, NSWindowDelegate {
+    static let shared = DinoMainWindowDelegate()
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        sender.orderOut(nil)
+        return false
+    }
+}
+
 /// AppKit bridge configuring the window chrome:
 /// - Strips standard toolbar and hides real traffic lights
 /// - Measures window's actual `_cornerRadius` for concentric page nesting
@@ -62,6 +70,8 @@ struct WindowSetup: NSViewRepresentable {
             guard let window = window else { return }
 
             window.toolbar = nil
+            window.delegate = DinoMainWindowDelegate.shared
+            window.isRestorable = false
             window.titleVisibility = .hidden
             window.titlebarAppearsTransparent = true
             window.styleMask.insert(.fullSizeContentView)

@@ -13,6 +13,8 @@ struct DinoApp: App {
 
     init() {
         signal(SIGPIPE, SIG_IGN)
+        UserDefaults.standard.register(defaults: ["ApplePersistenceIgnoreState": true])
+
         if DinoCLIManager.run() {
             exit(0)
         }
@@ -109,18 +111,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         if !flag {
-            var restored = false
             for window in sender.windows where window != DinoHeadlessManager.shared.offscreenWindow {
                 window.makeKeyAndOrderFront(self)
-                restored = true
+                sender.activate(ignoringOtherApps: true)
+                return true
             }
-            if !restored {
-                let appURL = DinoCLIManager.appBundleURL
-                let config = NSWorkspace.OpenConfiguration()
-                config.arguments = []
-                config.activates = true
-                NSWorkspace.shared.openApplication(at: appURL, configuration: config) { _, _ in }
-            }
+            let appURL = DinoCLIManager.appBundleURL
+            let config = NSWorkspace.OpenConfiguration()
+            config.arguments = []
+            config.activates = true
+            NSWorkspace.shared.openApplication(at: appURL, configuration: config) { _, _ in }
         }
         sender.activate(ignoringOtherApps: true)
         return true

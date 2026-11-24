@@ -393,12 +393,22 @@ enum WebKitPool {
 
                         const res = await origFetch.apply(this, args);
                         const duration = Math.round(performance.now() - startTime);
+                        let bodyText = null;
+                        try {
+                            const cType = (res.headers && res.headers.get('content-type')) || '';
+                            if (cType.includes('json') || cType.includes('text') || cType.includes('xml') || cType.includes('javascript')) {
+                                const cloned = res.clone();
+                                const txt = await cloned.text();
+                                bodyText = txt.length <= 65536 ? txt : (txt.slice(0, 65536) + '... [truncated]');
+                            }
+                        } catch(e) {}
                         sendNet({
                             method: method,
                             url: url || (res ? res.url : ''),
                             status: res ? res.status : 200,
                             duration: duration,
-                            type: 'fetch'
+                            type: 'fetch',
+                            body: bodyText
                         });
                         return res;
                     } catch(err) {
@@ -503,12 +513,23 @@ enum WebKitPool {
                     window.__dino_inflight_count = Math.max(0, (window.__dino_inflight_count || 1) - 1);
                     window.__dino_last_network_activity = performance.now();
                     const duration = Math.round(performance.now() - startTime);
+                    let bodyText = null;
+                    try {
+                        const cType = xhr.getResponseHeader('content-type') || '';
+                        if (cType.includes('json') || cType.includes('text') || cType.includes('xml')) {
+                            const txt = xhr.responseText;
+                            if (txt) {
+                                bodyText = txt.length <= 65536 ? txt : (txt.slice(0, 65536) + '... [truncated]');
+                            }
+                        }
+                    } catch(e) {}
                     sendNet({
                         method: xhr.__dino_method || 'GET',
                         url: xhr.__dino_url || '',
                         status: xhr.status || 0,
                         duration: duration,
-                        type: 'xhr'
+                        type: 'xhr',
+                        body: bodyText
                     });
                 }, { once: true });
                 return origSend.apply(this, args);

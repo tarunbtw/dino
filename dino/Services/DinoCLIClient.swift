@@ -81,10 +81,10 @@ enum DinoCLIClient {
         "snap": ["--json", "-j", "--all", "--viewport", "-v", "--viewportOnly", "--target", "-t", "--role", "-r", "--text", "--depth", "--limit", "--offset", "--track", "--unrestricted", "--force", "-u", "--tab", "--labeled", "-l", "--coords"],
         "snapshot": ["--json", "-j", "--all", "--viewport", "-v", "--viewportOnly", "--target", "-t", "--role", "-r", "--text", "--depth", "--limit", "--offset", "--track", "--unrestricted", "--force", "-u", "--tab", "--labeled", "-l", "--coords"],
         "diff": ["--json", "-j", "--viewport", "-v", "--tab"],
-        "open": ["--allow-local-files", "--local", "-l", "--wait", "-w", "--tab"],
-        "nav": ["--allow-local-files", "--local", "-l", "--wait", "-w", "--tab"],
-        "navigate": ["--allow-local-files", "--local", "-l", "--wait", "-w", "--tab"],
-        "goto": ["--allow-local-files", "--local", "-l", "--wait", "-w", "--tab"],
+        "open": ["--allow-local-files", "--local", "-l", "--wait", "-w", "--tab", "--snap", "-s", "--all", "-v", "--viewport"],
+        "nav": ["--allow-local-files", "--local", "-l", "--wait", "-w", "--tab", "--snap", "-s", "--all", "-v", "--viewport"],
+        "navigate": ["--allow-local-files", "--local", "-l", "--wait", "-w", "--tab", "--snap", "-s", "--all", "-v", "--viewport"],
+        "goto": ["--allow-local-files", "--local", "-l", "--wait", "-w", "--tab", "--snap", "-s", "--all", "-v", "--viewport"],
         "back": ["--wait", "-w", "--tab"],
         "forward": ["--wait", "-w", "--tab"],
         "reload": ["--wait", "-w", "--tab"],
@@ -114,7 +114,9 @@ enum DinoCLIClient {
         "upload": ["--tab"],
         "storage": ["--tab", "--json", "-j", "--raw"],
         "console": ["--tab", "--level", "-l", "--clear", "-c", "--json", "-j"],
-        "network": ["--tab", "--filter", "-f", "--clear", "-c", "--json", "-j"],
+        "network": ["--tab", "--filter", "-f", "--body", "-b", "--clear", "-c", "--json", "-j"],
+        "cookies": ["--domain", "-d", "--path", "--secure", "--all-domains", "--all", "-a", "--tab", "--json", "-j"],
+        "cookie": ["--domain", "-d", "--path", "--secure", "--all-domains", "--all", "-a", "--tab", "--json", "-j"],
         "downloads": ["--wait", "-w", "--timeout", "-t", "--delete", "-d", "--clear", "--json", "-j"],
         "token": ["--header", "-H", "--json", "-j"],
         "playbook": ["--tab", "--wait", "-w", "--name", "--var", "-V", "--param"],
@@ -164,11 +166,13 @@ enum DinoCLIClient {
         case "console":
             return ["--tab", "--level", "-l", "--port", "--socket"]
         case "network":
-            return ["--tab", "--filter", "-f", "--port", "--socket"]
+            return ["--tab", "--filter", "-f", "--body", "-b", "--port", "--socket"]
         case "downloads", "download":
             return ["--timeout", "-t", "--delete", "-d", "--wait", "-w", "--port", "--socket"]
         case "storage":
             return ["--tab", "--port", "--socket"]
+        case "cookies", "cookie":
+            return ["--tab", "--domain", "-d", "--path", "--port", "--socket"]
         case "playbook":
             return ["--name", "--tab", "--wait", "-w", "--var", "-V", "--param", "--port", "--socket"]
         case "route":
@@ -299,8 +303,10 @@ enum DinoCLIClient {
         guard connRes == 0 else { return nil }
 
         let bodyData = body ?? Data()
+        let token = DinoAgentServer.loadOrCreateAgentToken()
         var reqHeader = "\(method) \(path) HTTP/1.1\r\n"
         reqHeader += "Host: localhost\r\n"
+        reqHeader += "Authorization: Bearer \(token)\r\n"
         reqHeader += "Content-Type: application/json\r\n"
         reqHeader += "Content-Length: \(bodyData.count)\r\n"
         reqHeader += "Connection: close\r\n\r\n"
@@ -606,6 +612,10 @@ enum DinoCLIClient {
 
         case "storage":
             handleStorage(args: args, port: activePort, socketPath: activeSocket)
+            return true
+
+        case "cookies", "cookie":
+            handleCookies(args: args, port: activePort, socketPath: activeSocket)
             return true
 
         case "console":
@@ -971,6 +981,26 @@ enum DinoCLIClient {
               toggle <id>              Toggle enabled state of an extension
               enable <id>              Enable an installed extension
               disable <id>             Disable an installed extension
+            """)
+
+        case "cookies", "cookie":
+            emitOutput("""
+            Usage: dino cookies [get|set|clear] [args] [options]
+
+            Inspect and manage browser cookies.
+
+            Commands:
+              get                      List cookies for current or specified domain (default)
+              set <name> <value>       Set a cookie value
+              clear                    Clear cookies for domain
+
+            Options:
+              -d, --domain <domain>    Filter or target specific domain
+              -a, --all-domains        Include cookies across all domains
+              --path <path>            Cookie path (default: /)
+              --secure                 Mark cookie as secure
+              -j, --json               Output raw JSON
+              --tab <id|idx>           Target specific tab by index or ID
             """)
 
         case "storage":
@@ -1378,6 +1408,16 @@ enum DinoCLIClient {
                 let waitResp = request(method: "POST", path: "/wait", body: wData, timeoutSeconds: 15, socketPath: socketPath, port: port)
                 _ = validateActionResponse(waitResp, command: "wait")
             }
+        }
+
+        let shouldSnap = args.boolFlag(["--snap", "-s"])
+        if shouldSnap {
+            var snapArgs = args
+            if !snapArgs.boolFlag(["--all"]) {
+                snapArgs.flags.insert("--viewport")
+            }
+            handleSnap(args: snapArgs, port: port, socketPath: socketPath)
+            return
         }
 
         let finalURL = (json["navigatedTo"] as? String) ?? (json["url"] as? String) ?? url
@@ -2477,6 +2517,99 @@ enum DinoCLIClient {
         }
     }
 
+    private static func handleCookies(args: ParsedArgs, port: UInt16?, socketPath: String?) {
+        let sub = args.positionals.first?.lowercased() ?? "get"
+        let tabArg = args.stringOption(["--tab"])
+        let resolvedTid = tabArg.flatMap { resolveTabId($0, port: port, socketPath: socketPath) }
+        var queryParts: [String] = []
+        if let tid = resolvedTid { queryParts.append("tabId=\(tid)") }
+        if let d = args.stringOption(["--domain", "-d"]) { queryParts.append("domain=\(d)") }
+        if args.boolFlag(["--all-domains", "--all", "-a"]) { queryParts.append("allDomains=true") }
+        let qStr = queryParts.isEmpty ? "" : "?" + queryParts.joined(separator: "&")
+
+        switch sub {
+        case "get", "list":
+            let resp = request(method: "GET", path: "/cookies\(qStr)", socketPath: socketPath, port: port)
+            let json = validateActionResponse(resp, command: "cookies get")
+            if args.boolFlag(["--json", "-j"]) {
+                if let data = try? JSONSerialization.data(withJSONObject: json, options: .prettyPrinted),
+                   let str = String(data: data, encoding: .utf8) {
+                    emitOutput(str)
+                } else {
+                    emitOutput(resp.bodyString)
+                }
+                exit(0)
+            }
+            guard let cookies = json["cookies"] as? [[String: Any]], !cookies.isEmpty else {
+                emitOutput("No cookies found")
+                exit(0)
+            }
+            for c in cookies {
+                let name = c["name"] as? String ?? ""
+                let val = c["value"] as? String ?? ""
+                let domain = c["domain"] as? String ?? ""
+                let path = c["path"] as? String ?? "/"
+                let secure = (c["isSecure"] as? Bool) == true ? " [secure]" : ""
+                let httpOnly = (c["isHTTPOnly"] as? Bool) == true ? " [httpOnly]" : ""
+                emitOutput("\(domain)\(path) : \(name)=\(val)\(secure)\(httpOnly)")
+            }
+            exit(0)
+
+        case "set":
+            let nonSubPositionals = args.positionals.dropFirst()
+            guard nonSubPositionals.count >= 2 else {
+                emitError("dino cookies set: requires name and value (e.g. 'dino cookies set session_id abc123 --domain example.com')")
+                exit(1)
+            }
+            let name = Array(nonSubPositionals)[0]
+            let val = Array(nonSubPositionals)[1]
+            var cookieObj: [String: Any] = ["name": name, "value": val]
+            if let d = args.stringOption(["--domain", "-d"]) { cookieObj["domain"] = d }
+            if let p = args.stringOption(["--path"]) { cookieObj["path"] = p }
+            if args.boolFlag(["--secure"]) { cookieObj["isSecure"] = true }
+            var bodyObj: [String: Any] = ["cookies": [cookieObj]]
+            if let tid = resolvedTid { bodyObj["tabId"] = tid }
+            let bData = try? JSONSerialization.data(withJSONObject: bodyObj)
+            let resp = request(method: "POST", path: "/cookies", body: bData, socketPath: socketPath, port: port)
+            _ = validateActionResponse(resp, command: "cookies set")
+            emitOutput("Set cookie '\(name)'")
+            exit(0)
+
+        case "clear", "del", "delete":
+            let resp = request(method: "DELETE", path: "/cookies\(qStr)", socketPath: socketPath, port: port)
+            _ = validateActionResponse(resp, command: "cookies clear")
+            emitOutput("Cookies cleared")
+            exit(0)
+
+        default:
+            let resp = request(method: "GET", path: "/cookies\(qStr)", socketPath: socketPath, port: port)
+            let json = validateActionResponse(resp, command: "cookies")
+            if args.boolFlag(["--json", "-j"]) {
+                if let data = try? JSONSerialization.data(withJSONObject: json, options: .prettyPrinted),
+                   let str = String(data: data, encoding: .utf8) {
+                    emitOutput(str)
+                } else {
+                    emitOutput(resp.bodyString)
+                }
+                exit(0)
+            }
+            guard let cookies = json["cookies"] as? [[String: Any]], !cookies.isEmpty else {
+                emitOutput("No cookies found")
+                exit(0)
+            }
+            for c in cookies {
+                let name = c["name"] as? String ?? ""
+                let val = c["value"] as? String ?? ""
+                let domain = c["domain"] as? String ?? ""
+                let path = c["path"] as? String ?? "/"
+                let secure = (c["isSecure"] as? Bool) == true ? " [secure]" : ""
+                let httpOnly = (c["isHTTPOnly"] as? Bool) == true ? " [httpOnly]" : ""
+                emitOutput("\(domain)\(path) : \(name)=\(val)\(secure)\(httpOnly)")
+            }
+            exit(0)
+        }
+    }
+
     private static func handleConsole(args: ParsedArgs, port: UInt16?, socketPath: String?) {
         var queryParts: [String] = []
         let tabArg = args.stringOption(["--tab"])
@@ -2526,6 +2659,10 @@ enum DinoCLIClient {
         if args.boolFlag(["--clear", "-c"]) {
             queryParts.append("clear=true")
         }
+        let showBody = args.boolFlag(["--body", "-b"]) || args.stringOption(["--body", "-b"]) != nil
+        if showBody || args.boolFlag(["--json", "-j"]) {
+            queryParts.append("includeBody=true")
+        }
         let q = queryParts.isEmpty ? "" : "?" + queryParts.joined(separator: "&")
         let resp = request(method: "GET", path: "/network\(q)", socketPath: socketPath, port: port)
         guard resp.statusCode == 200, let json = resp.jsonObject else {
@@ -2541,14 +2678,30 @@ enum DinoCLIClient {
             emitOutput("No network entries")
             exit(0)
         }
-        for e in entries {
+        let bodyFilter = args.stringOption(["--body", "-b"])
+        for (idx, e) in entries.enumerated() {
             let method = e["method"] as? String ?? "GET"
             let url = e["url"] as? String ?? ""
             let status = e["status"] as? Int ?? 0
             let duration = e["durationMs"] as? Double ?? 0
             let isError = (e["isError"] as? Bool) ?? (status >= 400 || status == 0)
             let mark = isError ? "❌" : "✓"
+            let body = e["body"] as? String
             emitOutput("\(mark) [\(status)] \(method) \(url) (\(String(format: "%.1f", duration))ms)")
+            if showBody {
+                if let bf = bodyFilter, !bf.isEmpty {
+                    if "\(idx)" == bf || url.contains(bf) {
+                        if let b = body, !b.isEmpty {
+                            emitOutput("  Response Body:\n\(b)\n")
+                        } else {
+                            emitOutput("  Response Body: (none or binary)")
+                        }
+                    }
+                } else if let b = body, !b.isEmpty {
+                    let preview = b.count > 300 ? String(b.prefix(300)) + "... [truncated, use --body <index|url> for full]" : b
+                    emitOutput("  Response: \(preview)")
+                }
+            }
         }
         exit(0)
     }

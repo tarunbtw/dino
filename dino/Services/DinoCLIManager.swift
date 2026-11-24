@@ -344,6 +344,7 @@ enum DinoCLIManager {
             "wait", "tabs", "tab", "eval", "evaluate",
             "shot", "screenshot", "pdf", "upload", "find", "dialog",
             "ext", "extensions", "storage", "session", "extract", "console", "network",
+            "cookies", "cookie",
             "downloads", "download", "token", "playbook", "hitl", "route"
         ]
 

@@ -602,7 +602,7 @@ extension DinoAgentServer {
             sendRaw(connection: connection, contentType: "text/html; charset=utf-8", data: Data(html.utf8), origin: origin)
             return true
 
-        case ("GET", "/stream"):
+        case ("GET", "/stream"), ("HEAD", "/stream"):
             guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin) else { return true }
             let initialHeaders = """
             HTTP/1.1 200 OK\r
@@ -611,6 +611,12 @@ extension DinoAgentServer {
             Connection: close\r
             Access-Control-Allow-Origin: *\r\n\r\n
             """
+            if method == "HEAD" {
+                connection.send(content: Data(initialHeaders.utf8), completion: .contentProcessed { _ in
+                    connection.cancel()
+                })
+                return true
+            }
             connection.send(content: Data(initialHeaders.utf8), completion: .contentProcessed { [weak activeTab] err in
                 guard err == nil, let tab = activeTab else {
                     connection.cancel()
