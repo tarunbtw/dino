@@ -41,7 +41,7 @@ private struct BasecampTileView: View {
             ZStack {
                 // Background fill
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(isFocused ? Theme.activeTab : (isHovering ? Theme.hover : Theme.frameWash))
+                    .fill(isFocused ? Theme.activeTab : (isHovering ? Theme.surfaceHover : Theme.surface))
 
                 // Favicon or initial
                 if let favicon = tab.favicon {
@@ -63,9 +63,9 @@ private struct BasecampTileView: View {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .strokeBorder(
                         isFocused
-                            ? Theme.frost
-                            : (isHovering ? Theme.activeTabHairline : Color.clear),
-                        lineWidth: isFocused ? 1.5 : 0.5
+                            ? Theme.accent.opacity(0.65)
+                            : (isHovering ? Theme.borderHover : Theme.border),
+                        lineWidth: isFocused ? 1.5 : 1
                     )
             }
             .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))

@@ -23,16 +23,21 @@ struct OverflowButton: View {
             }) {
                 ZStack(alignment: .topTrailing) {
                     ArchiveBoxIcon(lidOpen: showsPopover || isHovering)
-                        .frame(width: 22, height: 22)
-                        .padding(4)
-                        .background(isHovering ? Theme.hover : Color.clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .frame(width: 30, height: 30)
+                        .background(isHovering ? Theme.surfaceHover : Theme.surface, in: Circle())
+                        .overlay {
+                            Circle()
+                                .strokeBorder(isHovering ? Theme.borderHover : Theme.border, lineWidth: 1)
+                        }
 
-                    // Unseen notification dot in active space color
+                    // Unseen notification dot
                     if unseen {
                         Circle()
-                            .fill(Theme.spaceColor(store.activeSpace.colorHex))
-                            .frame(width: 6, height: 6)
-                            .offset(x: 1, y: 1)
+                            .fill(Theme.accent)
+                            .frame(width: 7, height: 7)
+                            .overlay {
+                                Circle().strokeBorder(Theme.frame, lineWidth: 1)
+                            }
                             .transition(.opacity)
                     }
                 }

@@ -30,7 +30,7 @@ struct WelcomeView: View {
     var body: some View {
         ZStack {
             // Calm Dino ambient backdrop
-            DinoStageScene(spaceColor: "pine")
+            DinoStageScene(spaceColor: "blue")
                 .ignoresSafeArea()
 
             // Window drag clearance across top edge
@@ -50,7 +50,7 @@ struct WelcomeView: View {
                             .resizable()
                             .scaledToFit()
                             .frame(width: 48, height: 48)
-                            .shadow(color: Color(hex: 0x023121, opacity: 0.3), radius: 10, y: 4)
+                            .shadow(color: Theme.shadowPeek, radius: 10, y: 4)
                     }
 
                     Text("Welcome to Dino")
@@ -131,10 +131,10 @@ struct WelcomeView: View {
                             Image(systemName: "arrow.right")
                                 .font(.system(size: 11, weight: .semibold))
                         }
-                        .foregroundStyle(Color(hex: 0xFFE5CC))
+                        .foregroundStyle(Theme.frame)
                         .frame(maxWidth: .infinity)
                         .frame(height: 38)
-                        .background(Color(hex: 0x023121), in: RoundedRectangle(cornerRadius: Theme.tabRadius, style: .continuous))
+                        .background(Theme.accent, in: RoundedRectangle(cornerRadius: Theme.tabRadius, style: .continuous))
                     }
                     .buttonStyle(.plain)
                 }

@@ -8,35 +8,48 @@
 import SwiftUI
 import AppKit
 
-/// Firn design tokens and metrics.
+/// Chromium Dark Mode & HeroUI design tokens and metrics.
 enum Theme {
-    static let frame = Color(hex: 0x3A3734)
-    static let frameWash = Color(hex: 0x3A3734, opacity: 0.55)
-    static let page = Color(hex: 0x2B2826)
-    static let ink = Color(hex: 0xF5F1EC)
-    static let muted = Color(hex: 0xD4CDC5)
-    static let faint = Color(hex: 0x958D85)
-    static let frost = Color(hex: 0xA0C4D6, opacity: 0.45)
-    static let accent = Color(hex: 0x82A8BE)
-    static let hover = Color(hex: 0xF5F1EC, opacity: 0.07)
-    static let press = Color(hex: 0xF5F1EC, opacity: 0.13)
-    static let activeTab = Color(hex: 0xF5F1EC, opacity: 0.17)
-    static let activeTabHairline = Color(hex: 0x000000, opacity: 0.25)
-    static let commandDim = Color(hex: 0x000000, opacity: 0.45)
-    static let commandVeil = Color(hex: 0x2B2826, opacity: 0.62)
-    static let shadowPeek = Color(hex: 0x000000, opacity: 0.45)
+    // MARK: - Chromium Dark Mode Surfaces
+    static let frame = Color(hex: 0x1F1F1F)
+    static let frameWash = Color(hex: 0x1F1F1F, opacity: 0.65)
+    static let page = Color(hex: 0x28292A)
+    static let surface = Color(hex: 0x2D2E31)
+    static let surfaceHover = Color(hex: 0x35363A)
+    static let surfaceActive = Color(hex: 0x3C4043)
+
+    // MARK: - HeroUI Hairline Borders
+    static let border = Color(hex: 0xFFFFFF, opacity: 0.08)
+    static let borderHover = Color(hex: 0xFFFFFF, opacity: 0.16)
+
+    // MARK: - Typography & Accents
+    static let ink = Color(hex: 0xE8EAED)
+    static let muted = Color(hex: 0x9AA0A6)
+    static let faint = Color(hex: 0x5F6368)
+    static let frost = Color(hex: 0x8AB4F8, opacity: 0.45)
+    static let accent = Color(hex: 0x8AB4F8)
+    static let accentFaint = Color(hex: 0x8AB4F8, opacity: 0.16)
+
+    // MARK: - Interactive States
+    static let hover = Color(hex: 0xFFFFFF, opacity: 0.06)
+    static let press = Color(hex: 0xFFFFFF, opacity: 0.11)
+    static let activeTab = Color(hex: 0x35363A)
+    static let activeTabHairline = Color(hex: 0xFFFFFF, opacity: 0.08)
+    static let commandDim = Color(hex: 0x000000, opacity: 0.52)
+    static let commandVeil = Color(hex: 0x202124, opacity: 0.78)
+    static let shadowPeek = Color(hex: 0x000000, opacity: 0.48)
 
     static let pageInset: CGFloat = 8
     @MainActor static var pageCornerRadius: CGFloat {
         guard let window = WindowCorners.shared.radius else { return 10 }
         return min(max(window - pageInset, 6), 24)
     }
-    static let rowHeight: CGFloat = 36
+    static let rowHeight: CGFloat = 34
     static let tabRadius: CGFloat = 8
-    static let fieldRadius: CGFloat = 8
+    static let fieldRadius: CGFloat = 10
     static let panelRadius: CGFloat = 14
     static let trafficLightsWidth: CGFloat = 85
-    static let rowSpacing: CGFloat = 4
+    static let rowSpacing: CGFloat = 3
     static let rowPadding: CGFloat = 12
     static let sectionSpacing: CGFloat = 16
 
@@ -46,48 +59,48 @@ enum Theme {
 
     static let tabFont = Font.system(size: 13)
     static let labelFont = Font.system(size: 12)
-    static let groupHeaderFont = Font.system(size: 13, weight: .semibold)
+    static let groupHeaderFont = Font.system(size: 12.5, weight: .semibold)
     static let hintFont = Font.system(size: 11)
-    static let panelTitleFont = Font.system(size: 22, weight: .regular, design: .serif)
+    static let panelTitleFont = Font.system(size: 22, weight: .medium)
 
-    static let tileRimTop = Color(hex: 0xFFFFFF, opacity: 0.16)
+    static let tileRimTop = Color(hex: 0xFFFFFF, opacity: 0.12)
     static let tileRimBottom = Color(hex: 0xFFFFFF, opacity: 0.03)
-    static let shadowSoft = Color(hex: 0x000000, opacity: 0.15)
-    static let shadowLift = Color(hex: 0x000000, opacity: 0.20)
+    static let shadowSoft = Color(hex: 0x000000, opacity: 0.18)
+    static let shadowLift = Color(hex: 0x000000, opacity: 0.24)
 
     static let glide = Animation.spring(response: 0.24, dampingFraction: 0.88)
 
     static let spaceColors: [(name: String, hex: String)] = [
-        ("glacier", "#7F9CB0"),
-        ("sand", "#C9A27E"),
-        ("sage", "#8FAE8B"),
-        ("heather", "#B88A9E"),
-        ("ochre", "#C4A95B"),
-        ("dusk", "#8E8FB8"),
-        ("clay", "#B07F6A"),
-        ("lagoon", "#6FA3A0")
+        ("blue", "#8AB4F8"),
+        ("mint", "#81C995"),
+        ("lavender", "#C58AF9"),
+        ("coral", "#F28B82"),
+        ("amber", "#FDD663"),
+        ("cyan", "#78D9EC"),
+        ("rose", "#FF8BCB"),
+        ("slate", "#9AA0A6")
     ]
 
     static func spaceColor(_ hex: String) -> Color {
         Color(hex: hex)
     }
 
-    // MARK: - First Light
+    // MARK: - Ambient Tint Helper
     enum FirstLight {
         static func spaceHex(_ nameOrHex: String) -> UInt32 {
             switch nameOrHex.lowercased() {
-            case "sand": return 0xC9A27E
-            case "sage": return 0x8FAE8B
-            case "heather": return 0xB88A9E
-            case "ochre": return 0xC4A95B
-            case "dusk": return 0x8E8FB8
-            case "clay": return 0xB07F6A
-            case "lagoon": return 0x6FA3A0
-            case "glacier": return 0x7F9CB0
+            case "blue": return 0x8AB4F8
+            case "mint": return 0x81C995
+            case "lavender": return 0xC58AF9
+            case "coral": return 0xF28B82
+            case "amber": return 0xFDD663
+            case "cyan": return 0x78D9EC
+            case "rose": return 0xFF8BCB
+            case "slate": return 0x9AA0A6
             default:
                 let clean = nameOrHex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
                 if let val = UInt32(clean, radix: 16) { return val }
-                return 0x7F9CB0
+                return 0x8AB4F8
             }
         }
     }

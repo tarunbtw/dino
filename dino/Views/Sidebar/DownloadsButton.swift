@@ -39,31 +39,35 @@ struct DownloadsButton: View {
                     ZStack {
                         // Background
                         Circle()
-                            .fill(isHovering ? Theme.hover : Color.clear)
-                            .frame(width: 28, height: 28)
+                            .fill(isHovering ? Theme.surfaceHover : Theme.surface)
+                            .frame(width: 30, height: 30)
+                            .overlay {
+                                Circle()
+                                    .strokeBorder(isHovering ? Theme.borderHover : Theme.border, lineWidth: 1)
+                            }
 
                         // Circular Progress Ring when downloading
                         if isDownloading {
                             Circle()
-                                .stroke(Theme.activeTabHairline, lineWidth: 2)
-                                .frame(width: 22, height: 22)
+                                .stroke(Theme.border, lineWidth: 2)
+                                .frame(width: 24, height: 24)
 
                             Circle()
                                 .trim(from: 0, to: CGFloat(max(0.05, overallProgress)))
                                 .stroke(
-                                    Theme.spaceColor(store.activeSpace.colorHex),
+                                    Theme.accent,
                                     style: StrokeStyle(lineWidth: 2, lineCap: .round)
                                 )
                                 .rotationEffect(.degrees(-90))
-                                .frame(width: 22, height: 22)
+                                .frame(width: 24, height: 24)
                         }
 
                         // Arrow Icon
-                        Image(systemName: "arrow.down")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(isHovering || isDownloading ? Theme.ink : Theme.faint)
+                        Image(systemName: "arrow.down.to.line")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(isHovering || isDownloading ? Theme.ink : Theme.muted)
                     }
-                    .frame(width: 28, height: 28)
+                    .frame(width: 30, height: 30)
                     .contentShape(Circle())
                 }
                 .buttonStyle(.plain)

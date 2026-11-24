@@ -17,7 +17,6 @@ struct VerticalSidebarView: View {
     @State private var dragOffset: CGFloat = 0
     @State private var isSettling: Bool = false
     @State private var isHoveringNewTab: Bool = false
-    @State private var isHoveringAddress: Bool = false
 
     private let tabRowHeight: CGFloat = Theme.rowHeight
     private let tabRowSpacing: CGFloat = Theme.rowSpacing
@@ -122,7 +121,7 @@ struct VerticalSidebarView: View {
             WindowLights()
                 .frame(width: Theme.trafficLightsWidth, height: Theme.rowHeight)
 
-            Door(icon: "sidebar.left", help: "Hide sidebar (⌘S)") {
+            Door(icon: "sidebar.leading", help: "Hide sidebar (⌘S)") {
                 withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
                     settings.toggleSidebarCollapsed()
                 }
@@ -135,11 +134,11 @@ struct VerticalSidebarView: View {
                 SidebarNavButtons(tab: activeTab)
             } else {
                 HStack(spacing: 2) {
-                    Door(icon: "chevron.left", help: "Back (⌘[)") {}
+                    Door(icon: "arrow.left", help: "Back (⌘[)") {}
                         .disabled(true)
                         .opacity(0.35)
 
-                    Door(icon: "chevron.right", help: "Forward (⌘])") {}
+                    Door(icon: "arrow.right", help: "Forward (⌘])") {}
                         .disabled(true)
                         .opacity(0.35)
                 }
@@ -154,108 +153,12 @@ struct VerticalSidebarView: View {
     @ViewBuilder
     private var addressBarSection: some View {
         let isLookout = store.peekTab != nil
-        let activeTab = store.peekTab ?? store.activeTab
-        let rawSite = WebAddress.site(of: activeTab?.url)
-        let displaySite = isLookout ? (rawSite.isEmpty ? "Lookout" : "Lookout: \(rawSite)") : rawSite
-        let canBookmark = activeTab != nil && !(activeTab?.isBlank ?? true) && activeTab?.url != nil && !isLookout
-        let isBookmarked = activeTab?.url.map { settings.isBookmarked($0.absoluteString) } ?? false
-
-        HStack(spacing: 6) {
-            // Text area clicking opens Omnibox
-            Button(action: {
-                store.focusAddressBar(prefill: true)
-            }) {
-                HStack(spacing: 0) {
-                    Text(displaySite.isEmpty ? "Search or enter address" : displaySite)
-                        .font(Theme.tabFont)
-                        .foregroundStyle(displaySite.isEmpty ? Theme.faint : Theme.ink)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-
-                    if let tab = activeTab, tab.currentZoom != 1.0 {
-                        Button {
-                            tab.resetZoom()
-                        } label: {
-                            Text("\(Int(round(tab.currentZoom * 100)))%")
-                                .font(Theme.font(size: 10, weight: .semibold))
-                                .foregroundStyle(Theme.faint)
-                                .padding(.horizontal, 4)
-                                .padding(.vertical, 2)
-                                .background(Theme.hover, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
-                        }
-                        .buttonStyle(.plain)
-                        .help("Reset Zoom (⌘0)")
-                    }
-                    Spacer(minLength: 4)
-                }
-                .frame(maxHeight: .infinity)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            if let tab = activeTab {
-                // Save / Bookmark button (appears on hover, or stays visible if already bookmarked)
-                if (isHoveringAddress || isBookmarked) && canBookmark {
-                    Button(action: {
-                        store.toggleBookmark(for: tab)
-                    }) {
-                        Image(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(isBookmarked ? Theme.ink : Theme.muted)
-                            .frame(width: 22, height: 22)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help(isBookmarked ? "Remove bookmark (⌘D)" : "Bookmark this tab (⌘D)")
-                    .transition(.opacity)
-                }
-
-                // Reload / Stop button
-                Button(action: {
-                    if tab.isLoading { tab.stopLoading() } else { tab.reload() }
-                }) {
-                    Image(systemName: tab.isLoading ? "xmark" : "arrow.clockwise")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Theme.muted)
-                        .frame(width: 22, height: 22)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help(tab.isLoading ? "Stop loading" : "Reload this page (⌘R)")
-            } else {
-                Button(action: {}) {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Theme.faint.opacity(0.4))
-                        .frame(width: 22, height: 22)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .disabled(true)
-            }
+        if let activeTab = store.peekTab ?? store.activeTab {
+            SidebarAddressBar(store: store, settings: settings, tab: activeTab, isLookout: isLookout)
+                .id(activeTab.id)
+        } else {
+            EmptyAddressBar(store: store)
         }
-        .padding(.horizontal, 10)
-        .frame(height: Theme.rowHeight)
-        .background {
-            RoundedRectangle(cornerRadius: Theme.fieldRadius, style: .continuous)
-                .fill(isHoveringAddress ? Theme.press : Theme.hover)
-                .overlay {
-                    if let tab = activeTab {
-                        LoadingFrost(
-                            isLoading: tab.isLoading,
-                            progress: tab.estimatedProgress,
-                            spaceColorHex: store.activeSpace.colorHex
-                        )
-                        .clipShape(RoundedRectangle(cornerRadius: Theme.fieldRadius, style: .continuous))
-                    }
-                }
-        }
-        .contentShape(RoundedRectangle(cornerRadius: Theme.fieldRadius, style: .continuous))
-        .onHover { isHoveringAddress = $0 }
-        .animation(.easeOut(duration: 0.15), value: isHoveringAddress)
-        .padding(.horizontal, 8)
-        .padding(.top, 6)
-        .padding(.bottom, 10)
     }
 
     // MARK: - New Tab Row
@@ -596,8 +499,8 @@ struct VerticalTabRowView: View {
                 .scaledToFit()
                 .clipShape(RoundedRectangle(cornerRadius: 3))
         } else {
-            Image(systemName: tab.isBlank ? "sparkles" : "globe")
-                .font(.system(size: 11))
+            Image(systemName: tab.isBlank ? "macwindow" : "globe")
+                .font(.system(size: 11.5, weight: .medium))
                 .foregroundStyle(isActive ? Theme.ink : Theme.muted)
         }
     }
@@ -626,13 +529,13 @@ private struct SidebarNavButtons: View {
 
     var body: some View {
         HStack(spacing: 2) {
-            Door(icon: "chevron.left", help: "Back (⌘[)") {
+            Door(icon: "arrow.left", help: "Back (⌘[)") {
                 tab.goBack()
             }
             .disabled(!tab.canGoBack)
             .opacity(tab.canGoBack ? 1.0 : 0.35)
 
-            Door(icon: "chevron.right", help: "Forward (⌘])") {
+            Door(icon: "arrow.right", help: "Forward (⌘])") {
                 tab.goForward()
             }
             .disabled(!tab.canGoForward)
@@ -641,22 +544,161 @@ private struct SidebarNavButtons: View {
     }
 }
 
-/// The tab on screen: a lifted sheet of frosted glass matching Firn.
+/// The tab on screen: a lifted HeroUI surface card.
 private struct ActiveTabBackground: View {
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: Theme.tabRadius, style: .continuous)
         shape
             .fill(Theme.activeTab)
             .overlay {
-                shape.inset(by: 0.5).strokeBorder(
-                    LinearGradient(colors: [Theme.tileRimTop, Theme.tileRimBottom], startPoint: .top, endPoint: .bottom),
-                    lineWidth: 0.5
-                )
+                shape.strokeBorder(Theme.border, lineWidth: 1)
             }
-            .overlay {
-                shape.strokeBorder(Theme.activeTabHairline, lineWidth: 0.5)
+            .shadow(color: Theme.shadowSoft, radius: 2, y: 1)
+    }
+}
+
+/// Dedicated address bar observing the active Tab directly so KVO loading progress updates stream smoothly without mouse hover.
+private struct SidebarAddressBar: View {
+    @ObservedObject var store: BrowserStore
+    @ObservedObject var settings: SettingsStore
+    @ObservedObject var tab: Tab
+    let isLookout: Bool
+
+    @State private var isHovering: Bool = false
+
+    var body: some View {
+        let rawSite = WebAddress.site(of: tab.url)
+        let displaySite = isLookout ? (rawSite.isEmpty ? "Lookout" : "Lookout: \(rawSite)") : rawSite
+        let canBookmark = !tab.isBlank && tab.url != nil && !isLookout
+        let isBookmarked = tab.url.map { settings.isBookmarked($0.absoluteString) } ?? false
+        let fieldShape = RoundedRectangle(cornerRadius: Theme.fieldRadius, style: .continuous)
+
+        HStack(spacing: 6) {
+            Button(action: {
+                store.focusAddressBar(prefill: true)
+            }) {
+                HStack(spacing: 0) {
+                    Text(displaySite.isEmpty ? "Search or enter address" : displaySite)
+                        .font(Theme.tabFont)
+                        .foregroundStyle(displaySite.isEmpty ? Theme.faint : Theme.ink)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+
+                    if tab.currentZoom != 1.0 {
+                        Button {
+                            tab.resetZoom()
+                        } label: {
+                            Text("\(Int(round(tab.currentZoom * 100)))%")
+                                .font(Theme.font(size: 10, weight: .semibold))
+                                .foregroundStyle(Theme.muted)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .background(Theme.surfaceActive, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                        .help("Reset Zoom (⌘0)")
+                    }
+                    Spacer(minLength: 4)
+                }
+                .frame(maxHeight: .infinity)
+                .contentShape(Rectangle())
             }
-            .shadow(color: Theme.shadowSoft, radius: 1, y: 1)
-            .shadow(color: Theme.shadowLift, radius: 4, y: 2)
+            .buttonStyle(.plain)
+
+            if (isHovering || isBookmarked) && canBookmark {
+                Button(action: {
+                    store.toggleBookmark(for: tab)
+                }) {
+                    Image(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(isBookmarked ? Theme.accent : Theme.muted)
+                        .frame(width: 22, height: 22)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(isBookmarked ? "Remove bookmark (⌘D)" : "Bookmark this tab (⌘D)")
+                .transition(.opacity)
+            }
+
+            Button(action: {
+                if tab.isLoading { tab.stopLoading() } else { tab.reload() }
+            }) {
+                Image(systemName: tab.isLoading ? "xmark" : "arrow.clockwise")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Theme.muted)
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(tab.isLoading ? "Stop loading" : "Reload this page (⌘R)")
+        }
+        .padding(.horizontal, 10)
+        .frame(height: Theme.rowHeight)
+        .background {
+            fieldShape
+                .fill(isHovering ? Theme.surfaceHover : Theme.surface)
+                .overlay {
+                    LoadingFrost(
+                        isLoading: tab.isLoading,
+                        progress: tab.estimatedProgress,
+                        spaceColorHex: store.activeSpace.colorHex
+                    )
+                    .clipShape(fieldShape)
+                }
+                .overlay {
+                    fieldShape.strokeBorder(isHovering ? Theme.borderHover : Theme.border, lineWidth: 1)
+                }
+        }
+        .contentShape(fieldShape)
+        .onHover { isHovering = $0 }
+        .animation(.easeOut(duration: 0.15), value: isHovering)
+        .padding(.horizontal, 8)
+        .padding(.top, 6)
+        .padding(.bottom, 10)
+    }
+}
+
+private struct EmptyAddressBar: View {
+    @ObservedObject var store: BrowserStore
+    @State private var isHovering: Bool = false
+
+    var body: some View {
+        let fieldShape = RoundedRectangle(cornerRadius: Theme.fieldRadius, style: .continuous)
+        HStack(spacing: 6) {
+            Button(action: {
+                store.focusAddressBar(prefill: true)
+            }) {
+                HStack {
+                    Text("Search or enter address")
+                        .font(Theme.tabFont)
+                        .foregroundStyle(Theme.faint)
+                        .lineLimit(1)
+                    Spacer()
+                }
+                .frame(maxHeight: .infinity)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Image(systemName: "arrow.clockwise")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Theme.faint.opacity(0.4))
+                .frame(width: 22, height: 22)
+        }
+        .padding(.horizontal, 10)
+        .frame(height: Theme.rowHeight)
+        .background {
+            fieldShape
+                .fill(isHovering ? Theme.surfaceHover : Theme.surface)
+                .overlay {
+                    fieldShape.strokeBorder(isHovering ? Theme.borderHover : Theme.border, lineWidth: 1)
+                }
+        }
+        .contentShape(fieldShape)
+        .onHover { isHovering = $0 }
+        .animation(.easeOut(duration: 0.15), value: isHovering)
+        .padding(.horizontal, 8)
+        .padding(.top, 6)
+        .padding(.bottom, 10)
     }
 }

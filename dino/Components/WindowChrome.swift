@@ -79,7 +79,7 @@ struct WindowSetup: NSViewRepresentable {
             window.isMovableByWindowBackground = false
             window.isOpaque = true
             window.appearance = NSAppearance(named: .darkAqua)
-            window.backgroundColor = NSColor(hex: 0x3A3734)
+            window.backgroundColor = NSColor(hex: 0x1F1F1F)
 
             hideRealLights()
             readMenuBarHeight()

@@ -222,7 +222,7 @@ struct AutopilotRailView: View {
                         .resizable()
                         .scaledToFit()
                         .frame(width: 32, height: 32)
-                        .shadow(color: Color(hex: 0x023121, opacity: 0.25), radius: 6, y: 2)
+                        .shadow(color: Theme.accent.opacity(0.25), radius: 6, y: 2)
                 }
 
                 Text("Agent")

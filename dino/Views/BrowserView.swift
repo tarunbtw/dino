@@ -108,8 +108,8 @@ struct BrowserView: View {
             .overlay {
                 if store.activeTab?.isAgentDriving == true {
                     RoundedRectangle(cornerRadius: Theme.pageCornerRadius, style: .continuous)
-                        .strokeBorder(Color(hex: 0x023121, opacity: 0.85), lineWidth: 2.5)
-                        .shadow(color: Color(hex: 0x023121, opacity: 0.45), radius: 8)
+                        .strokeBorder(Theme.accent.opacity(0.85), lineWidth: 2.0)
+                        .shadow(color: Theme.accent.opacity(0.35), radius: 8)
                         .allowsHitTesting(false)
                 }
             }
@@ -213,7 +213,8 @@ struct BrowserView: View {
             if store.isAddressBarFocused {
                 OmniboxModalView(store: store, isPresented: $store.isAddressBarFocused)
                     .padding(.leading, leadingPad)
-                    .padding([.top, .trailing, .bottom], Theme.pageInset)
+                    .padding(.top, Theme.pageInset + store.menuBarDrop)
+                    .padding([.trailing, .bottom], Theme.pageInset)
                     .zIndex(350)
             }
 
@@ -378,7 +379,7 @@ private struct TabStageView: View {
                         VStack(spacing: 8) {
                             Image(systemName: "eye.slash.fill")
                                 .font(.system(size: 32, weight: .semibold))
-                                .foregroundStyle(Color.purple.opacity(0.85))
+                                .foregroundStyle(Theme.accent)
 
                             Text("Private Browsing")
                                 .font(.system(size: 18, weight: .semibold))

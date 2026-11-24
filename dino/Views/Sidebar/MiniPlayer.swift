@@ -108,11 +108,11 @@ private struct MiniPlayerCard: View {
         .padding(.trailing, 6)
         .padding(.vertical, 5)
         .background {
-            shape.fill(Theme.page)
+            shape.fill(Theme.surface)
         }
         .clipShape(shape)
         .overlay {
-            shape.strokeBorder(Theme.activeTabHairline, lineWidth: 0.5)
+            shape.strokeBorder(Theme.border, lineWidth: 1)
         }
         .shadow(color: Color.black.opacity(0.18), radius: 8, y: 3)
         .contentShape(shape)

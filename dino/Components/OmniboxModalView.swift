@@ -233,17 +233,18 @@ struct OmniboxModalView: View {
         let rows = items
         GeometryReader { proxy in
             ZStack(alignment: .top) {
-                // Dimming backdrop
+                // Dimming backdrop clipped strictly to concentric page geometry
+                let pageShape = RoundedRectangle(cornerRadius: Theme.pageCornerRadius, style: .continuous)
                 if !store.isPickingSplit {
-                    Theme.commandDim
-                        .ignoresSafeArea()
-                        .contentShape(Rectangle())
+                    pageShape
+                        .fill(Theme.commandDim)
+                        .contentShape(pageShape)
                         .onTapGesture { dismiss() }
                 } else {
                     // In split pick mode, clicking outside the omnibox commits the split with a new blank tab
-                    Color.clear
-                        .ignoresSafeArea()
-                        .contentShape(Rectangle())
+                    pageShape
+                        .fill(Color.clear)
+                        .contentShape(pageShape)
                         .onTapGesture {
                             dismiss(cancelledByEscape: false)
                         }
@@ -322,7 +323,7 @@ struct OmniboxModalView: View {
                                     .frame(height: 36)
                                     .background(
                                         RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                            .fill(isSelected ? Theme.press : Color.clear)
+                                            .fill(isSelected ? Theme.surfaceHover : Color.clear)
                                     )
                                     .contentShape(Rectangle())
                                 }
@@ -338,12 +339,12 @@ struct OmniboxModalView: View {
                 .frame(width: store.isPickingSplit ? min(420, max(240, (proxy.size.width / 2) - 32)) : min(560, max(240, proxy.size.width - 64)))
                 .background {
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(Theme.page)
+                        .fill(Theme.surface)
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .strokeBorder(Theme.activeTabHairline, lineWidth: 0.5)
+                        .strokeBorder(Theme.borderHover, lineWidth: 1)
                 }
                 .shadow(color: Color.black.opacity(0.35), radius: 24, y: 8)
                 .shadow(color: Color.black.opacity(0.20), radius: 3, y: 1)

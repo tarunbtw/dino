@@ -21,8 +21,8 @@ struct Space: Identifiable, Codable, Equatable {
     static let defaultSecondID = UUID(uuidString: "00000000-0000-0000-0000-000000000002") ?? UUID()
 
     static let defaultSpaces: [Space] = [
-        Space(id: defaultFirstID, name: "Personal", icon: "person.fill", colorHex: "#3B82F6"),
-        Space(id: defaultSecondID, name: "Work", icon: "briefcase.fill", colorHex: "#10B981")
+        Space(id: defaultFirstID, name: "Personal", icon: "person.fill", colorHex: "#8AB4F8"),
+        Space(id: defaultSecondID, name: "Work", icon: "briefcase.fill", colorHex: "#81C995")
     ]
 }
 
@@ -975,7 +975,7 @@ final class BrowserStore: ObservableObject {
     }
 
     /// Creates a new workspace with name, icon, and color.
-    func createSpace(name: String, icon: String = "folder.fill", colorHex: String = "#7F9CB0", sharesWithId: UUID? = nil) {
+    func createSpace(name: String, icon: String = "folder.fill", colorHex: String = "#8AB4F8", sharesWithId: UUID? = nil) {
         let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let finalName = cleanName.isEmpty ? "New Space" : cleanName
         let newSpace = Space(id: UUID(), name: finalName, icon: icon, colorHex: colorHex, sharesWithId: sharesWithId)
