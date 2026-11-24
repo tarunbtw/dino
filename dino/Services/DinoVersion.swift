@@ -9,7 +9,7 @@ import Foundation
 
 public enum DinoVersion {
     public static let appName = "Dino"
-    public static let version = "0.53"
+    public static let version = "0.54"
     public static let build = "1"
 
     /// Resolves the actual runtime version string, inspecting the enclosing bundle if running from a symlinked CLI binary.
