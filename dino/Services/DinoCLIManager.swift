@@ -60,6 +60,18 @@ enum DinoCLIManager {
         return "\(dinoDirectory)/dino.log"
     }
 
+    /// Resolves the canonical .app bundle URL regardless of symlink execution paths.
+    static var appBundleURL: URL {
+        if let bundle = DinoVersion.resolvedBundle, bundle.bundleURL.pathExtension == "app" {
+            return bundle.bundleURL
+        }
+        let fallback = URL(fileURLWithPath: "/Applications/Dino.app")
+        if FileManager.default.fileExists(atPath: fallback.path) {
+            return fallback
+        }
+        return Bundle.main.bundleURL
+    }
+
     static func ensureDinoDirectory() {
         let dir = dinoDirectory
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true, attributes: [
@@ -126,6 +138,7 @@ enum DinoCLIManager {
 
     /// Returns the PID of the active Dino GUI browser if running.
     static func getRunningGUIPID() -> pid_t? {
+        let currentPid = getpid()
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let candidatePaths = [
             guiPidFilePath,
@@ -137,13 +150,21 @@ enum DinoCLIManager {
                   let pid = Int32(content.trimmingCharacters(in: .whitespacesAndNewlines)) else {
                 continue
             }
-            let res = kill(pid, 0)
-            if res == 0 || errno == EPERM {
-                return pid
-            } else if errno == ESRCH {
-                unlink(path)
+            if pid == currentPid {
+                continue
+            }
+            if let app = NSRunningApplication(processIdentifier: pid) {
+                let name = (app.localizedName ?? "").lowercased()
+                let bundleId = (app.bundleIdentifier ?? "").lowercased()
+                let isDino = name.contains("dino") || bundleId.contains("dino")
+                let isRegularGUI = (app.activationPolicy == .regular)
+                if isDino && isRegularGUI {
+                    return pid
+                } else {
+                    unlink(path)
+                }
             } else {
-                return pid
+                unlink(path)
             }
         }
         return nil
@@ -727,7 +748,10 @@ enum DinoCLIManager {
     ) -> DinoWorkerDescriptor? {
         ensureDinoDirectory()
         let selectedProfile = profile ?? "agent"
-        let execURL = Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0])
+        let bundleExec = appBundleURL.appendingPathComponent("Contents/MacOS/Dino")
+        let execURL = FileManager.default.fileExists(atPath: bundleExec.path)
+            ? bundleExec
+            : (Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0]))
         let proc = Process()
         proc.executableURL = execURL
 
@@ -749,6 +773,10 @@ enum DinoCLIManager {
 
         proc.arguments = childArgs
         proc.standardInput = FileHandle.nullDevice
+
+        var env = ProcessInfo.processInfo.environment
+        env["DINO_HEADLESS"] = "1"
+        proc.environment = env
 
         let logPath = logFilePath
         if !FileManager.default.fileExists(atPath: logPath) {

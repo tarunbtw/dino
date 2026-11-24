@@ -27,6 +27,9 @@ final class DinoHeadlessManager: ObservableObject {
     /// Determines if Dino was launched in headless mode via CLI argument, executable name, or environment variable.
     static var isHeadless: Bool = {
         let args = CommandLine.arguments
+        if args.contains("--gui") {
+            return false
+        }
         let execName = (args.first as NSString?)?.lastPathComponent.lowercased() ?? ""
         if execName == "dinod" || execName.contains("dinod") {
             return true
