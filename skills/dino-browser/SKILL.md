@@ -38,8 +38,11 @@ All commands run via `dino <command> [options]`. Add `--worker` for headless dae
 | **Scroll** | `dino scroll [dir px \| to <eN\|sel>]`| Scrolls by pixel offset or scrolls element to center of view | Minimal |
 | **Drag** | `dino drag <from> <to> [--native]`| Multi-step drag without warping host macOS cursor | Minimal |
 | **Hover** | `dino hover <eN>` | Hovers over element with virtual cursor pulse | Minimal |
-| **Screenshot** | `dino shot [file\|-] -l [--crop]`| Captures PNG (`-` for stdout pipe); `-l` adds SoM badges; `--crop` crops | ~150 vision tokens |
-| **Wait** | `dino wait [--mode <mode>]` | Awaits settlement (`auto` default, `stability`, `selector`) | Minimal |
+| **Screenshot** | `dino shot [file\|-] -l [--full-page] [--crop]`| Captures PNG (`-` for stdout pipe); `-l` adds SoM badges; `--full-page` for complete document | ~150 vision tokens |
+| **PDF Export**  | `dino pdf [file\|-]` | Exports vector PDF artifact (`-` for stdout pipe) | **0 tokens** |
+| **Extract**     | `dino extract [sel] [--mode <mode>]` | Extracts structured data (`table`, `jsonld`, `records`) directly | **0 tokens** |
+| **Session**     | `dino session <save\|restore> [name]`| Exports / restores cookies & storage in Playwright format | Minimal |
+| **Wait**        | `dino wait [--mode <mode>]` | Awaits settlement (`auto` default, `stability`, `selector`) | Minimal |
 | **Dialog** | `dino dialog [accept\|dismiss\|wait]`| Inspect or configure JavaScript alert/confirm/prompt handling | Minimal |
 | **Upload** | `dino upload <eN> <filepath...>`| Stage and set files on file input | Minimal |
 | **Storage** | `dino storage [get\|set\|clear] [--raw]`| Inspect or set web storage (`--raw` to bypass masking) | Minimal |
@@ -128,7 +131,13 @@ All endpoints require `Authorization: Bearer <token>` (or `X-Dino-Token`). Read 
 | `/diff` | `GET` | `?tabId=...` | Delta DOM mutations (added, removed, changed) |
 | `/find` | `GET` | `?text=...&role=...` | Find element and return ref ID |
 | `/action` | `POST` | `{"action": "click"\|"type", "target": "e2", ...}` | Interaction dispatch |
-| `/screenshot` | `GET` | `?labeled=true&somCrop=true` | GPU snapshot with Set-of-Marks badges |
+| `/screenshot` | `GET` | `?labeled=true&somCrop=true&fullPage=true` | GPU snapshot with Set-of-Marks badges (`fullPage` support) |
+| `/pdf` | `GET` / `POST` | `?tabId=...` | Vector PDF artifact generation |
+| `/extract` | `GET` / `POST` | `?selector=...&mode=table\|jsonld\|records` | Zero-token structured DOM extractor |
+| `/session/export` | `GET` / `POST` | `?tabId=...` | Export cookies & storage in universal Playwright format |
+| `/session/import` | `POST` | `{"cookies": [...], "origins": [...]}` | Restore cookies & storage from JSON state |
+| `/view` | `GET` | — | Web-based live observability stream viewer |
+| `/stream` | `GET` | — | Real-time 15 FPS MJPEG video feed of headless worker |
 | `/evaluate` | `POST` | `{"expression": "...", "world": "isolated"\|"page"}`| Execute JavaScript |
 | `/playbook/replay`| `POST` | `{"name": "...", "variables": {"key": "val"}}` | Deterministic macro replay |
 | `/route` | `POST` | `{"pattern": "...", "action": "abort"\|"mock"}` | Block or mock network routes |

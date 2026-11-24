@@ -106,8 +106,11 @@ enum DinoCLIClient {
         "tabs": ["--close", "--new", "--switch", "--wait", "-w", "--incognito"],
         "eval": ["--world", "--tab"],
         "evaluate": ["--world", "--tab"],
-        "shot": ["--clip", "-c", "--element", "-e", "--labeled", "-l", "--output", "-o", "--tab", "--crop", "--som-crop", "--scale"],
-        "screenshot": ["--clip", "-c", "--element", "-e", "--labeled", "-l", "--output", "-o", "--tab", "--crop", "--som-crop", "--scale"],
+        "shot": ["--clip", "-c", "--element", "-e", "--labeled", "-l", "--output", "-o", "--tab", "--crop", "--som-crop", "--scale", "--full-page", "--fullpage"],
+        "screenshot": ["--clip", "-c", "--element", "-e", "--labeled", "-l", "--output", "-o", "--tab", "--crop", "--som-crop", "--scale", "--full-page", "--fullpage"],
+        "pdf": ["--clip", "-c", "--output", "-o", "--tab", "--json", "-j"],
+        "session": ["--tab", "--json", "-j"],
+        "extract": ["--mode", "-m", "--tab", "--json", "-j"],
         "upload": ["--tab"],
         "storage": ["--tab", "--json", "-j", "--raw"],
         "console": ["--tab", "--level", "-l", "--clear", "-c", "--json", "-j"],
@@ -152,6 +155,12 @@ enum DinoCLIClient {
             return ["--world", "--tab", "--port", "--socket"]
         case "shot", "screenshot":
             return ["--clip", "-c", "--element", "-e", "--output", "-o", "--tab", "--scale", "--port", "--socket"]
+        case "pdf":
+            return ["--clip", "-c", "--output", "-o", "--tab", "--port", "--socket"]
+        case "session":
+            return ["--tab", "--port", "--socket"]
+        case "extract":
+            return ["--mode", "-m", "--tab", "--port", "--socket"]
         case "console":
             return ["--tab", "--level", "-l", "--port", "--socket"]
         case "network":
@@ -575,6 +584,18 @@ enum DinoCLIClient {
             handleShot(args: args, port: activePort, socketPath: activeSocket)
             return true
 
+        case "pdf":
+            handlePdf(args: args, port: activePort, socketPath: activeSocket)
+            return true
+
+        case "session":
+            handleSession(args: args, port: activePort, socketPath: activeSocket)
+            return true
+
+        case "extract":
+            handleExtract(args: args, port: activePort, socketPath: activeSocket)
+            return true
+
         case "upload":
             handleUpload(args: args, port: activePort, socketPath: activeSocket)
             return true
@@ -836,7 +857,7 @@ enum DinoCLIClient {
             Capture a PNG screenshot of the page or an element.
 
             Arguments:
-              [filepath]               Output PNG path (prints base64 data URI if omitted, '-' for stdout pipe)
+              [filepath]               Output PNG path (prints to ~/.dino/screenshots if omitted, '-' for stdout pipe)
 
             Options:
               -l, --labeled            Annotate interactive elements with numbered visual badges
@@ -844,6 +865,51 @@ enum DinoCLIClient {
               -c, --clip <x,y,w,h>     Capture a specific viewport bounding box
               --crop                   Auto-crop to active container/modal (Set-of-Marks)
               --scale <n>              Resolution scale factor (e.g. 1 for 1x logical downsampling)
+              --full-page              Capture full document scrollHeight
+              --tab <id|idx>           Target specific tab by index or ID (default: active tab)
+            """)
+
+        case "pdf":
+            emitOutput("""
+            Usage: dino pdf [filepath] [options]
+
+            Generate a pixel-perfect vector PDF of the current page.
+
+            Arguments:
+              [filepath]               Output PDF path (defaults to ~/.dino/pdfs/ if omitted, '-' for stdout pipe)
+
+            Options:
+              -c, --clip <x,y,w,h>     Clip PDF bounds to specific box
+              --tab <id|idx>           Target specific tab by index or ID (default: active tab)
+            """)
+
+        case "session":
+            emitOutput("""
+            Usage: dino session <save|restore> [name|path] [options]
+
+            Manage portable browser session states (Playwright storageState.json format).
+
+            Subcommands:
+              save [name|path]         Export all active cookies and localStorage to session file
+              restore <name|path>      Import cookies and localStorage from session file
+
+            Options:
+              -j, --json               Output raw session JSON to stdout
+              --tab <id|idx>           Target specific tab by index or ID (default: active tab)
+            """)
+
+        case "extract":
+            emitOutput("""
+            Usage: dino extract [selector] [options]
+
+            Extract structured data from the page with 0 tokens using native DOM heuristics.
+
+            Arguments:
+              [selector]               Target table, container, or card list selector (e.g. 'table', '.item')
+
+            Options:
+              -m, --mode <mode>        Extraction mode: auto, table, jsonld, records (default: auto)
+              -j, --json               Output formatted JSON (default: true)
               --tab <id|idx>           Target specific tab by index or ID (default: active tab)
             """)
 
@@ -2060,6 +2126,9 @@ enum DinoCLIClient {
         if let scaleVal = args.stringOption(["--scale"]) {
             queryItems.append("scale=\(scaleVal)")
         }
+        if args.boolFlag(["--full-page", "--fullpage"]) {
+            queryItems.append("fullPage=true")
+        }
         if let tabArg = args.stringOption(["--tab"]),
            let tid = resolveTabId(tabArg, port: port, socketPath: socketPath) {
             queryItems.append("tabId=\(tid)")
@@ -2114,6 +2183,198 @@ enum DinoCLIClient {
             emitError("dino shot: failed to write image to \(destinationPath): \(error.localizedDescription)")
             exit(1)
         }
+    }
+
+    private static func handlePdf(args: ParsedArgs, port: UInt16?, socketPath: String?) {
+        var queryItems: [String] = []
+
+        if let clip = args.stringOption(["--clip", "-c"]) {
+            queryItems.append("clip=\(clip)")
+        }
+        if let tabArg = args.stringOption(["--tab"]),
+           let tid = resolveTabId(tabArg, port: port, socketPath: socketPath) {
+            queryItems.append("tabId=\(tid)")
+        }
+
+        let path = queryItems.isEmpty ? "/pdf" : "/pdf?" + queryItems.joined(separator: "&")
+        let resp = request(method: "GET", path: path, timeoutSeconds: 30, socketPath: socketPath, port: port)
+
+        guard resp.statusCode == 200 else {
+            let errMsg = (resp.jsonObject?["error"] as? String) ?? resp.bodyString
+            emitError("dino pdf: \(errMsg)")
+            exit(1)
+        }
+
+        let outTarget = args.positionals.first
+
+        if outTarget == "-" {
+            resp.body.withUnsafeBytes { rawBuffer in
+                if let base = rawBuffer.baseAddress {
+                    var totalWritten = 0
+                    while totalWritten < rawBuffer.count {
+                        let written = Darwin.write(STDOUT_FILENO, base + totalWritten, rawBuffer.count - totalWritten)
+                        if written <= 0 { break }
+                        totalWritten += written
+                    }
+                }
+            }
+            exit(0)
+        }
+
+        let destinationPath: String
+        if let custom = outTarget, !custom.isEmpty {
+            destinationPath = (custom as NSString).expandingTildeInPath
+        } else {
+            let home = FileManager.default.homeDirectoryForCurrentUser.path
+            let pdfDir = "\(home)/.dino/pdfs"
+            try? FileManager.default.createDirectory(atPath: pdfDir, withIntermediateDirectories: true, attributes: [
+                .posixPermissions: 0o700
+            ])
+            let df = DateFormatter()
+            df.dateFormat = "yyyy-MM-dd_HH-mm-ss"
+            destinationPath = "\(pdfDir)/dino-doc-\(df.string(from: Date())).pdf"
+        }
+
+        let url = URL(fileURLWithPath: destinationPath)
+        let dir = url.deletingLastPathComponent().path
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true, attributes: [
+            .posixPermissions: 0o700
+        ])
+
+        do {
+            try resp.body.write(to: url, options: .atomic)
+            emitOutput(destinationPath)
+            exit(0)
+        } catch {
+            emitError("dino pdf: Failed to write PDF file: \(error.localizedDescription)")
+            exit(1)
+        }
+    }
+
+    private static func handleSession(args: ParsedArgs, port: UInt16?, socketPath: String?) {
+        guard let subcmd = args.positionals.first?.lowercased() else {
+            emitError("dino session: Missing subcommand. Usage: dino session save [name|path] | dino session restore <name|path>")
+            exit(1)
+        }
+
+        let isJson = args.boolFlag(["--json", "-j"])
+        var tabQuery = ""
+        if let tabArg = args.stringOption(["--tab"]),
+           let tid = resolveTabId(tabArg, port: port, socketPath: socketPath) {
+            tabQuery = "?tabId=\(tid)"
+        }
+
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let sessionsDir = "\(home)/.dino/sessions"
+        try? FileManager.default.createDirectory(atPath: sessionsDir, withIntermediateDirectories: true, attributes: [
+            .posixPermissions: 0o700
+        ])
+
+        func resolveSessionPath(_ target: String?) -> String {
+            guard let t = target, !t.isEmpty else {
+                return "\(sessionsDir)/default.json"
+            }
+            if t.contains("/") || t.hasSuffix(".json") {
+                return (t as NSString).expandingTildeInPath
+            }
+            return "\(sessionsDir)/\(t).json"
+        }
+
+        switch subcmd {
+        case "save", "export":
+            let targetArg = args.positionals.count > 1 ? args.positionals[1] : nil
+            let filePath = resolveSessionPath(targetArg)
+            let resp = request(method: "GET", path: "/session/export\(tabQuery)", timeoutSeconds: 30, socketPath: socketPath, port: port)
+            guard resp.statusCode == 200 else {
+                let errMsg = (resp.jsonObject?["error"] as? String) ?? resp.bodyString
+                emitError("dino session save: \(errMsg)")
+                exit(1)
+            }
+            do {
+                let fileURL = URL(fileURLWithPath: filePath)
+                let parent = fileURL.deletingLastPathComponent().path
+                try FileManager.default.createDirectory(atPath: parent, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+                try resp.body.write(to: fileURL, options: .atomic)
+                try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: filePath)
+                if isJson {
+                    emitOutput(resp.bodyString)
+                } else {
+                    let cookiesCount = (resp.jsonObject?["cookies"] as? [Any])?.count ?? 0
+                    let originsCount = (resp.jsonObject?["origins"] as? [Any])?.count ?? 0
+                    emitOutput("✅ Saved session state (\(cookiesCount) cookies, \(originsCount) origins) to \(filePath)")
+                }
+                exit(0)
+            } catch {
+                emitError("dino session save: Failed to write session file: \(error.localizedDescription)")
+                exit(1)
+            }
+
+        case "restore", "import", "load":
+            guard args.positionals.count > 1 else {
+                emitError("dino session restore: Missing session name or file path. Usage: dino session restore <name|path>")
+                exit(1)
+            }
+            let filePath = resolveSessionPath(args.positionals[1])
+            guard FileManager.default.fileExists(atPath: filePath),
+                  let data = try? Data(contentsOf: URL(fileURLWithPath: filePath)) else {
+                emitError("dino session restore: Session file not found at \(filePath)")
+                exit(1)
+            }
+            let resp = request(method: "POST", path: "/session/import\(tabQuery)", body: data, timeoutSeconds: 30, socketPath: socketPath, port: port)
+            guard resp.statusCode == 200 else {
+                let errMsg = (resp.jsonObject?["error"] as? String) ?? resp.bodyString
+                emitError("dino session restore: \(errMsg)")
+                exit(1)
+            }
+            if isJson {
+                emitOutput(resp.bodyString)
+            } else {
+                let cCount = resp.jsonObject?["cookiesImported"] as? Int ?? 0
+                let oCount = resp.jsonObject?["originsImported"] as? Int ?? 0
+                emitOutput("✅ Restored session state (\(cCount) cookies, \(oCount) origins) from \(filePath)")
+            }
+            exit(0)
+
+        default:
+            emitError("dino session: Unknown subcommand '\(subcmd)'. Usage: dino session save [name|path] | dino session restore <name|path>")
+            exit(1)
+        }
+    }
+
+    private static func handleExtract(args: ParsedArgs, port: UInt16?, socketPath: String?) {
+        var queryItems: [String] = []
+
+        if let mode = args.stringOption(["--mode", "-m"]) {
+            queryItems.append("mode=\(mode)")
+        }
+        if let sel = args.positionals.first, !sel.isEmpty {
+            queryItems.append("selector=\(sel.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? sel)")
+        }
+        if let tabArg = args.stringOption(["--tab"]),
+           let tid = resolveTabId(tabArg, port: port, socketPath: socketPath) {
+            queryItems.append("tabId=\(tid)")
+        }
+
+        let path = queryItems.isEmpty ? "/extract" : "/extract?" + queryItems.joined(separator: "&")
+        let resp = request(method: "GET", path: path, timeoutSeconds: 30, socketPath: socketPath, port: port)
+
+        guard resp.statusCode == 200 else {
+            let errMsg = (resp.jsonObject?["error"] as? String) ?? resp.bodyString
+            emitError("dino extract: \(errMsg)")
+            exit(1)
+        }
+
+        if let json = resp.jsonObject, let data = json["data"] {
+            if let prettyData = try? JSONSerialization.data(withJSONObject: data, options: [.prettyPrinted]),
+               let prettyStr = String(data: prettyData, encoding: .utf8) {
+                emitOutput(prettyStr)
+            } else {
+                emitOutput("\(data)")
+            }
+        } else {
+            emitOutput(resp.bodyString)
+        }
+        exit(0)
     }
 
     private static func handleUpload(args: ParsedArgs, port: UInt16?, socketPath: String?) {

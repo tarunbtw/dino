@@ -3719,6 +3719,111 @@
                 }
 
                 return { detected: false, type: null, resolved: true };
+            },
+
+            extract: function(selector, mode) {
+                mode = (mode || 'auto').toLowerCase();
+
+                // 1. JSON-LD Mode
+                if (mode === 'jsonld' || (mode === 'auto' && (!selector || selector === 'ld+json' || selector === 'jsonld'))) {
+                    var scripts = document.querySelectorAll('script[type="application/ld+json"]');
+                    var ldList = [];
+                    for (var i = 0; i < scripts.length; i++) {
+                        try {
+                            var parsed = JSON.parse(scripts[i].textContent || '{}');
+                            ldList.push(parsed);
+                        } catch(e) {}
+                    }
+                    if (ldList.length > 0 || mode === 'jsonld') {
+                        return { success: true, mode: 'jsonld', count: ldList.length, data: ldList };
+                    }
+                }
+
+                // 2. Table Mode
+                var targetTable = null;
+                if (selector) {
+                    try {
+                        var selEl = document.querySelector(selector);
+                        if (selEl) {
+                            if (selEl.tagName === 'TABLE') {
+                                targetTable = selEl;
+                            } else {
+                                targetTable = selEl.querySelector('table');
+                            }
+                        }
+                    } catch(e) {}
+                }
+                if (!targetTable && mode === 'table') {
+                    targetTable = document.querySelector('table');
+                }
+
+                if (targetTable || (mode === 'auto' && !selector && document.querySelector('table'))) {
+                    if (!targetTable) targetTable = document.querySelector('table');
+                    if (targetTable) {
+                        var headers = [];
+                        var ths = targetTable.querySelectorAll('thead th, tr:first-child th, tr:first-child td');
+                        for (var h = 0; h < ths.length; h++) {
+                            var hText = (ths[h].innerText || ths[h].textContent || '').trim();
+                            headers.push(hText || ('col_' + (h + 1)));
+                        }
+                        var rows = [];
+                        var trs = targetTable.querySelectorAll('tbody tr, tr');
+                        for (var r = 0; r < trs.length; r++) {
+                            var tr = trs[r];
+                            if (tr.querySelector('th') && r === 0) continue;
+                            var cells = tr.querySelectorAll('td');
+                            if (cells.length === 0) continue;
+                            var rowObj = {};
+                            for (var c = 0; c < cells.length; c++) {
+                                var key = headers[c] || ('col_' + (c + 1));
+                                var val = (cells[c].innerText || cells[c].textContent || '').trim();
+                                var link = cells[c].querySelector('a');
+                                if (link && link.href) {
+                                    rowObj[key] = val;
+                                    rowObj[key + '_url'] = link.href;
+                                } else {
+                                    rowObj[key] = val;
+                                }
+                            }
+                            rows.push(rowObj);
+                        }
+                        return { success: true, mode: 'table', count: rows.length, data: rows };
+                    }
+                }
+
+                // 3. Repeated card / list records extraction
+                var targetSelector = selector || 'article, [role="article"], .item, .card, li';
+                var matched = [];
+                try {
+                    matched = document.querySelectorAll(targetSelector);
+                } catch(e) {}
+
+                if (matched.length > 0) {
+                    var records = [];
+                    for (var m = 0; m < matched.length; m++) {
+                        var item = matched[m];
+                        var itemText = (item.innerText || item.textContent || '').trim();
+                        if (!itemText && !item.querySelector('img, a')) continue;
+
+                        var record = {
+                            text: itemText.split('\n').map(function(s) { return s.trim(); }).filter(Boolean).slice(0, 5).join(' ')
+                        };
+                        var a = item.tagName === 'A' ? item : item.querySelector('a');
+                        if (a && a.href) {
+                            record.url = a.href;
+                            var title = (a.innerText || a.getAttribute('title') || '').trim();
+                            if (title) record.title = title;
+                        }
+                        var img = item.tagName === 'IMG' ? item : item.querySelector('img');
+                        if (img && img.src) {
+                            record.image = img.src;
+                        }
+                        records.push(record);
+                    }
+                    return { success: true, mode: 'records', count: records.length, data: records };
+                }
+
+                return { success: false, code: 'NO_DATA_EXTRACTED', message: 'No extractable data found with selector: ' + (selector || 'auto') };
             }
         };
 

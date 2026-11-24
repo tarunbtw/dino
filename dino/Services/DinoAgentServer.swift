@@ -542,6 +542,8 @@ final class DinoAgentServer: ObservableObject {
                 providedToken = String(authHeader.dropFirst(7)).trimmingCharacters(in: .whitespaces)
             } else if let customHeader = headers["x-dino-token"] {
                 providedToken = customHeader.trimmingCharacters(in: .whitespaces)
+            } else if let urlToken = queryItem("token") {
+                providedToken = urlToken.trimmingCharacters(in: .whitespaces)
             }
 
             if let tok = providedToken, Self.constantTimeEquals(tok, self.token) {
@@ -549,12 +551,13 @@ final class DinoAgentServer: ObservableObject {
             }
         }
 
-        // Unauthenticated access is strictly limited to minimal health check probe without sensitive page data
-        let isPublicHealthCheck = (method == "GET" && (path == "/" || path == "/status" || cleanPath == "/" || cleanPath == "/status" || cleanPath == "/health" || cleanPath == "/version" || cleanPath == "/capabilities" || cleanPath == "/daemon" || cleanPath == "/headless" || cleanPath == "/socket")) || ((method == "POST" || method == "DELETE") && (cleanPath == "/socket" || cleanPath == "/daemon"))
+        // Unauthenticated access is strictly limited to health check probe and local live stream viewer
+        let isPublicHealthCheck = ((method == "GET" || method == "HEAD") && (path == "/" || path == "/status" || cleanPath == "/" || cleanPath == "/status" || cleanPath == "/health" || cleanPath == "/version" || cleanPath == "/capabilities" || cleanPath == "/daemon" || cleanPath == "/headless" || cleanPath == "/socket" || cleanPath == "/view" || cleanPath == "/stream")) || ((method == "POST" || method == "DELETE") && (cleanPath == "/socket" || cleanPath == "/daemon"))
         if !isAuthenticated {
             if isPublicHealthCheck {
-                // If it's a socket modification request, process it below
-                if !((method == "POST" || method == "DELETE") && (cleanPath == "/socket" || cleanPath == "/daemon")) {
+                if cleanPath == "/view" || cleanPath == "/stream" {
+                    // Allow local loopback live view and streaming to proceed to perception router
+                } else if !((method == "POST" || method == "DELETE") && (cleanPath == "/socket" || cleanPath == "/daemon")) {
                     let publicStatusObj: [String: Any] = [
                         "success": true,
                         "dino": "active",

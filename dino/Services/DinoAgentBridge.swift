@@ -867,6 +867,22 @@ extension Tab {
             let primaryScreenH = NSScreen.screens.first?.frame.height ?? 1080
             let cgPos = CGPoint(x: screenPoint.x, y: primaryScreenH - screenPoint.y)
 
+            // Organic preceding mouseMoved event for Cloudflare Turnstile & anti-bot event validation
+            let moveEvent = NSEvent.mouseEvent(
+                with: .mouseMoved,
+                location: winPoint,
+                modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: windowNumber,
+                context: nil,
+                eventNumber: 0,
+                clickCount: 0,
+                pressure: 0.0
+            )
+            if let move = moveEvent { webView.mouseMoved(with: move) }
+            _ = try? await webView.evaluateJavaScript("window.__dino && window.__dino.updateVirtualCursor && window.__dino.updateVirtualCursor(\(pt.x), \(pt.y));")
+            try? await Task.sleep(nanoseconds: 12_000_000)
+
             let downEvent = NSEvent.mouseEvent(
                 with: .leftMouseDown,
                 location: winPoint,
@@ -994,6 +1010,22 @@ extension Tab {
             let screenPoint = webView.window?.convertPoint(toScreen: winPoint) ?? winPoint
             let primaryScreenH = NSScreen.screens.first?.frame.height ?? 1080
             let cgPos = CGPoint(x: screenPoint.x, y: primaryScreenH - screenPoint.y)
+
+            // Organic preceding mouseMoved event for Cloudflare Turnstile & anti-bot event validation
+            let moveEvent = NSEvent.mouseEvent(
+                with: .mouseMoved,
+                location: winPoint,
+                modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: windowNumber,
+                context: nil,
+                eventNumber: 0,
+                clickCount: 0,
+                pressure: 0.0
+            )
+            if let move = moveEvent { webView.mouseMoved(with: move) }
+            _ = try? await webView.evaluateJavaScript("window.__dino && window.__dino.updateVirtualCursor && window.__dino.updateVirtualCursor(\(pt.x), \(pt.y));")
+            try? await Task.sleep(nanoseconds: 12_000_000)
 
             let downEvent = NSEvent.mouseEvent(
                 with: .rightMouseDown,
@@ -1528,7 +1560,7 @@ extension Tab {
     /// If `elementId` or `clip` is provided, captures only the cropped element/region.
     /// If `somCrop` is true, automatically identifies the active interaction container (modal, form, card) for high-res cropping.
     @MainActor
-    func captureScreenshot(labeled: Bool = false, elementId: String? = nil, clip: CGRect? = nil, somCrop: Bool = false) async throws -> NSImage {
+    func captureScreenshot(labeled: Bool = false, elementId: String? = nil, clip: CGRect? = nil, somCrop: Bool = false, fullPage: Bool = false) async throws -> NSImage {
         await ensureDinoScriptInjected()
 
         if labeled || (elementId != nil && elementId?.contains("f") == true) {
@@ -1546,6 +1578,22 @@ extension Tab {
         }
 
         var targetRect: CGRect? = clip
+
+        if fullPage && targetRect == nil && elementId == nil {
+            let dimsScript = """
+            (function() {
+                var w = Math.max(document.body ? document.body.scrollWidth : 0, document.documentElement ? document.documentElement.scrollWidth : 0, window.innerWidth || 1280);
+                var h = Math.max(document.body ? document.body.scrollHeight : 0, document.documentElement ? document.documentElement.scrollHeight : 0, window.innerHeight || 800);
+                return { width: w, height: h };
+            })()
+            """
+            if let dims = (try? await webView.evaluateJavaScript(dimsScript)) as? [String: Any],
+               let w = (dims["width"] as? NSNumber)?.doubleValue,
+               let h = (dims["height"] as? NSNumber)?.doubleValue,
+               w > 0 && h > 0 {
+                targetRect = CGRect(x: 0, y: 0, width: w, height: h)
+            }
+        }
 
         // Set-of-Marks (SoM) Dynamic Container Cropping
         if targetRect == nil && somCrop {
@@ -1732,9 +1780,11 @@ extension Tab {
         }
     }
 
-    private func generatePDF(configuration: WKPDFConfiguration) async throws -> Data {
-        try await withCheckedThrowingContinuation { continuation in
-            self.webView.createPDF(configuration: configuration) { result in
+    @MainActor
+    func generatePDF(configuration: WKPDFConfiguration? = nil) async throws -> Data {
+        let config = configuration ?? WKPDFConfiguration()
+        return try await withCheckedThrowingContinuation { continuation in
+            self.webView.createPDF(configuration: config) { result in
                 continuation.resume(with: result)
             }
         }

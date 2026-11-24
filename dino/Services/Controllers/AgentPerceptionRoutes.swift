@@ -452,6 +452,7 @@ extension DinoAgentServer {
             guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin) else { return true }
             var isLabeled = queryBool("labeled")
             var isSomCrop = queryBool("somCrop") || queryBool("container") || queryBool("cropContainer")
+            var isFullPage = queryBool("fullPage") || queryBool("fullpage")
             var elementId: String? = queryItem("elementId") ?? queryItem("ref")
             var clipRect: CGRect? = nil
             var scaleFactor: CGFloat? = nil
@@ -473,6 +474,7 @@ extension DinoAgentServer {
                 }
                 if let labeledBool = json["labeled"] as? Bool { isLabeled = labeledBool }
                 if let somBool = json["somCrop"] as? Bool ?? json["container"] as? Bool ?? json["cropContainer"] as? Bool { isSomCrop = somBool }
+                if let fp = json["fullPage"] as? Bool ?? json["fullpage"] as? Bool { isFullPage = fp }
                 if let elId = json["elementId"] as? String { elementId = elId }
                 if let sNum = json["scale"] as? NSNumber, sNum.doubleValue > 0 {
                     scaleFactor = CGFloat(sNum.doubleValue)
@@ -501,7 +503,7 @@ extension DinoAgentServer {
                 }
             }
             do {
-                let image = try await activeTab.captureScreenshot(labeled: isLabeled, elementId: elementId, clip: clipRect, somCrop: isSomCrop)
+                let image = try await activeTab.captureScreenshot(labeled: isLabeled, elementId: elementId, clip: clipRect, somCrop: isSomCrop, fullPage: isFullPage)
                 if let png = image.pngData(scale: scaleFactor) {
                     sendRaw(connection: connection, contentType: "image/png", data: png, origin: origin)
                 } else {
@@ -512,6 +514,139 @@ extension DinoAgentServer {
                 let code = errMsg.contains("not found") ? "ELEMENT_NOT_FOUND" : "SCREENSHOT_ERROR"
                 sendResponse(connection: connection, status: "400 Bad Request", body: "{\"error\":\"\(errMsg)\",\"code\":\"\(code)\",\"success\":false}", origin: origin)
             }
+            return true
+
+        case ("GET", "/pdf"), ("POST", "/pdf"):
+            guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin) else { return true }
+            let pdfConfig = WKPDFConfiguration()
+            if let clipStr = queryItem("clip") {
+                let parts = clipStr.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+                if parts.count == 4 && parts[2] > 0 && parts[3] > 0 && !parts[0].isNaN && !parts[1].isNaN && !parts[2].isNaN && !parts[3].isNaN {
+                    pdfConfig.rect = CGRect(x: parts[0], y: parts[1], width: parts[2], height: parts[3])
+                }
+            }
+            if let bodyData = bodyData, !bodyData.isEmpty,
+               let json = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any] {
+                if let clipDict = json["clip"] as? [String: Any],
+                   let x = (clipDict["x"] as? NSNumber)?.doubleValue,
+                   let y = (clipDict["y"] as? NSNumber)?.doubleValue,
+                   let w = (clipDict["width"] as? NSNumber)?.doubleValue,
+                   let h = (clipDict["height"] as? NSNumber)?.doubleValue,
+                   w > 0, h > 0 {
+                    pdfConfig.rect = CGRect(x: x, y: y, width: w, height: h)
+                }
+            }
+            do {
+                let pdfData = try await activeTab.generatePDF(configuration: pdfConfig)
+                sendRaw(connection: connection, contentType: "application/pdf", data: pdfData, origin: origin)
+            } catch {
+                sendResponse(connection: connection, status: "500 Internal Server Error", body: "{\"error\":\"\(error.localizedDescription)\",\"code\":\"PDF_EXPORT_FAILED\",\"success\":false}", origin: origin)
+            }
+            return true
+
+        case ("GET", "/extract"), ("POST", "/extract"):
+            guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin) else { return true }
+            var selector: String? = queryItem("selector") ?? queryItem("target") ?? queryItem("s")
+            var mode: String = queryItem("mode") ?? queryItem("m") ?? "auto"
+
+            if let bodyData = bodyData, !bodyData.isEmpty,
+               let json = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any] {
+                if let s = json["selector"] as? String ?? json["target"] as? String { selector = s }
+                if let m = json["mode"] as? String { mode = m }
+            }
+
+            let selArg = selector ?? ""
+            let script = "return window.__dino && window.__dino.extract ? window.__dino.extract(selector || null, mode) : null;"
+            let res = try? await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Any, Error>) in
+                activeTab.webView.callAsyncJavaScript(script, arguments: ["selector": selArg, "mode": mode], in: nil, in: .page) { result in
+                    continuation.resume(with: result)
+                }
+            }
+
+            if let dict = res as? [String: Any], let success = dict["success"] as? Bool, success {
+                sendJSON(connection: connection, object: dict, origin: origin)
+            } else if let dict = res as? [String: Any] {
+                let msg = (dict["message"] as? String) ?? "Failed to extract structured data from page"
+                let code = (dict["code"] as? String) ?? "EXTRACT_FAILED"
+                sendResponse(connection: connection, status: "400 Bad Request", body: "{\"error\":\"\(msg)\",\"code\":\"\(code)\",\"success\":false}", origin: origin)
+            } else {
+                sendResponse(connection: connection, status: "400 Bad Request", body: "{\"error\":\"Extraction produced no data or core script not ready\",\"code\":\"NO_DATA\",\"success\":false}", origin: origin)
+            }
+            return true
+
+        case ("GET", "/view"), ("HEAD", "/view"):
+            let html = """
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1">
+              <title>Dino Live Observability View</title>
+              <style>
+                body { margin: 0; padding: 0; background: #0c0d12; color: #f3f4f6; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; overflow: hidden; }
+                .badge { position: fixed; top: 18px; left: 24px; display: flex; align-items: center; gap: 8px; z-index: 100; font-size: 13px; font-weight: 600; color: #e5e7eb; background: rgba(18, 20, 28, 0.85); padding: 7px 16px; border-radius: 9999px; backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.12); box-shadow: 0 4px 12px rgba(0,0,0,0.4); }
+                .pulse { width: 9px; height: 9px; border-radius: 50%; background: #10b981; box-shadow: 0 0 10px #10b981; animation: livePulse 2s infinite ease-in-out; }
+                @keyframes livePulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.3); opacity: 0.6; } }
+                .screen { max-width: 95vw; max-height: 88vh; border-radius: 12px; overflow: hidden; box-shadow: 0 20px 50px rgba(0,0,0,0.85); border: 1px solid rgba(255,255,255,0.15); background: #000; display: flex; align-items: center; justify-content: center; }
+                img { display: block; max-width: 100%; max-height: 88vh; object-fit: contain; }
+              </style>
+            </head>
+            <body>
+              <div class="badge"><div class="pulse"></div> Dino Live Observability (15 FPS)</div>
+              <div class="screen">
+                <img src="/stream" alt="Live View Stream" />
+              </div>
+            </body>
+            </html>
+            """
+            sendRaw(connection: connection, contentType: "text/html; charset=utf-8", data: Data(html.utf8), origin: origin)
+            return true
+
+        case ("GET", "/stream"):
+            guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin) else { return true }
+            let initialHeaders = """
+            HTTP/1.1 200 OK\r
+            Content-Type: multipart/x-mixed-replace; boundary=--frame\r
+            Cache-Control: no-cache, no-store, must-revalidate\r
+            Connection: close\r
+            Access-Control-Allow-Origin: *\r\n\r\n
+            """
+            connection.send(content: Data(initialHeaders.utf8), completion: .contentProcessed { [weak activeTab] err in
+                guard err == nil, let tab = activeTab else {
+                    connection.cancel()
+                    return
+                }
+                Task { @MainActor in
+                    while connection.state == .ready {
+                        let config = WKSnapshotConfiguration()
+                        let viewWidth = tab.webView.frame.width > 0 ? tab.webView.frame.width : 1280
+                        config.snapshotWidth = NSNumber(value: Double(viewWidth))
+                        if let img = try? await withCheckedThrowingContinuation({ (c: CheckedContinuation<NSImage, Error>) in
+                            tab.webView.takeSnapshot(with: config) { i, e in
+                                if let e = e { c.resume(throwing: e) }
+                                else if let i = i { c.resume(returning: i) }
+                                else { c.resume(throwing: NSError(domain: "Dino", code: -1)) }
+                            }
+                        }),
+                           let tiff = img.tiffRepresentation,
+                           let rep = NSBitmapImageRep(data: tiff),
+                           let jpeg = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.6]) {
+                            var frameHeader = "--frame\r\n"
+                            frameHeader += "Content-Type: image/jpeg\r\n"
+                            frameHeader += "Content-Length: \(jpeg.count)\r\n\r\n"
+                            var frameData = Data(frameHeader.utf8)
+                            frameData.append(jpeg)
+                            frameData.append(Data("\r\n".utf8))
+                            connection.send(content: frameData, completion: .contentProcessed { sendErr in
+                                if sendErr != nil {
+                                    connection.cancel()
+                                }
+                            })
+                        }
+                        try? await Task.sleep(nanoseconds: 66_000_000)
+                    }
+                }
+            })
             return true
 
         default:

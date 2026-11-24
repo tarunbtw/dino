@@ -429,6 +429,115 @@ extension DinoAgentServer {
             sendJSON(connection: connection, object: ["success": true, "cleared": targetType], origin: origin)
             return true
 
+        case ("GET", "/session/export"), ("POST", "/session/export"):
+            guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin) else { return true }
+            let cookieStore = activeTab.webView.configuration.websiteDataStore.httpCookieStore
+            let allCookies = await cookieStore.allCookies()
+            let cookiesData: [[String: Any]] = allCookies.map { c in
+                var d: [String: Any] = [
+                    "name": c.name,
+                    "value": c.value,
+                    "domain": c.domain,
+                    "path": c.path,
+                    "httpOnly": c.isHTTPOnly,
+                    "secure": c.isSecure
+                ]
+                if let exp = c.expiresDate {
+                    d["expires"] = exp.timeIntervalSince1970
+                }
+                return d
+            }
+            let lsScript = """
+            (() => {
+                var ls = [];
+                try {
+                    for (var i = 0; i < localStorage.length; i++) {
+                        var k = localStorage.key(i);
+                        if (k !== null) ls.push({ name: k, value: localStorage.getItem(k) });
+                    }
+                } catch(e) {}
+                return {
+                    origin: window.location.origin || '',
+                    localStorage: ls
+                };
+            })()
+            """
+            var originsData: [[String: Any]] = []
+            if let storeRes = (try? await activeTab.webView.evaluateJavaScript(lsScript)) as? [String: Any],
+               let originUrl = storeRes["origin"] as? String, !originUrl.isEmpty, originUrl != "null",
+               let lsItems = storeRes["localStorage"] as? [[String: Any]], !lsItems.isEmpty {
+                originsData.append([
+                    "origin": originUrl,
+                    "localStorage": lsItems
+                ])
+            }
+            let sessionState: [String: Any] = [
+                "cookies": cookiesData,
+                "origins": originsData
+            ]
+            sendJSON(connection: connection, object: sessionState, origin: origin)
+            return true
+
+        case ("POST", "/session/import"):
+            guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin) else { return true }
+            guard let bodyData = bodyData,
+                  let json = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any] else {
+                sendResponse(connection: connection, status: "400 Bad Request", body: "{\"error\":\"Invalid or missing JSON payload in /session/import\",\"code\":\"INVALID_PAYLOAD\",\"success\":false}", origin: origin)
+                return true
+            }
+            let cookieStore = activeTab.webView.configuration.websiteDataStore.httpCookieStore
+            var cookiesCount = 0
+            if let cookiesList = json["cookies"] as? [[String: Any]] {
+                for cDict in cookiesList {
+                    guard let name = cDict["name"] as? String,
+                          let value = (cDict["value"] as? String) ?? (cDict["val"] as? String),
+                          let domain = cDict["domain"] as? String else { continue }
+                    let path = (cDict["path"] as? String) ?? "/"
+                    var props: [HTTPCookiePropertyKey: Any] = [
+                        .name: name,
+                        .value: value,
+                        .domain: domain,
+                        .path: path
+                    ]
+                    if let expNum = cDict["expires"] as? Double, expNum > 0 {
+                        props[.expires] = Date(timeIntervalSince1970: expNum)
+                    }
+                    if let sec = cDict["secure"] as? Bool ?? cDict["isSecure"] as? Bool, sec {
+                        props[.secure] = "TRUE"
+                    }
+                    if let cookie = HTTPCookie(properties: props) {
+                        await cookieStore.setCookie(cookie)
+                        cookiesCount += 1
+                    }
+                }
+            }
+            var originsCount = 0
+            if let originsList = json["origins"] as? [[String: Any]] {
+                for oDict in originsList {
+                    guard let lsItems = oDict["localStorage"] as? [[String: Any]],
+                          let lsData = try? JSONSerialization.data(withJSONObject: lsItems),
+                          let lsJSON = String(data: lsData, encoding: .utf8) else { continue }
+                    let script = """
+                    (() => {
+                        var items = \(lsJSON);
+                        for (var i = 0; i < items.length; i++) {
+                            if (items[i] && items[i].name !== undefined) {
+                                localStorage.setItem(items[i].name, String(items[i].value ?? ''));
+                            }
+                        }
+                    })()
+                    """
+                    _ = try? await activeTab.webView.evaluateJavaScript(script)
+                    originsCount += 1
+                }
+            }
+            sendJSON(connection: connection, object: [
+                "success": true,
+                "cookiesImported": cookiesCount,
+                "originsImported": originsCount
+            ], origin: origin)
+            return true
+
         case ("GET", "/events"):
             registerEventStream(connection: connection, origin: origin)
             return true

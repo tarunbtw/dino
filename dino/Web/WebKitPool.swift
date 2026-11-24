@@ -123,6 +123,41 @@ enum WebKitPool {
                 });
             } catch(e) {}
 
+            // 2b. Mock authentic navigator.languages
+            try {
+                Object.defineProperty(navigator, 'languages', {
+                    get: function() { return ['en-US', 'en']; },
+                    configurable: true
+                });
+            } catch(e) {}
+
+            // 2c. Spoof permissions API query for notifications
+            try {
+                if (navigator.permissions && navigator.permissions.query) {
+                    const origQuery = navigator.permissions.query.bind(navigator.permissions);
+                    navigator.permissions.query = function(param) {
+                        if (param && param.name === 'notifications') {
+                            return Promise.resolve({ state: 'prompt', onchange: null });
+                        }
+                        return origQuery(param);
+                    };
+                }
+            } catch(e) {}
+
+            // 2d. Authentic Retina screen dimension attributes in headless environments
+            try {
+                if (window.screen) {
+                    if (window.screen.width === 0 || window.screen.width === 1024) {
+                        Object.defineProperty(window.screen, 'width', { get: () => 1512, configurable: true });
+                        Object.defineProperty(window.screen, 'height', { get: () => 982, configurable: true });
+                        Object.defineProperty(window.screen, 'availWidth', { get: () => 1512, configurable: true });
+                        Object.defineProperty(window.screen, 'availHeight', { get: () => 944, configurable: true });
+                    }
+                    Object.defineProperty(window.screen, 'colorDepth', { get: () => 24, configurable: true });
+                    Object.defineProperty(window.screen, 'pixelDepth', { get: () => 24, configurable: true });
+                }
+            } catch(e) {}
+
             // 3. Synthetic window.chrome runtime & client hints for Google Workspace compatibility
             try {
                 if (!window.chrome) {

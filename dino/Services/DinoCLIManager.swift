@@ -321,8 +321,8 @@ enum DinoCLIManager {
             "back", "forward", "reload", "click", "dblclick", "double-click", "type",
             "press", "drag", "hover", "select", "scroll",
             "wait", "tabs", "tab", "eval", "evaluate",
-            "shot", "screenshot", "upload", "find", "dialog",
-            "ext", "extensions", "storage", "console", "network",
+            "shot", "screenshot", "pdf", "upload", "find", "dialog",
+            "ext", "extensions", "storage", "session", "extract", "console", "network",
             "downloads", "download", "token", "playbook", "hitl", "route"
         ]
 
