@@ -11,7 +11,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-const DINO_VERSION = '0.55';
+const DINO_VERSION = '0.56';
 const GITHUB_REPO = 'tarunbtw/dino';
 
 function downloadBinary(targetPath) {
