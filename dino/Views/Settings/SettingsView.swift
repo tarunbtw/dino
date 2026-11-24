@@ -54,7 +54,7 @@ struct SettingsView: View {
             case .general: return "gearshape"
             case .spaces: return "square.stack"
             case .passwords: return "key.fill"
-            case .agent: return "sparkles"
+            case .agent: return "cpu"
             case .history: return "clock.arrow.circlepath"
             case .bookmarks: return "bookmark"
             case .downloads: return "arrow.down.circle"
@@ -71,7 +71,7 @@ struct SettingsView: View {
                 .background(Theme.frameWash)
 
             Rectangle()
-                .fill(Theme.activeTabHairline)
+                .fill(Theme.border)
                 .frame(width: 1)
 
             // Right Main Content
@@ -124,17 +124,21 @@ struct SettingsView: View {
                         Image(systemName: section.icon)
                             .font(.system(size: 13, weight: .medium))
                             .frame(width: 18)
-                            .foregroundStyle(selectedSection == section ? Color.white : Theme.accent)
+                            .foregroundStyle(selectedSection == section ? Theme.accent : Theme.muted)
                         Text(section.rawValue)
                             .font(Theme.font(size: 13, weight: selectedSection == section ? .medium : .regular))
                         Spacer()
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
-                    .foregroundStyle(selectedSection == section ? Color.white : Theme.ink)
+                    .foregroundStyle(selectedSection == section ? Theme.ink : Theme.muted)
                     .background(
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(selectedSection == section ? Color.white.opacity(0.12) : Color.clear)
+                            .fill(selectedSection == section ? Theme.surfaceHover : Color.clear)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(selectedSection == section ? Theme.border : Color.clear, lineWidth: 1)
                     )
                     .contentShape(Rectangle())
                 }
@@ -164,11 +168,11 @@ struct SettingsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Theme.hover)
+                .fill(Theme.surface)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Theme.activeTabHairline, lineWidth: 1)
+                .strokeBorder(Theme.border, lineWidth: 1)
         )
     }
 

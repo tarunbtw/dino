@@ -36,9 +36,17 @@ struct NewSpaceSheetView: View {
             let shape = RoundedRectangle(cornerRadius: Theme.panelRadius, style: .continuous)
             VStack(alignment: .leading, spacing: Theme.sectionSpacing) {
                 // Header
-                Text("New space")
-                    .font(Theme.panelTitleFont)
-                    .foregroundStyle(Theme.ink)
+                HStack(spacing: 10) {
+                    BlobatarAvatar(
+                        seed: name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "New Space" : name,
+                        colorHex: selectedColorHex,
+                        size: 30
+                    )
+
+                    Text("New space")
+                        .font(Theme.panelTitleFont)
+                        .foregroundStyle(Theme.ink)
+                }
 
                 // Name Section
                 VStack(alignment: .leading, spacing: 8) {
@@ -56,11 +64,11 @@ struct NewSpaceSheetView: View {
                         .frame(height: 32)
                         .background(
                             RoundedRectangle(cornerRadius: Theme.fieldRadius, style: .continuous)
-                                .fill(Theme.hover)
+                                .fill(Theme.surfaceHover)
                         )
                         .overlay(
                             RoundedRectangle(cornerRadius: Theme.fieldRadius, style: .continuous)
-                                .strokeBorder(isNameFocused ? Theme.frost : Theme.activeTabHairline, lineWidth: isNameFocused ? 1.5 : 1)
+                                .strokeBorder(isNameFocused ? Theme.accent.opacity(0.65) : Theme.border, lineWidth: isNameFocused ? 1.5 : 1)
                         )
                 }
 
@@ -104,16 +112,16 @@ struct NewSpaceSheetView: View {
 
                     choiceRow(
                         isSelected: !sharesSignIns,
-                        title: "Keep this space separate",
-                        caption: "Recommended. It starts signed out of everything."
+                        title: "Keep separate",
+                        caption: "Isolated logins and cookies"
                     ) {
                         sharesSignIns = false
                     }
 
                     choiceRow(
                         isSelected: sharesSignIns,
-                        title: "Share sign-ins with “\(activeSpace.name)”",
-                        caption: "It starts signed in wherever “\(activeSpace.name)” is. Its tabs and Basecamp are still its own."
+                        title: "Share with “\(activeSpace.name)”",
+                        caption: "Reuse logins and cookies"
                     ) {
                         sharesSignIns = true
                     }

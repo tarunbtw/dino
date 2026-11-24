@@ -12,13 +12,7 @@ extension SettingsView {
         VStack(alignment: .leading, spacing: 20) {
             // History Header & Clear Action
             HStack(alignment: .center) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("History")
-                        .font(.system(size: 20, weight: .semibold))
-                    Text("Sites you've visited across tabs and browsing sessions.")
-                        .font(.system(size: 13))
-                        .foregroundStyle(.secondary)
-                }
+                header(title: "History", subtitle: "")
 
                 Spacer()
 
@@ -42,7 +36,7 @@ extension SettingsView {
                         }
                         Button("Cancel", role: .cancel) {}
                     } message: {
-                        Text("This will remove all \(historyStore.items.count) visited pages from local history.")
+                        Text("Removes all \(historyStore.items.count) items from local history.")
                     }
                 }
             }
@@ -51,27 +45,28 @@ extension SettingsView {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.muted)
 
-                TextField("Search history by title or domain...", text: $historySearchQuery)
+                TextField("Search history...", text: $historySearchQuery)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
+                    .foregroundStyle(Theme.ink)
 
                 if !historySearchQuery.isEmpty {
                     Button(action: { historySearchQuery = "" }) {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 12))
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(Theme.faint)
                     }
                     .buttonStyle(.plain)
                 }
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
-            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .background(Theme.hover, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+                    .strokeBorder(Theme.border, lineWidth: 1)
             )
 
             // Date Groups List
@@ -87,13 +82,13 @@ extension SettingsView {
                             HStack {
                                 Text(group.title)
                                     .font(.system(size: 13, weight: .semibold))
-                                    .foregroundStyle(.primary)
+                                    .foregroundStyle(Theme.ink)
 
                                 Spacer()
 
                                 Text("\(group.items.count) visit\(group.items.count == 1 ? "" : "s")")
                                     .font(.system(size: 11))
-                                    .foregroundStyle(.tertiary)
+                                    .foregroundStyle(Theme.faint)
                             }
                             .padding(.horizontal, 2)
 
@@ -110,11 +105,11 @@ extension SettingsView {
                             .padding(.vertical, 4)
                             .background(
                                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .fill(Color.primary.opacity(0.03))
+                                    .fill(Theme.hover)
                             )
                             .overlay(
                                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .strokeBorder(Color.primary.opacity(0.08), lineWidth: 1)
+                                    .strokeBorder(Theme.border, lineWidth: 1)
                             )
                         }
                     }
@@ -128,7 +123,7 @@ extension SettingsView {
             // Localized Time (e.g. 18:30)
             Text(formattedTime(for: item.timestamp))
                 .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(Theme.faint)
                 .frame(width: 58, alignment: .leading)
 
             // Favicon or Globe
@@ -140,7 +135,7 @@ extension SettingsView {
             } else {
                 Image(systemName: "globe")
                     .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.muted)
                     .frame(width: 14, height: 14)
             }
 
@@ -148,12 +143,12 @@ extension SettingsView {
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.title)
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(Theme.ink)
                     .lineLimit(1)
 
                 Text(item.host.isEmpty ? item.url : item.host)
                     .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.muted)
                     .lineLimit(1)
             }
             .contentShape(Rectangle())
@@ -173,11 +168,11 @@ extension SettingsView {
             }) {
                 Text("Open")
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(settings.accentColor)
+                    .foregroundStyle(Theme.accent)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 4)
                     .background(
-                        hoveredOpenId == item.id ? settings.accentColor.opacity(0.12) : Color.clear,
+                        hoveredOpenId == item.id ? Theme.accentFaint : Color.clear,
                         in: RoundedRectangle(cornerRadius: 5, style: .continuous)
                     )
                     .contentShape(Rectangle())
@@ -196,10 +191,10 @@ extension SettingsView {
             }) {
                 Image(systemName: "xmark")
                     .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(hoveredDeleteId == item.id ? .primary : .tertiary)
+                    .foregroundStyle(hoveredDeleteId == item.id ? Theme.ink : Theme.faint)
                     .frame(width: 20, height: 20)
                     .background(
-                        hoveredDeleteId == item.id ? Color.primary.opacity(0.08) : Color.clear,
+                        hoveredDeleteId == item.id ? Theme.hover : Color.clear,
                         in: RoundedRectangle(cornerRadius: 4, style: .continuous)
                     )
                     .contentShape(Rectangle())
@@ -240,20 +235,20 @@ extension SettingsView {
         VStack(spacing: 12) {
             Image(systemName: historySearchQuery.isEmpty ? "clock.arrow.circlepath" : "magnifyingglass")
                 .font(.system(size: 32))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(Theme.faint)
                 .padding(.top, 24)
 
-            Text(historySearchQuery.isEmpty ? "No Browsing History" : "No Matching Results")
+            Text(historySearchQuery.isEmpty ? "No History" : "No Results")
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.muted)
 
             Text(
                 historySearchQuery.isEmpty
-                    ? "Websites you visit in regular browsing will appear here, grouped by date."
-                    : "No visits matched \"\(historySearchQuery)\". Try searching by another keyword or host."
+                    ? "Visited pages appear here."
+                    : "No matches for \"\(historySearchQuery)\"."
             )
             .font(.system(size: 12))
-            .foregroundStyle(.tertiary)
+            .foregroundStyle(Theme.faint)
             .multilineTextAlignment(.center)
             .frame(maxWidth: 360)
             .padding(.bottom, 24)
@@ -262,11 +257,11 @@ extension SettingsView {
         .padding(.vertical, 32)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.primary.opacity(0.02))
+                .fill(Theme.hover)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
+                .strokeBorder(Theme.border, lineWidth: 1)
         )
     }
 

@@ -11,13 +11,12 @@ import AppKit
 extension SettingsView {
 
     var passwordsSection: some View {
-        PasswordsSectionView(settings: settings)
+        PasswordsSectionView()
     }
 }
 
 /// Dedicated Passwords management pane inside dino://settings.
 private struct PasswordsSectionView: View {
-    @ObservedObject var settings: SettingsStore
     @State private var credentials: [StoredCredential] = []
     @State private var searchQuery: String = ""
     @State private var isAddingNew: Bool = false
@@ -38,14 +37,10 @@ private struct PasswordsSectionView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             // Header
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Passwords & Keychain")
-                        .font(.system(size: 20, weight: .semibold))
-                    Text("Saved web credentials stored securely in your native macOS Keychain.")
-                        .font(.system(size: 13))
-                        .foregroundStyle(.secondary)
-                }
+            HStack(alignment: .center) {
+                Text("Passwords")
+                    .font(Theme.panelTitleFont)
+                    .foregroundStyle(Theme.ink)
 
                 Spacer()
 
@@ -57,20 +52,21 @@ private struct PasswordsSectionView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.regular)
-                .tint(settings.accentColor)
+                .tint(Theme.accent)
             }
 
             // Inline Add Form
             if isAddingNew {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Add New Login")
+                    Text("Add Login")
                         .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Theme.ink)
 
                     HStack(spacing: 10) {
                         TextField("Website (e.g. github.com)", text: $newHost)
                             .textFieldStyle(.roundedBorder)
 
-                        TextField("Username or Email", text: $newUser)
+                        TextField("Username or email", text: $newUser)
                             .textFieldStyle(.roundedBorder)
 
                         SecureField("Password", text: $newPassword)
@@ -85,48 +81,51 @@ private struct PasswordsSectionView: View {
 
                     HStack {
                         Spacer()
-                        Button("Save to Keychain") {
+                        Button("Save") {
                             saveNewCredential()
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
-                        .tint(settings.accentColor)
+                        .tint(Theme.accent)
                     }
                 }
                 .padding(14)
-                .background(Color.primary.opacity(0.03), in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.08), lineWidth: 1))
+                .background(Theme.hover, in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.border, lineWidth: 1))
             }
 
             // Search Filter
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.muted)
 
-                TextField("Search sites and usernames...", text: $searchQuery)
+                TextField("Search passwords...", text: $searchQuery)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
+                    .foregroundStyle(Theme.ink)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
-            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 7))
+            .background(Theme.hover, in: RoundedRectangle(cornerRadius: 7))
+            .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Theme.border, lineWidth: 1))
 
             // Credentials List or Empty State
             if filteredCredentials.isEmpty {
                 VStack(spacing: 12) {
                     Image(systemName: "key.fill")
                         .font(.system(size: 32))
-                        .foregroundStyle(settings.accentColor.opacity(0.7))
+                        .foregroundStyle(Theme.accent.opacity(0.7))
 
-                    Text(credentials.isEmpty ? "No Passwords Stored Yet" : "No Matching Passwords")
+                    Text(credentials.isEmpty ? "No Saved Passwords" : "No Results")
                         .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(Theme.ink)
 
                     Text(credentials.isEmpty
-                         ? "Credentials you save on login forms will be stored in your macOS Keychain."
-                         : "Try searching for a different domain or username.")
+                         ? "Saved logins are stored in macOS Keychain."
+                         : "No matches for \"\(searchQuery)\".")
                         .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.muted)
                         .multilineTextAlignment(.center)
                 }
                 .frame(maxWidth: .infinity)
@@ -142,14 +141,15 @@ private struct PasswordsSectionView: View {
                         HStack(spacing: 12) {
                             Image(systemName: "globe")
                                 .font(.system(size: 14))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(Theme.muted)
 
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(cred.host)
                                     .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(Theme.ink)
                                 Text(cred.user)
                                     .font(.system(size: 11))
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(Theme.muted)
                             }
 
                             Spacer()
@@ -164,9 +164,10 @@ private struct PasswordsSectionView: View {
                                     Text(copiedId == cred.id ? "Copied" : "Copy Password")
                                         .font(.system(size: 11))
                                 }
+                                .foregroundStyle(Theme.ink)
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 4)
-                                .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 5))
+                                .background(Theme.press, in: RoundedRectangle(cornerRadius: 5))
                             }
                             .buttonStyle(.plain)
 
@@ -180,15 +181,15 @@ private struct PasswordsSectionView: View {
                                     .frame(width: 24, height: 24)
                             }
                             .buttonStyle(.plain)
-                            .help("Delete from Keychain")
+                            .help("Delete")
                         }
                         .padding(.vertical, 8)
                         .padding(.horizontal, 6)
                     }
                 }
                 .padding(10)
-                .background(Color.primary.opacity(0.02), in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.06), lineWidth: 1))
+                .background(Theme.hover, in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.border, lineWidth: 1))
             }
         }
         .onAppear {

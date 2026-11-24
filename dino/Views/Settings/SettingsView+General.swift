@@ -7,6 +7,7 @@
 
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 extension SettingsView {
     var generalSection: some View {
@@ -17,14 +18,9 @@ extension SettingsView {
             card(title: "Search") {
                 VStack(alignment: .leading, spacing: 14) {
                     HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Search with")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(Theme.ink)
-                            Text("Your preferred search engine for the command bar.")
-                                .font(.system(size: 11))
-                                .foregroundStyle(Theme.muted)
-                        }
+                        Text("Search engine")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Theme.ink)
 
                         Spacer()
 
@@ -54,11 +50,11 @@ extension SettingsView {
                             .padding(.vertical, 6)
                             .background(
                                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                    .fill(Theme.press)
+                                    .fill(Theme.surfaceHover)
                             )
                             .overlay(
                                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                    .strokeBorder(Theme.activeTabHairline, lineWidth: 1)
+                                    .strokeBorder(Theme.border, lineWidth: 1)
                             )
                         }
                         .menuStyle(.borderlessButton)
@@ -68,17 +64,44 @@ extension SettingsView {
                     Divider()
 
                     Toggle(isOn: $settings.searchSuggestions) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Show suggestions as you type")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(Theme.ink)
-                            Text("With suggestions on, your search engine sees what you type.")
-                                .font(.system(size: 11))
-                                .foregroundStyle(Theme.muted)
-                        }
+                        Text("Search suggestions")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Theme.ink)
                     }
                     .toggleStyle(.switch)
                     .tint(Theme.accent)
+                }
+            }
+
+            // Backdrop
+            card(title: "Backdrop") {
+                HStack(spacing: 14) {
+                    backdropThumbnail
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Empty tab image")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Theme.ink)
+                        Text(settings.customBackdropPath.isEmpty ? "Default" : "Custom (image or GIF)")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Theme.muted)
+                    }
+
+                    Spacer()
+
+                    if !settings.customBackdropPath.isEmpty {
+                        Button("Reset") {
+                            settings.resetCustomBackdrop()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+
+                    Button("Choose…") {
+                        pickCustomBackdrop()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
                 }
             }
 
@@ -96,25 +119,25 @@ extension SettingsView {
                                     .foregroundStyle(Theme.muted)
                                     .padding(.horizontal, 6)
                                     .padding(.vertical, 1)
-                                    .background(Theme.press, in: Capsule())
+                                    .background(Theme.surfaceHover, in: Capsule())
                             }
 
                             switch updater.stage {
                             case .none:
-                                Text(updater.statusMessage.isEmpty ? "Dino is up to date" : updater.statusMessage)
+                                Text(updater.statusMessage.isEmpty ? "Up to date" : updater.statusMessage)
                                     .font(.system(size: 11))
                                     .foregroundStyle(Theme.muted)
                             case .checking:
                                 HStack(spacing: 5) {
                                     ProgressView().controlSize(.mini)
-                                    Text("Checking for updates...")
+                                    Text("Checking…")
                                         .font(.system(size: 11))
                                         .foregroundStyle(Theme.muted)
                                 }
                             case .fetching(let release, let progress):
                                 VStack(alignment: .leading, spacing: 4) {
                                     HStack {
-                                        Text("Downloading Dino \(release.version)...")
+                                        Text("Downloading \(release.version)…")
                                             .font(.system(size: 11))
                                             .foregroundStyle(Theme.muted)
                                         Spacer()
@@ -126,11 +149,11 @@ extension SettingsView {
                                         .progressViewStyle(.linear)
                                 }
                             case .ready(let release):
-                                Text("Dino \(release.version) is ready — restart to use it")
+                                Text("Dino \(release.version) ready")
                                     .font(.system(size: 11, weight: .medium))
-                                    .foregroundStyle(.green)
+                                    .foregroundStyle(Theme.accent)
                             case .waiting(let release):
-                                Text("Dino \(release.version) is available")
+                                Text("Dino \(release.version) available")
                                     .font(.system(size: 11, weight: .medium))
                                     .foregroundStyle(Theme.accent)
                             case .failed(let error):
@@ -144,14 +167,14 @@ extension SettingsView {
 
                         switch updater.stage {
                         case .ready:
-                            Button("Relaunch to Update") {
+                            Button("Relaunch") {
                                 updater.relaunch()
                             }
                             .buttonStyle(.borderedProminent)
-                            .tint(Color.green)
+                            .tint(Theme.accent)
                             .controlSize(.small)
                         case .waiting:
-                            Button("Install Update") {
+                            Button("Install") {
                                 updater.install()
                             }
                             .buttonStyle(.borderedProminent)
@@ -175,28 +198,23 @@ extension SettingsView {
                         get: { updater.autoInstall },
                         set: { updater.autoInstall = $0 }
                     )) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Check for updates automatically")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(Theme.ink)
-                            Text("Once a day, Dino checks whether a new version is out.")
-                                .font(.system(size: 11))
-                                .foregroundStyle(Theme.muted)
-                        }
+                        Text("Check automatically")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Theme.ink)
                     }
                     .toggleStyle(.switch)
                     .tint(Theme.accent)
                 }
             }
 
-            // Import from Arc & Other Browsers
-            card(title: "Import from Other Browsers") {
+            // Import
+            card(title: "Import") {
                 HStack(spacing: 16) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Import from Arc")
                             .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(Theme.ink)
-                        Text("Brings over Arc's spaces, favorites, and pinned tabs, as new spaces.")
+                        Text("Spaces, favorites, and pinned tabs")
                             .font(.system(size: 11))
                             .foregroundStyle(Theme.muted)
                     }
@@ -210,6 +228,46 @@ extension SettingsView {
                     .controlSize(.small)
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var backdropThumbnail: some View {
+        let shape = RoundedRectangle(cornerRadius: 8, style: .continuous)
+        let customPath = settings.customBackdropPath
+        let customImage = (!customPath.isEmpty && FileManager.default.fileExists(atPath: customPath))
+            ? NSImage(contentsOfFile: customPath)
+            : nil
+
+        Group {
+            if let img = customImage {
+                let imgSize = img.size.width > 0 && img.size.height > 0 ? img.size : CGSize(width: 64, height: 40)
+                BackdropImageView(image: img, animates: true)
+                    .id(customPath)
+                    .aspectRatio(imgSize, contentMode: .fill)
+            } else {
+                Image("DinoBackdrop")
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fill)
+            }
+        }
+        .frame(width: 64, height: 40)
+        .clipShape(shape)
+        .overlay {
+            shape.strokeBorder(Theme.borderHover, lineWidth: 1)
+        }
+    }
+
+    private func pickCustomBackdrop() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose Backdrop"
+        panel.prompt = "Set Backdrop"
+        panel.allowedContentTypes = [.image, .gif]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        if panel.runModal() == .OK, let url = panel.url {
+            settings.setCustomBackdrop(from: url)
         }
     }
 }

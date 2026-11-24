@@ -11,19 +11,19 @@ import AppKit
 extension SettingsView {
     var downloadsSection: some View {
         VStack(alignment: .leading, spacing: 24) {
-            header(title: "Downloads", subtitle: "Manage downloaded files.")
+            header(title: "Downloads", subtitle: "")
 
             // Downloads List Card
-            card(title: "Recent Downloads (\(downloadManager.downloads.count))") {
+            card(title: "Recent (\(downloadManager.downloads.count))") {
                 if downloadManager.downloads.isEmpty {
                     VStack(spacing: 10) {
                         Image(systemName: "arrow.down.circle")
                             .font(.system(size: 28))
-                            .foregroundStyle(.secondary.opacity(0.5))
+                            .foregroundStyle(Theme.faint)
                             .padding(.top, 8)
-                        Text("No downloaded files yet.")
+                        Text("No downloads yet.")
                             .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.muted)
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 16)
@@ -35,7 +35,7 @@ extension SettingsView {
                                 downloadManager.clearCompleted()
                             }
                             .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.muted)
                             .buttonStyle(.plain)
                         }
                         .padding(.bottom, 8)
@@ -62,7 +62,7 @@ extension SettingsView {
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.suggestedFilename)
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(Theme.ink)
                     .lineLimit(1)
 
                 HStack(spacing: 6) {
@@ -73,10 +73,10 @@ extension SettingsView {
                     if !item.formattedSize.isEmpty {
                         Text("•")
                             .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.muted)
                         Text(item.formattedSize)
                             .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.muted)
                     }
 
                     if let err = item.errorMessage {
@@ -98,7 +98,7 @@ extension SettingsView {
                 Button(action: { item.cancel() }) {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.muted)
                 }
                 .buttonStyle(.plain)
             } else if item.state == .completed {
@@ -118,10 +118,10 @@ extension SettingsView {
             Button(action: { downloadManager.removeDownload(item) }) {
                 Image(systemName: "trash")
                     .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.muted)
             }
             .buttonStyle(.plain)
-            .help("Remove from history")
+            .help("Remove")
         }
         .padding(.vertical, 4)
     }

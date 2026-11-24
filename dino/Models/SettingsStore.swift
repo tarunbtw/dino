@@ -91,6 +91,40 @@ final class SettingsStore: ObservableObject {
         alert.runModal()
     }
 
+    // MARK: - Backdrop Preferences
+    @AppStorage("dino.customBackdropPath") var customBackdropPath: String = "" {
+        didSet { objectWillChange.send() }
+    }
+
+    private var backdropDirectoryURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".dino/backdrop", isDirectory: true)
+    }
+
+    func setCustomBackdrop(from sourceURL: URL) {
+        let fm = FileManager.default
+        try? fm.createDirectory(at: backdropDirectoryURL, withIntermediateDirectories: true)
+        if let existing = try? fm.contentsOfDirectory(at: backdropDirectoryURL, includingPropertiesForKeys: nil) {
+            for item in existing { try? fm.removeItem(at: item) }
+        }
+        let ext = sourceURL.pathExtension.isEmpty ? "png" : sourceURL.pathExtension.lowercased()
+        let destURL = backdropDirectoryURL.appendingPathComponent("stage-\(UUID().uuidString.prefix(8)).\(ext)")
+        do {
+            try fm.copyItem(at: sourceURL, to: destURL)
+            customBackdropPath = destURL.path
+        } catch {
+            NSLog("[dino] Failed to copy custom backdrop: %@", error.localizedDescription)
+        }
+    }
+
+    func resetCustomBackdrop() {
+        let fm = FileManager.default
+        if let existing = try? fm.contentsOfDirectory(at: backdropDirectoryURL, includingPropertiesForKeys: nil) {
+            for item in existing { try? fm.removeItem(at: item) }
+        }
+        customBackdropPath = ""
+    }
+
     // MARK: - Appearance Preferences
     @AppStorage("dino.theme") var theme: String = "dark" {
         didSet {
@@ -136,6 +170,9 @@ final class SettingsStore: ObservableObject {
 
     // MARK: - First-Run / Onboarding State
     @AppStorage("dino.hasCompletedOnboarding") var hasCompletedOnboarding: Bool = false {
+        didSet { objectWillChange.send() }
+    }
+    @AppStorage("dino.hasSeenQuickShortcutsCard") var hasSeenQuickShortcutsCard: Bool = false {
         didSet { objectWillChange.send() }
     }
 

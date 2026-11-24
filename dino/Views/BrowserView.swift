@@ -96,12 +96,14 @@ struct BrowserView: View {
                     TabStageView(store: store, tab: activeTab, settings: settings)
                         .id(activeTab.id)
                 } else {
-                    DinoStageScene(spaceColor: store.activeSpace.colorHex)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            store.openNewTabOmnibox()
+                    ZStack {
+                        DinoStageScene(spaceColor: store.activeSpace.colorHex)
+
+                        if !store.isAddressBarFocused && !isCommandPaletteVisible {
+                            OmniboxModalView(store: store, isPresented: .constant(true), isEmbeddedStage: true)
                         }
-                        .transition(.opacity)
+                    }
+                    .transition(.opacity)
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: Theme.pageCornerRadius, style: .continuous))
@@ -224,6 +226,17 @@ struct BrowserView: View {
                     .zIndex(360)
             }
 
+            // One-time Keybinds Card shown once after onboarding completes
+            if settings.hasCompletedOnboarding && !settings.hasSeenQuickShortcutsCard {
+                QuickShortcutsCardView {
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        settings.hasSeenQuickShortcutsCard = true
+                    }
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.97)))
+                .zIndex(358)
+            }
+
             // Modal Arc Import Sheet
             if store.isShowingArcImportModal {
                 ArcImportModal(store: store, isPresented: $store.isShowingArcImportModal)
@@ -254,7 +267,9 @@ struct BrowserView: View {
         .preferredColorScheme(.dark)
         .tint(settings.accentColor)
         .onExitCommand {
-            if store.isQuickSwitcherVisible {
+            if isCommandPaletteVisible {
+                isCommandPaletteVisible = false
+            } else if store.isQuickSwitcherVisible {
                 store.cancelTabSwitch()
             } else if store.isShowingExtensionsModal {
                 store.isShowingExtensionsModal = false
@@ -262,6 +277,8 @@ struct BrowserView: View {
                 store.isShowingArcImportModal = false
             } else if store.isShowingNewSpaceSheet {
                 store.isShowingNewSpaceSheet = false
+            } else if settings.hasCompletedOnboarding && !settings.hasSeenQuickShortcutsCard {
+                settings.hasSeenQuickShortcutsCard = true
             } else if store.isPickingSplit {
                 store.cancelSplitPick()
             } else if store.isAddressBarFocused {

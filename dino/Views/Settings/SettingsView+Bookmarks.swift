@@ -13,13 +13,7 @@ extension SettingsView {
         VStack(alignment: .leading, spacing: 20) {
             // Bookmarks Heading with Import Button on the right
             HStack(alignment: .center) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Bookmarks")
-                        .font(.system(size: 20, weight: .semibold))
-                    Text("Manage saved links or import existing bookmarks from Chrome, Firefox, or Safari.")
-                        .font(.system(size: 13))
-                        .foregroundStyle(.secondary)
-                }
+                header(title: "Bookmarks", subtitle: "")
 
                 Spacer()
 
@@ -30,25 +24,26 @@ extension SettingsView {
                         Text("Import")
                             .font(.system(size: 12, weight: .medium))
                     }
+                    .foregroundStyle(Theme.ink)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .background(Theme.hover, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                     .overlay(
                         RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
+                            .strokeBorder(Theme.border, lineWidth: 1)
                     )
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help("Import bookmarks from Chrome, Firefox, or Safari (HTML or JSON)")
+                .help("Import bookmarks (HTML or JSON)")
             }
 
             // Bookmarks List
-            card(title: "Saved Bookmarks (\(settings.bookmarks.count))") {
+            card(title: "Saved (\(settings.bookmarks.count))") {
                 if settings.bookmarks.isEmpty {
-                    Text("No bookmarks saved yet. Save pages using the bookmark icon in the top bar or import from another browser.")
+                    Text("No bookmarks yet.")
                         .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.muted)
                         .padding(.vertical, 8)
                 } else {
                     VStack(spacing: 0) {
@@ -56,14 +51,15 @@ extension SettingsView {
                             HStack {
                                 Image(systemName: "bookmark.fill")
                                     .font(.system(size: 11))
-                                    .foregroundStyle(settings.accentColor)
+                                    .foregroundStyle(Theme.accent)
 
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(bookmark.title)
                                         .font(.system(size: 13, weight: .medium))
+                                        .foregroundStyle(Theme.ink)
                                     Text(bookmark.url)
                                         .font(.system(size: 11))
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(Theme.muted)
                                 }
 
                                 Spacer()
@@ -73,13 +69,13 @@ extension SettingsView {
                                 }
                                 .buttonStyle(.plain)
                                 .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(settings.accentColor)
+                                .foregroundStyle(Theme.accent)
                                 .padding(.horizontal, 8)
 
                                 Button(action: { settings.removeBookmark(id: bookmark.id) }) {
                                     Image(systemName: "trash")
                                         .font(.system(size: 11))
-                                        .foregroundStyle(.tertiary)
+                                        .foregroundStyle(Theme.faint)
                                 }
                                 .buttonStyle(.plain)
                                 .help("Delete bookmark")

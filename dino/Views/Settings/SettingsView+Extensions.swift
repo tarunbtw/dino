@@ -11,13 +11,13 @@ import AppKit
 extension SettingsView {
     var extensionsSection: some View {
         VStack(alignment: .leading, spacing: 24) {
-            header(title: "Extensions", subtitle: "Manage your extensions and add-ons.")
+            header(title: "Extensions", subtitle: "")
 
             // Add from Chrome Web Store Card
-            card(title: "Add from Chrome Web Store") {
+            card(title: "Chrome Web Store") {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack(spacing: 8) {
-                        TextField("Chrome Web Store URL or extension ID", text: $webStoreInput)
+                        TextField("Store URL or extension ID", text: $webStoreInput)
                             .textFieldStyle(.roundedBorder)
                             .font(.system(size: 12))
                             .onSubmit { installFromWebStore() }
@@ -60,6 +60,7 @@ extension SettingsView {
                 HStack(spacing: 12) {
                     Text("Load unpacked extension")
                         .font(.system(size: 13))
+                        .foregroundStyle(Theme.ink)
 
                     Spacer()
 
@@ -71,11 +72,11 @@ extension SettingsView {
             }
 
             // Installed Extensions List Card
-            card(title: "Installed Extensions (\(extensionManager.installed.count))") {
+            card(title: "Installed (\(extensionManager.installed.count))") {
                 if extensionManager.installed.isEmpty {
                     Text("No extensions installed.")
                         .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.muted)
                         .padding(.vertical, 8)
                 } else {
                     VStack(spacing: 12) {
@@ -83,24 +84,25 @@ extension SettingsView {
                             HStack(spacing: 12) {
                                 Image(systemName: "puzzlepiece.extension")
                                     .font(.system(size: 16))
-                                    .foregroundStyle(ext.enabled ? Color.accentColor : Color.secondary)
+                                    .foregroundStyle(ext.enabled ? Theme.accent : Theme.muted)
                                     .frame(width: 28, height: 28)
-                                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
+                                    .background(Theme.hover, in: RoundedRectangle(cornerRadius: 6))
 
                                 VStack(alignment: .leading, spacing: 2) {
                                     HStack(spacing: 6) {
                                         Text(ext.name)
                                             .font(.system(size: 13, weight: .semibold))
+                                            .foregroundStyle(Theme.ink)
                                         Text("v\(ext.version)")
                                             .font(.system(size: 11, weight: .regular))
-                                            .foregroundStyle(.secondary)
+                                            .foregroundStyle(Theme.muted)
                                         if !ext.fromStore {
                                             Text("Unpacked")
                                                 .font(.system(size: 9, weight: .semibold))
                                                 .padding(.horizontal, 5)
                                                 .padding(.vertical, 2)
-                                                .background(Color.primary.opacity(0.08), in: Capsule())
-                                                .foregroundStyle(.secondary)
+                                                .background(Theme.press, in: Capsule())
+                                                .foregroundStyle(Theme.muted)
                                         }
                                     }
                                 }
@@ -113,9 +115,10 @@ extension SettingsView {
                                     }) {
                                         Image(systemName: "gearshape")
                                             .font(.system(size: 12))
+                                            .foregroundStyle(Theme.muted)
                                     }
                                     .buttonStyle(.plain)
-                                    .help("Extension Options")
+                                    .help("Options")
                                 }
 
                                 Button(action: {
@@ -123,7 +126,7 @@ extension SettingsView {
                                 }) {
                                     Image(systemName: ext.pinned ? "pin.fill" : "pin")
                                         .font(.system(size: 12))
-                                        .foregroundStyle(ext.pinned ? Color.accentColor : Color.secondary)
+                                        .foregroundStyle(ext.pinned ? Theme.accent : Theme.muted)
                                 }
                                 .buttonStyle(.plain)
                                 .help(ext.pinned ? "Unpin from Toolbar" : "Pin to Toolbar")
@@ -135,6 +138,7 @@ extension SettingsView {
                                 .labelsHidden()
                                 .toggleStyle(.switch)
                                 .controlSize(.small)
+                                .tint(Theme.accent)
 
                                 Button(action: {
                                     extensionManager.remove(id: ext.id)
@@ -144,7 +148,7 @@ extension SettingsView {
                                         .foregroundStyle(.red.opacity(0.8))
                                 }
                                 .buttonStyle(.plain)
-                                .help("Remove Extension")
+                                .help("Remove")
                             }
                             .padding(.vertical, 6)
 

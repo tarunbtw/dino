@@ -11,19 +11,20 @@ import AppKit
 extension SettingsView {
     var spacesSection: some View {
         VStack(alignment: .leading, spacing: 24) {
-            header(title: "Spaces", subtitle: "Manage your contextual workspaces, custom colors, and tabs.")
+            header(title: "Spaces", subtitle: "")
 
             // Spaces List & Selection
             card(title: "Your Spaces") {
                 VStack(spacing: 6) {
                     ForEach(Array(store.spaces.enumerated()), id: \.element.id) { index, s in
                         let isSelected = s.id == store.activeSpaceId
-                        let spaceColor = Color(hex: s.colorHex)
 
-                        HStack(spacing: 12) {
-                            Circle()
-                                .fill(spaceColor)
-                                .frame(width: 10, height: 10)
+                        HStack(spacing: 10) {
+                            BlobatarAvatar(
+                                seed: s.id.uuidString,
+                                colorHex: s.colorHex,
+                                size: 22
+                            )
 
                             Text(s.name)
                                 .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
@@ -40,14 +41,18 @@ extension SettingsView {
                             if isSelected {
                                 Image(systemName: "checkmark")
                                     .font(.system(size: 11, weight: .semibold))
-                                    .foregroundStyle(Theme.ink)
+                                    .foregroundStyle(Theme.accent)
                             }
                         }
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
                         .background(
                             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(isSelected ? Theme.press : Color.clear)
+                                .fill(isSelected ? Theme.surfaceHover : Color.clear)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .strokeBorder(isSelected ? Theme.border : Color.clear, lineWidth: 1)
                         )
                         .contentShape(Rectangle())
                         .onTapGesture {
@@ -70,7 +75,11 @@ extension SettingsView {
                         .foregroundStyle(Theme.ink)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
-                        .background(Theme.press, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .background(Theme.surfaceHover, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .strokeBorder(Theme.border, lineWidth: 1)
+                        )
                     }
                     .buttonStyle(.plain)
                 }
@@ -140,7 +149,7 @@ extension SettingsView {
                             Text("Delete “\(activeSpace.name)”")
                                 .font(.system(size: 13, weight: .semibold))
                                 .foregroundStyle(Theme.ink)
-                            Text("Its tabs will be merged into the primary space.")
+                            Text("Tabs move to your primary space.")
                                 .font(.system(size: 11))
                                 .foregroundStyle(Theme.muted)
                         }

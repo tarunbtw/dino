@@ -17,7 +17,6 @@ extension SettingsView {
 }
 
 private struct AgentSettingsContent: View {
-    @ObservedObject private var runtime = DinoAgentRuntime.shared
     private let vault = DinoModelVault.shared
 
     @State private var activeProvider: DinoModelProvider = DinoModelVault.shared.activeProvider
@@ -40,15 +39,9 @@ private struct AgentSettingsContent: View {
     // MARK: - Header
 
     private var headerView: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Agent")
-                .font(Theme.panelTitleFont)
-                .foregroundStyle(Theme.ink)
-
-            Text("Configure AI model provider and credentials.")
-                .font(Theme.font(size: 13))
-                .foregroundStyle(Theme.muted)
-        }
+        Text("Agent")
+            .font(Theme.panelTitleFont)
+            .foregroundStyle(Theme.ink)
     }
 
     // MARK: - Model Configuration Card

@@ -12,6 +12,7 @@ import AppKit
 struct OmniboxModalView: View {
     @ObservedObject var store: BrowserStore
     @Binding var isPresented: Bool
+    var isEmbeddedStage: Bool = false
     @State private var text: String = ""
     @State private var selectedIndex: Int = 0
     @State private var liveSuggestions: [SearchSuggestion] = []
@@ -233,21 +234,27 @@ struct OmniboxModalView: View {
         let rows = items
         GeometryReader { proxy in
             ZStack(alignment: .top) {
-                // Dimming backdrop clipped strictly to concentric page geometry
-                let pageShape = RoundedRectangle(cornerRadius: Theme.pageCornerRadius, style: .continuous)
-                if !store.isPickingSplit {
-                    pageShape
-                        .fill(Theme.commandDim)
-                        .contentShape(pageShape)
-                        .onTapGesture { dismiss() }
+                if isEmbeddedStage {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture { isFieldFocused = false }
                 } else {
-                    // In split pick mode, clicking outside the omnibox commits the split with a new blank tab
-                    pageShape
-                        .fill(Color.clear)
-                        .contentShape(pageShape)
-                        .onTapGesture {
-                            dismiss(cancelledByEscape: false)
-                        }
+                    // Dimming backdrop clipped strictly to concentric page geometry
+                    let pageShape = RoundedRectangle(cornerRadius: Theme.pageCornerRadius, style: .continuous)
+                    if !store.isPickingSplit {
+                        pageShape
+                            .fill(Theme.commandDim)
+                            .contentShape(pageShape)
+                            .onTapGesture { dismiss() }
+                    } else {
+                        // In split pick mode, clicking outside the omnibox commits the split with a new blank tab
+                        pageShape
+                            .fill(Color.clear)
+                            .contentShape(pageShape)
+                            .onTapGesture {
+                                dismiss(cancelledByEscape: false)
+                            }
+                    }
                 }
 
                 // Centered modal card
@@ -339,7 +346,7 @@ struct OmniboxModalView: View {
                 .frame(width: store.isPickingSplit ? min(420, max(240, (proxy.size.width / 2) - 32)) : min(560, max(240, proxy.size.width - 64)))
                 .background {
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(Theme.surface)
+                        .fill(Theme.surface.opacity(isEmbeddedStage ? 0.90 : 1.0))
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .overlay {
@@ -351,28 +358,47 @@ struct OmniboxModalView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.leading, store.isPickingSplit ? (store.splitPickSide == .left ? (proxy.size.width / 2) : 0) : 0)
                 .padding(.trailing, store.isPickingSplit ? (store.splitPickSide == .right ? (proxy.size.width / 2) : 0) : 0)
-                .padding(.top, max(48, proxy.size.height * 0.22))
+                .padding(.top, isEmbeddedStage ? max(48, (proxy.size.height - 48) * 0.42) : max(48, proxy.size.height * 0.22))
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .background {
-            ArrowCatcher { offset in
-                let count = rows.count
-                guard count > 0 else { return }
-                selectedIndex = min(max(selectedIndex + offset, 0), count - 1)
-            }
+            ArrowCatcher(
+                onArrow: { offset in
+                    let count = rows.count
+                    guard count > 0 else { return }
+                    selectedIndex = min(max(selectedIndex + offset, 0), count - 1)
+                },
+                requireFieldEditorFocus: isEmbeddedStage
+            )
         }
         .onAppear {
             selectedIndex = 0
-            if store.isEditingCurrentURL, let active = store.peekTab ?? store.activeTab, let url = active.url, !active.isBlank {
+            if !isEmbeddedStage && store.isEditingCurrentURL, let active = store.peekTab ?? store.activeTab, let url = active.url, !active.isBlank {
                 text = url.absoluteString
             } else {
                 text = ""
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                isFieldFocused = true
-                if store.isEditingCurrentURL {
-                    NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil)
+            let canAutoFocus = !isEmbeddedStage || (
+                settings.hasCompletedOnboarding &&
+                settings.hasSeenQuickShortcutsCard &&
+                !store.isShowingNewSpaceSheet &&
+                !store.isShowingArcImportModal &&
+                !store.isShowingExtensionsModal
+            )
+            if canAutoFocus {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    isFieldFocused = true
+                    if !isEmbeddedStage && store.isEditingCurrentURL {
+                        NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: nil)
+                    }
+                }
+            }
+        }
+        .onChange(of: settings.hasSeenQuickShortcutsCard) { _, seen in
+            if isEmbeddedStage && seen && settings.hasCompletedOnboarding {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                    isFieldFocused = true
                 }
             }
         }
@@ -421,6 +447,12 @@ struct OmniboxModalView: View {
     }
 
     private func dismiss(cancelledByEscape: Bool = false) {
+        if isEmbeddedStage {
+            text = ""
+            liveSuggestions = []
+            isFieldFocused = false
+            return
+        }
         store.isEditingCurrentURL = false
         if store.isPickingSplit {
             if cancelledByEscape {
@@ -435,16 +467,24 @@ struct OmniboxModalView: View {
     }
 }
 
-/// Intercepts ↑, ↓, Tab, and Shift+Tab keys while typing in the text field.
+/// Intercepts ↑, ↓, Tab, Shift+Tab, and optional Return while typing or navigating modals.
 struct ArrowCatcher: NSViewRepresentable {
     let onArrow: (Int) -> Void
+    var onReturn: (() -> Void)? = nil
+    var requireFieldEditorFocus: Bool = false
 
     func makeNSView(context: Context) -> CatcherView { CatcherView() }
 
-    func updateNSView(_ view: CatcherView, context: Context) { view.onArrow = onArrow }
+    func updateNSView(_ view: CatcherView, context: Context) {
+        view.onArrow = onArrow
+        view.onReturn = onReturn
+        view.requireFieldEditorFocus = requireFieldEditorFocus
+    }
 
     final class CatcherView: NSView {
         var onArrow: ((Int) -> Void)?
+        var onReturn: (() -> Void)?
+        var requireFieldEditorFocus: Bool = false
         private var monitor: Any?
 
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
@@ -461,6 +501,20 @@ struct ArrowCatcher: NSViewRepresentable {
         }
 
         private func catches(_ event: NSEvent) -> Bool {
+            guard let window, event.window === window,
+                  event.modifierFlags.intersection([.command, .option, .control]).isEmpty else {
+                return false
+            }
+
+            if requireFieldEditorFocus && (window.firstResponder as? NSTextView)?.isFieldEditor != true {
+                return false
+            }
+
+            if (event.keyCode == 36 || event.keyCode == 76), let onReturn {
+                onReturn()
+                return true
+            }
+
             let offset: Int
             if event.keyCode == 125 || event.keyCode == 48 { // Down arrow or Tab
                 offset = (event.modifierFlags.contains(.shift) && event.keyCode == 48) ? -1 : 1
@@ -469,10 +523,7 @@ struct ArrowCatcher: NSViewRepresentable {
             } else {
                 offset = 0
             }
-            guard offset != 0, let window, event.window === window,
-                  event.modifierFlags.intersection([.command, .option, .control]).isEmpty,
-                  (window.firstResponder as? NSTextView)?.isFieldEditor == true,
-                  let onArrow else { return false }
+            guard offset != 0, let onArrow else { return false }
             onArrow(offset)
             return true
         }
