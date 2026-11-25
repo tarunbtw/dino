@@ -246,9 +246,10 @@ extension DinoAgentServer {
                         return false;
                     })()
                     """
+                    await activeTab.driver.ensureDinoScriptInjected()
                     let selectorDeadline = Date().addingTimeInterval(max(0.1, maxTimeoutSec - Date().timeIntervalSince(startTime)))
                     while Date() < selectorDeadline {
-                        let found = (try? await activeTab.webView.evaluateJavaScript(checkScript)) as? Bool ?? false
+                        let found = (try? await activeTab.driver.evalIsolated(checkScript)) as? Bool ?? false
                         if found {
                             targetAppeared = true
                             break
@@ -378,10 +379,11 @@ extension DinoAgentServer {
                 })()
                 """
 
+                await activeTab.driver.ensureDinoScriptInjected()
                 var found = false
                 while Date().timeIntervalSince(startTime) < maxDuration {
                     if !activeTab.isLoading {
-                        let res = (try? await activeTab.webView.evaluateJavaScript(checkScript)) as? Bool ?? false
+                        let res = (try? await activeTab.driver.evalIsolated(checkScript)) as? Bool ?? false
                         if res {
                             found = true
                             break
@@ -497,10 +499,11 @@ extension DinoAgentServer {
                 })()
                 """
 
+                await activeTab.driver.ensureDinoScriptInjected()
                 var matched = false
                 while Date().timeIntervalSince(startTime) < maxDuration {
                     if !activeTab.isLoading {
-                        let res = (try? await activeTab.webView.evaluateJavaScript(checkTextScript)) as? Bool ?? false
+                        let res = (try? await activeTab.driver.evalIsolated(checkTextScript)) as? Bool ?? false
                         if res {
                             matched = true
                             break
@@ -554,10 +557,11 @@ extension DinoAgentServer {
                 })()
                 """
 
+                await activeTab.driver.ensureDinoScriptInjected()
                 var matched = false
                 while Date().timeIntervalSince(startTime) < maxDuration {
                     if !activeTab.isLoading {
-                        let res = (try? await activeTab.webView.evaluateJavaScript(checkStateScript)) as? Bool ?? false
+                        let res = (try? await activeTab.driver.evalIsolated(checkStateScript)) as? Bool ?? false
                         if res {
                             matched = true
                             break

@@ -288,7 +288,7 @@ extension DinoAgentServer {
             })()
             """
 
-            if let result = try? await activeTab.webView.evaluateJavaScript(findScript) as? [String: Any],
+            if let result = try? await activeTab.driver.evalIsolated(findScript) as? [String: Any],
                let success = result["success"] as? Bool, success {
                 sendJSON(connection: connection, object: result, origin: origin)
             } else {
@@ -555,10 +555,11 @@ extension DinoAgentServer {
                 if let m = json["mode"] as? String { mode = m }
             }
 
+            await activeTab.driver.ensureDinoScriptInjected()
             let selArg = selector ?? ""
             let script = "return window.__dino && window.__dino.extract ? window.__dino.extract(selector || null, mode) : null;"
             let res = try? await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Any, Error>) in
-                activeTab.webView.callAsyncJavaScript(script, arguments: ["selector": selArg, "mode": mode], in: nil, in: .page) { result in
+                activeTab.webView.callAsyncJavaScript(script, arguments: ["selector": selArg, "mode": mode], in: nil, in: .defaultClient) { result in
                     continuation.resume(with: result)
                 }
             }

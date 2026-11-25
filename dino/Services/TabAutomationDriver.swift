@@ -439,7 +439,7 @@ final class TabAutomationDriver {
         return try await withThrowingTaskGroup(of: [String: Any].self) { group in
             group.addTask { @MainActor in
                 try await withCheckedThrowingContinuation { continuation in
-                    self.webView.callAsyncJavaScript(script, arguments: ["quietMs": quietMs, "timeoutMs": remainingTimeoutMs], in: nil, in: .page) { result in
+                    self.webView.callAsyncJavaScript(script, arguments: ["quietMs": quietMs, "timeoutMs": remainingTimeoutMs], in: nil, in: .defaultClient) { result in
                         switch result {
                         case .success(let val):
                             if let dict = val as? [String: Any] {
@@ -1159,7 +1159,7 @@ final class TabAutomationDriver {
             return { count: 0 };
             """
             await withCheckedContinuation { continuation in
-                webView.callAsyncJavaScript(syncScript, arguments: [:], in: nil, in: .page) { _ in
+                webView.callAsyncJavaScript(syncScript, arguments: [:], in: nil, in: .defaultClient) { _ in
                     continuation.resume()
                 }
             }

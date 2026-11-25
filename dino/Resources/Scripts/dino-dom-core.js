@@ -661,6 +661,7 @@
                     var resolvedNode = (this.elements && this.elements[element] && this.isNodeConnected(this.elements[element]) ? this.elements[element] : null) || this.findInTree(document, element);
                     if (resolvedNode) {
                         element = resolvedNode;
+                        this.lastInteractedElement = resolvedNode;
                     } else {
                         // 4. Fallback to elementsBounds cache from getSemanticTree (e.g. cross-origin subframes)
                         var cache = this.elementsBounds || window.__dino_elements_bounds;
@@ -871,6 +872,24 @@
                     }
                     if (resolvedTargetEl) {
                         scopeRoot = resolvedTargetEl;
+                    } else {
+                        var notFoundOrigin = window.location.href || '';
+                        var notFoundSummary = '<!-- BEGIN UNTRUSTED WEB CONTENT (origin: ' + notFoundOrigin + ') -->\\n[Page: ' + (document.title || 'Untitled') + ' | Target: ' + targetFilter + ' (not found) | URL: ' + notFoundOrigin + ']\\nInteractive Elements (0 of 0):\\n<!-- Target not found in DOM -->\\n<!-- END UNTRUSTED WEB CONTENT -->';
+                        return {
+                            title: document.title || '',
+                            url: notFoundOrigin,
+                            target: targetFilter,
+                            tracked: null,
+                            viewportWidth: vpW,
+                            viewportHeight: vpH,
+                            totalElements: 0,
+                            filteredTotal: 0,
+                            unfilteredTotal: 0,
+                            elements: [],
+                            summary: notFoundSummary,
+                            securityBoundary: { untrusted: true, origin: notFoundOrigin },
+                            tokenEstimate: Math.round(notFoundSummary.length / 4)
+                        };
                     }
                 }
 
@@ -3532,46 +3551,55 @@
                         el = this.findInTree(document, elementId);
                     }
                 }
+                if (!el && this.lastInteractedElement && this.isNodeConnected(this.lastInteractedElement)) {
+                    el = this.lastInteractedElement;
+                }
+                if (!el && document.activeElement && document.activeElement !== document.body && document.activeElement !== document.documentElement) {
+                    el = document.activeElement;
+                }
 
                 if (el) {
-                    container = el.closest('dialog, [role="dialog"], [aria-modal="true"], form, [class*="modal"], [class*="popup"], [class*="overlay"], [class*="card"], [class*="panel"], main, article');
-                    if (!container) container = el.parentElement;
+                    container = el.closest('dialog, [role="dialog"], [aria-modal="true"], form, [class*="modal"], [class*="popup"], [class*="overlay"], [class*="card"], [class*="panel"], [role="region"], table, tr, li, article, section');
+                    if (container) {
+                        var cr = container.getBoundingClientRect();
+                        // Reject full-page wrappers: if container spans >85% width AND >80% height, fall back to localized element
+                        if (cr.width > window.innerWidth * 0.85 && cr.height > window.innerHeight * 0.8) {
+                            container = null;
+                        }
+                    }
+                    if (!container) container = (el.parentElement && el.parentElement !== document.body && el.parentElement !== document.documentElement) ? el.parentElement : el;
                 } else {
-                    // 1. Active Modals & Dialogs
-                    container = document.querySelector('dialog[open], [role="dialog"], [aria-modal="true"], .modal.show, .modal.active, .modal.open, .popup.show, .popup.active');
+                    // 1. Active Modals, Dialogs, Popovers & Menus
+                    container = document.querySelector('dialog[open], [role="dialog"], [aria-modal="true"], .modal.show, .modal.active, .modal.open, .popup.show, .popup.active, [role="menu"][aria-hidden="false"]');
                     // 2. Focused element container
                     if (!container && document.activeElement && document.activeElement !== document.body) {
-                        container = document.activeElement.closest('form, dialog, [role="dialog"], [class*="modal"], [class*="card"], [class*="panel"]');
+                        var foc = document.activeElement.closest('form, dialog, [role="dialog"], [class*="modal"], [class*="card"], [class*="panel"], table, tr, li');
+                        if (foc) {
+                            var focr = foc.getBoundingClientRect();
+                            if (focr.width <= window.innerWidth * 0.85 || focr.height <= window.innerHeight * 0.8) {
+                                container = foc;
+                            }
+                        }
                     }
                     // 3. Primary visible form / search box
                     if (!container) {
                         var forms = document.querySelectorAll('form:not([hidden]), [role="form"]:not([hidden]), [role="search"]:not([hidden])');
                         for (var fi = 0; fi < forms.length; fi++) {
                             var fr = forms[fi].getBoundingClientRect();
-                            if (fr.width >= 160 && fr.height >= 32 && fr.top < window.innerHeight && fr.bottom > 0) {
+                            if (fr.width >= 160 && fr.height >= 32 && fr.width <= window.innerWidth * 0.85 && fr.top < window.innerHeight && fr.bottom > 0) {
                                 container = forms[fi];
                                 break;
                             }
                         }
                     }
-                    // 4. Bounded content card or region
+                    // 4. Bounded content card, article, or list item
                     if (!container) {
-                        var mainCards = document.querySelectorAll('.card:not([hidden]), article:not([hidden]), [role="region"]:not([hidden]), [class*="content-wrapper"]:not([hidden])');
+                        var mainCards = document.querySelectorAll('.card:not([hidden]), article:not([hidden]), [role="region"]:not([hidden]), [class*="content-wrapper"]:not([hidden]), tr.athing, [class*="item"]:not([hidden])');
                         for (var ci = 0; ci < mainCards.length; ci++) {
-                            var cr = mainCards[ci].getBoundingClientRect();
-                            if (cr.width >= 240 && cr.height >= 120 && cr.width <= window.innerWidth * 0.95 && cr.top < window.innerHeight && cr.bottom > 0) {
+                            var mcr = mainCards[ci].getBoundingClientRect();
+                            if (mcr.width >= 160 && mcr.height >= 24 && (mcr.width <= window.innerWidth * 0.85 || mcr.height <= window.innerHeight * 0.8) && mcr.top < window.innerHeight && mcr.bottom > 0) {
                                 container = mainCards[ci];
                                 break;
-                            }
-                        }
-                    }
-                    // 5. Main content landmark / container (#main, main, #hnmain, etc.)
-                    if (!container) {
-                        var mainEl = document.querySelector('main:not([hidden]), [role="main"]:not([hidden]), #main, #content, #hnmain, [class*="main-content"]');
-                        if (mainEl) {
-                            var mr = mainEl.getBoundingClientRect();
-                            if (mr.width >= 100 && mr.height >= 50 && mr.top < window.innerHeight && mr.bottom > 0) {
-                                container = mainEl;
                             }
                         }
                     }
@@ -3579,27 +3607,31 @@
 
                 if (container) {
                     var r = container.getBoundingClientRect();
-                    if (r && r.width > 30 && r.height > 30) {
+                    if (r && r.width > 20 && r.height > 20) {
                         var pad = 16;
                         var left = Math.max(0, r.left - pad);
                         var top = Math.max(0, r.top - pad);
                         var right = Math.min(window.innerWidth, r.right + pad);
                         var bottom = Math.min(window.innerHeight, r.bottom + pad);
-                        return {
-                            x: Math.round(left),
-                            y: Math.round(top),
-                            width: Math.round(right - left),
-                            height: Math.round(bottom - top),
-                            containerTag: container.tagName ? container.tagName.toLowerCase() : 'container',
-                            isModal: Boolean(container.matches && container.matches('dialog, [role="dialog"], [aria-modal="true"], [class*="modal"]'))
-                        };
+                        var rw = Math.round(right - left);
+                        var rh = Math.round(bottom - top);
+                        if (rw > 0 && rh > 0) {
+                            return {
+                                x: Math.round(left),
+                                y: Math.round(top),
+                                width: rw,
+                                height: rh,
+                                containerTag: container.tagName ? container.tagName.toLowerCase() : 'container',
+                                isModal: Boolean(container.matches && container.matches('dialog, [role="dialog"], [aria-modal="true"], [class*="modal"]'))
+                            };
+                        }
                     }
                 }
 
                 if (el) {
                     var er = el.getBoundingClientRect();
                     if (er && er.width > 0 && er.height > 0) {
-                        var epad = 40;
+                        var epad = 24;
                         var eleft = Math.max(0, er.left - epad);
                         var etop = Math.max(0, er.top - epad);
                         var eright = Math.min(window.innerWidth, er.right + epad);
@@ -3615,7 +3647,7 @@
                     }
                 }
 
-                // 6. Viewport fallback: bounding box of visible interactive elements
+                // 5. Viewport fallback: bounding box of visible interactive elements
                 if (this.elementsBounds) {
                     var minX = window.innerWidth, minY = window.innerHeight, maxX = 0, maxY = 0, count = 0;
                     for (var bId in this.elementsBounds) {
@@ -3636,11 +3668,17 @@
                         var vTop = Math.max(0, Math.round(minY - vpad));
                         var vRight = Math.min(window.innerWidth, Math.round(maxX + vpad));
                         var vBottom = Math.min(window.innerHeight, Math.round(maxY + vpad));
+                        var vWidth = Math.round(vRight - vLeft);
+                        var vHeight = Math.round(vBottom - vTop);
+                        // If interactive elements span full viewport height, focus on the top hero / cluster
+                        if (vHeight > window.innerHeight * 0.8) {
+                            vHeight = Math.min(window.innerHeight, Math.max(300, Math.round(window.innerHeight * 0.5)));
+                        }
                         return {
                             x: vLeft,
                             y: vTop,
-                            width: Math.round(vRight - vLeft),
-                            height: Math.round(vBottom - vTop),
+                            width: vWidth,
+                            height: vHeight,
                             containerTag: 'viewport-content',
                             isModal: false
                         };
