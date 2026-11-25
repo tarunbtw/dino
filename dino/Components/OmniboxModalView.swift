@@ -242,9 +242,9 @@ struct OmniboxModalView: View {
                     // Dimming backdrop clipped strictly to concentric page geometry
                     let pageShape = RoundedRectangle(cornerRadius: Theme.pageCornerRadius, style: .continuous)
                     if !store.isPickingSplit {
-                        let hasExistingTabs = store.tabs.contains(where: { !$0.isBlank })
+                        let hasExistingTabs = store.tabs.contains(where: { !$0.isBlank && !$0.isGhost })
                         pageShape
-                            .fill(hasExistingTabs ? Theme.commandDim : Theme.commandDim.opacity(0.70))
+                            .fill(hasExistingTabs ? Theme.commandDim : Color.clear)
                             .contentShape(pageShape)
                             .onTapGesture { dismiss() }
                     } else {
@@ -359,7 +359,7 @@ struct OmniboxModalView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.leading, store.isPickingSplit ? (store.splitPickSide == .left ? (proxy.size.width / 2) : 0) : 0)
                 .padding(.trailing, store.isPickingSplit ? (store.splitPickSide == .right ? (proxy.size.width / 2) : 0) : 0)
-                .padding(.top, max(72, (proxy.size.height - 48) * 0.36))
+                .padding(.top, max(88, (proxy.size.height - 48) * 0.42))
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }

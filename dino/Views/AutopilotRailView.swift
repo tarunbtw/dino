@@ -234,11 +234,11 @@ struct AutopilotRailView: View {
             HStack(spacing: 8) {
                 let isBlank = store.activeTab?.isBlank ?? true
                 if isBlank {
-                    suggestionChip(title: "Search web", prompt: "Search the web for ")
-                    suggestionChip(title: "Navigate", prompt: "Navigate to ")
+                    suggestionChip(title: "Search web", prompt: "Search the web for ", isTemplate: true)
+                    suggestionChip(title: "Navigate", prompt: "Navigate to ", isTemplate: true)
                 } else {
-                    suggestionChip(title: "Summarize", prompt: "Summarize the key information and takeaways on this page")
-                    suggestionChip(title: "Extract Table", prompt: "Extract the primary table or list from this page into structured text")
+                    suggestionChip(title: "Summarize", prompt: "Summarize the key information and takeaways on this page", isTemplate: false)
+                    suggestionChip(title: "Extract Table", prompt: "Extract the primary table or list from this page into structured text", isTemplate: false)
                 }
             }
             .padding(.top, 4)
@@ -248,9 +248,18 @@ struct AutopilotRailView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func suggestionChip(title: String, prompt: String) -> some View {
+    private func suggestionChip(title: String, prompt: String, isTemplate: Bool = false) -> some View {
         Button(action: {
-            submitInstruction(prompt)
+            if isTemplate {
+                instructionInput = prompt
+            } else {
+                if vault.activeProvider.requiresAPIKey && !vault.hasKey(for: vault.activeProvider) {
+                    instructionInput = prompt
+                    runtime.messages.append(AgentChatMessage(sender: .error, text: "API key required: Please configure your \(vault.activeProvider.displayName) API key in Settings (⌘,) to run Agent tasks."))
+                    return
+                }
+                submitInstruction(prompt)
+            }
         }) {
             Text(title)
                 .font(Theme.font(size: 11.5, weight: .medium))
@@ -591,7 +600,7 @@ struct AutopilotRailView: View {
         }
 
         if vault.activeProvider.requiresAPIKey && !vault.hasKey(for: vault.activeProvider) {
-            store.openSettings(section: "Agent")
+            runtime.messages.append(AgentChatMessage(sender: .error, text: "API key required: Please configure your \(vault.activeProvider.displayName) API key in Settings (⌘,) to run Agent tasks."))
             return
         }
 
