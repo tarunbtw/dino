@@ -35,23 +35,16 @@ struct DinoStageScene: View {
                         .aspectRatio(imgSize, contentMode: .fill)
                         .frame(width: proxy.size.width, height: proxy.size.height)
                         .clipped()
-                } else {
-                    Image("DinoBackdrop")
-                        .resizable()
-                        .interpolation(.high)
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: proxy.size.width, height: proxy.size.height)
-                        .clipped()
-                }
 
-                LinearGradient(
-                    stops: [
-                        .init(color: Color.black.opacity(0.18), location: 0.0),
-                        .init(color: Color.black.opacity(0.28), location: 1.0)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
+                    LinearGradient(
+                        stops: [
+                            .init(color: Color.black.opacity(0.18), location: 0.0),
+                            .init(color: Color.black.opacity(0.28), location: 1.0)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                }
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
         }

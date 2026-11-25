@@ -201,11 +201,11 @@ extension DinoAgentServer {
             }
             if method == "POST", let bodyData = bodyData,
                let json = (try? JSONSerialization.jsonObject(with: bodyData)) as? [String: Any] {
-                if let t = json["timeoutMs"] as? Int { timeoutMs = t }
+                if let t = json["timeoutMs"] as? Int ?? json["timeout"] as? Int { timeoutMs = t }
                 if let f = json["filename"] as? String { targetFilename = f }
                 sinceDate = parseSince(json["since"])
             } else {
-                if let tStr = queryItem("timeoutMs"), let t = Int(tStr) { timeoutMs = t }
+                if let tStr = queryItem("timeoutMs") ?? queryItem("timeout"), let t = Int(tStr) { timeoutMs = t }
                 sinceDate = parseSince(queryItem("since"))
             }
             let res = await DownloadManager.shared.waitForDownload(timeoutMs: timeoutMs, since: sinceDate, filename: targetFilename)

@@ -1647,6 +1647,59 @@
         managed: { get: resolve({}), getBytesInUse: resolve(0), onChanged: event() },
         AccessLevel: { TRUSTED_CONTEXTS: "TRUSTED_CONTEXTS", TRUSTED_AND_UNTRUSTED_CONTEXTS: "TRUSTED_AND_UNTRUSTED_CONTEXTS" },
       });
+      if (chrome.storage && !chrome.storage.session) {
+        const _sessionMap = new Map();
+        const _sessionOnChanged = event();
+        chrome.storage.session = {
+          get: (keys, callback) => {
+            let res = {};
+            if (typeof keys === "string") {
+              if (_sessionMap.has(keys)) res[keys] = _sessionMap.get(keys);
+            } else if (Array.isArray(keys)) {
+              for (const k of keys) { if (_sessionMap.has(k)) res[k] = _sessionMap.get(k); }
+            } else if (keys && typeof keys === "object") {
+              res = Object.assign({}, keys);
+              for (const k in keys) { if (_sessionMap.has(k)) res[k] = _sessionMap.get(k); }
+            } else {
+              _sessionMap.forEach((v, k) => { res[k] = v; });
+            }
+            if (typeof callback === "function") callback(res);
+            return Promise.resolve(res);
+          },
+          set: (items, callback) => {
+            if (items && typeof items === "object") {
+              const changes = {};
+              for (const k in items) {
+                changes[k] = { oldValue: _sessionMap.get(k), newValue: items[k] };
+                _sessionMap.set(k, items[k]);
+              }
+              try { if (chrome.storage.onChanged) chrome.storage.onChanged.dispatch(changes, "session"); } catch(e){}
+            }
+            if (typeof callback === "function") callback();
+            return Promise.resolve();
+          },
+          remove: (keys, callback) => {
+            const list = Array.isArray(keys) ? keys : [keys];
+            for (const k of list) _sessionMap.delete(k);
+            if (typeof callback === "function") callback();
+            return Promise.resolve();
+          },
+          clear: (callback) => {
+            _sessionMap.clear();
+            if (typeof callback === "function") callback();
+            return Promise.resolve();
+          },
+          getBytesInUse: (keys, callback) => {
+            if (typeof callback === "function") callback(0);
+            return Promise.resolve(0);
+          },
+          setAccessLevel: (opts, callback) => {
+            if (typeof callback === "function") callback();
+            return Promise.resolve();
+          },
+          onChanged: _sessionOnChanged
+        };
+      }
       // A page at the address of the extension's popup hears no events
       // from WebKit: WebKit takes it for its own popup, and Search's popup
       // is a view of Search's. The one that matters, storage.onChanged —

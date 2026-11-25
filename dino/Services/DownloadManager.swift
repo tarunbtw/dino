@@ -10,6 +10,7 @@ import SwiftUI
 import WebKit
 import Combine
 import CryptoKit
+import UniformTypeIdentifiers
 
 /// Represents an active or completed file download.
 @MainActor
@@ -201,7 +202,13 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
                 chosenName = "download"
             }
         }
-        let safeFilename = sanitizeFilename(chosenName)
+        var safeFilename = sanitizeFilename(chosenName)
+        if (safeFilename as NSString).pathExtension.isEmpty,
+           let mime = response.mimeType,
+           let ut = UTType(mimeType: mime),
+           let ext = ut.preferredFilenameExtension {
+            safeFilename = "\(safeFilename).\(ext)"
+        }
         
         // Ensure ~/Downloads directory exists
         try? FileManager.default.createDirectory(at: downloadsDirectory, withIntermediateDirectories: true)
@@ -235,7 +242,7 @@ final class DownloadManager: NSObject, ObservableObject, WKDownloadDelegate {
             item.completedAt = Date()
             if let dest = item.destinationURL {
                 var finalDest = dest
-                if dest.path.contains(".dino/downloads") {
+                if !DinoHeadlessManager.isHeadless && dest.path.contains(".dino/downloads") {
                     let targetURL = self.uniqueDestinationURL(for: item.suggestedFilename, in: self.standardDownloadsDirectory)
                     if (try? FileManager.default.copyItem(at: dest, to: targetURL)) != nil {
                         item.destinationURL = targetURL

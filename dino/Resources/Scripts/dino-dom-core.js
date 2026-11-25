@@ -659,8 +659,12 @@
 
                     // 3. Resolve live top-level DOM node first (accurate geometry & isTextEditable)
                     var resolvedNode = (this.elements && this.elements[element] && this.isNodeConnected(this.elements[element]) ? this.elements[element] : null) || this.findInTree(document, element);
+                    if (!resolvedNode) {
+                        resolvedNode = this.reanchorElement(element);
+                    }
                     if (resolvedNode) {
                         element = resolvedNode;
+                        this.lastInteractedElement = resolvedNode;
                     } else {
                         // 4. Fallback to elementsBounds cache from getSemanticTree (e.g. cross-origin subframes)
                         var cache = this.elementsBounds || window.__dino_elements_bounds;
@@ -871,6 +875,24 @@
                     }
                     if (resolvedTargetEl) {
                         scopeRoot = resolvedTargetEl;
+                    } else {
+                        var notFoundOrigin = window.location.href || '';
+                        var notFoundSummary = '<!-- BEGIN UNTRUSTED WEB CONTENT (origin: ' + notFoundOrigin + ') -->\\n[Page: ' + (document.title || 'Untitled') + ' | Target: ' + targetFilter + ' (not found) | URL: ' + notFoundOrigin + ']\\nInteractive Elements (0 of 0):\\n<!-- Target not found in DOM -->\\n<!-- END UNTRUSTED WEB CONTENT -->';
+                        return {
+                            title: document.title || '',
+                            url: notFoundOrigin,
+                            target: targetFilter,
+                            tracked: null,
+                            viewportWidth: vpW,
+                            viewportHeight: vpH,
+                            totalElements: 0,
+                            filteredTotal: 0,
+                            unfilteredTotal: 0,
+                            elements: [],
+                            summary: notFoundSummary,
+                            securityBoundary: { untrusted: true, origin: notFoundOrigin },
+                            tokenEstimate: Math.round(notFoundSummary.length / 4)
+                        };
                     }
                 }
 
@@ -1313,6 +1335,10 @@
                         placeholder: el.placeholder || null,
                         ariaLabel: el.getAttribute('aria-label') || null,
                         testId: el.getAttribute('data-testid') || null,
+                        docY: Math.round(window.scrollY + rect.top),
+                        docX: Math.round(window.scrollX + rect.left),
+                        width: Math.round(rect.width),
+                        height: Math.round(rect.height),
                         ordinal: i
                     };
 
@@ -1718,6 +1744,7 @@
                     if (!item.inViewport) desc += ' (offscreen)';
                     desc += '>';
                     if (item.hasContextMenu) desc += ' (context-menu)';
+                    if (item.tag === 'canvas') desc += ' (interactive-canvas)';
                     if (item.isObscured) desc += ' (obscured)';
                     summaryLines.push(desc);
                 }
@@ -1746,6 +1773,35 @@
                     securityBoundary: { untrusted: true, origin: displayUrl },
                     tokenEstimate: tokenEst
                 };
+            },
+
+            // Re-anchors a virtualized or unmounted element by scrolling to its last known document offset
+            reanchorElement: function(targetId) {
+                if (!targetId) return null;
+                var sig = (this.elementSignatures && this.elementSignatures[targetId]) || null;
+                if (!sig || sig.docY === undefined) return null;
+
+                // 1. Scroll document to anchor position
+                var targetScrollY = Math.max(0, sig.docY - Math.round(window.innerHeight / 2));
+                window.scrollTo({ top: targetScrollY, behavior: 'instant' });
+
+                // 2. Allow synchronous layout / virtual list to register new scroll position
+                if (document.body) { void document.body.offsetHeight; }
+
+                // 3. Attempt to find the re-mounted live node
+                var el = this.elements && this.elements[targetId] && this.isNodeConnected(this.elements[targetId]) ? this.elements[targetId] : null;
+                if (!el) el = this.selfHealElement(targetId);
+                if (!el) {
+                    try { el = document.querySelector('[data-dino-id="' + CSS.escape(targetId) + '"]'); } catch(e) {}
+                }
+                if (el) {
+                    this.elements[targetId] = el;
+                    if (el.scrollIntoView) {
+                        try { el.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch(e) {}
+                    }
+                    return el;
+                }
+                return null;
             },
 
             // Resolves a replacement node for a stale reference when DOM changes occurred without intermediate snapshot
@@ -2074,6 +2130,10 @@
                             var rectC = el.getBoundingClientRect ? el.getBoundingClientRect() : { left: 0, top: 0, width: 0, height: 0 };
                             var cxC = Math.round(rectC.left + (rectC.width ? rectC.width / 2 : 0));
                             var cyC = Math.round(rectC.top + (rectC.height ? rectC.height / 2 : 0));
+                            if (actionObj.x !== undefined && actionObj.y !== undefined) {
+                                cxC = Math.round(rectC.left + actionObj.x);
+                                cyC = Math.round(rectC.top + actionObj.y);
+                            }
 
                             // Occlusion hit-testing: unless force: true, clicks hit what is physically on top
                             if (!actionObj.force) {
@@ -2133,28 +2193,30 @@
                                 button: 0,
                                 buttons: 0
                             });
+                            var clickEvt = new elWin.MouseEvent('click', {
+                                bubbles: true,
+                                cancelable: true,
+                                view: elWin,
+                                clientX: cxC,
+                                clientY: cyC,
+                                screenX: cxC,
+                                screenY: cyC,
+                                button: 0,
+                                buttons: 0
+                            });
 
                             targetToClick.dispatchEvent(pdown);
                             targetToClick.dispatchEvent(mdown);
                             targetToClick.dispatchEvent(pup);
                             targetToClick.dispatchEvent(mup);
+                            targetToClick.dispatchEvent(clickEvt);
 
-                            // Native click triggers standard activation behavior (checkboxes, buttons, navigation)
-                            try {
-                                targetToClick.click();
-                            } catch(e) {
-                                targetToClick.dispatchEvent(new elWin.MouseEvent('click', {
-                                    bubbles: true,
-                                    cancelable: true,
-                                    view: elWin,
-                                    clientX: cxC,
-                                    clientY: cyC,
-                                    screenX: cxC,
-                                    screenY: cyC,
-                                    button: 0,
-                                    buttons: 0
-                                }));
+                            var isStandardClickTarget = (targetToClick.tagName === 'BUTTON' || targetToClick.tagName === 'A' || targetToClick.tagName === 'INPUT');
+                            if (isStandardClickTarget && actionObj.x === undefined && actionObj.y === undefined) {
+                                try { targetToClick.click(); } catch(e) {}
                             }
+
+                            if (this.pulseVirtualCursor) this.pulseVirtualCursor(cxC, cyC);
 
                             if (wasObscured) {
                                 return {
@@ -2180,8 +2242,16 @@
                         } else if (actionObj.x !== undefined && actionObj.y !== undefined) {
                             var hit = document.elementFromPoint(actionObj.x, actionObj.y);
                             if (hit) {
-                                hit.click();
-                                return { success: true, message: 'Clicked coordinates (' + actionObj.x + ', ' + actionObj.y + ')' };
+                                var hitDoc = hit.ownerDocument || document;
+                                var hitWin = hitDoc.defaultView || window;
+                                var pInit = { bubbles: true, cancelable: true, view: hitWin, clientX: actionObj.x, clientY: actionObj.y, screenX: actionObj.x, screenY: actionObj.y, button: 0, buttons: 1, pointerId: 1, pointerType: 'mouse', isPrimary: true };
+                                hit.dispatchEvent(new hitWin.PointerEvent('pointerdown', pInit));
+                                hit.dispatchEvent(new hitWin.MouseEvent('mousedown', pInit));
+                                hit.dispatchEvent(new hitWin.PointerEvent('pointerup', Object.assign({}, pInit, { buttons: 0 })));
+                                hit.dispatchEvent(new hitWin.MouseEvent('mouseup', Object.assign({}, pInit, { buttons: 0 })));
+                                hit.dispatchEvent(new hitWin.MouseEvent('click', Object.assign({}, pInit, { buttons: 0 })));
+                                if (this.pulseVirtualCursor) this.pulseVirtualCursor(actionObj.x, actionObj.y);
+                                return { success: true, message: 'Clicked coordinates (' + actionObj.x + ', ' + actionObj.y + ')', centerCoordinates: { x: actionObj.x, y: actionObj.y } };
                             }
                             return { success: false, code: 'ELEMENT_NOT_FOUND', message: 'No element at coordinates (' + actionObj.x + ', ' + actionObj.y + ')' };
                         }
@@ -2197,9 +2267,13 @@
                                 try { elWinD.frameElement.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch(e) {}
                             }
                             el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-                            var rectD = el.getBoundingClientRect();
-                            var cxD = rectD.left + rectD.width / 2;
-                            var cyD = rectD.top + rectD.height / 2;
+                            var rectD = el.getBoundingClientRect ? el.getBoundingClientRect() : { left: 0, top: 0, width: 0, height: 0 };
+                            var cxD = Math.round(rectD.left + (rectD.width ? rectD.width / 2 : 0));
+                            var cyD = Math.round(rectD.top + (rectD.height ? rectD.height / 2 : 0));
+                            if (actionObj.x !== undefined && actionObj.y !== undefined) {
+                                cxD = Math.round(rectD.left + actionObj.x);
+                                cyD = Math.round(rectD.top + actionObj.y);
+                            }
 
                             var targetToDbl = el;
                             var hitTopD = elDocD.elementFromPoint(cxD, cyD);
@@ -2323,16 +2397,35 @@
                         return { success: false, code: 'MISSING_TARGET', message: 'No target element or coordinates specified for right-click action' };
 
                     case 'hover':
-                        if (!el) return { success: false, code: 'MISSING_TARGET', message: 'No target element for hover action' };
+                        if (!el && actionObj.x !== undefined && actionObj.y !== undefined) {
+                            el = document.elementFromPoint(actionObj.x, actionObj.y);
+                        }
+                        if (!el) {
+                            if (actionObj.x !== undefined && actionObj.y !== undefined) {
+                                if (this.updateVirtualCursor) this.updateVirtualCursor(actionObj.x, actionObj.y);
+                                return {
+                                    success: true,
+                                    message: 'Hovered at (' + actionObj.x + ', ' + actionObj.y + ')',
+                                    centerCoordinates: { x: actionObj.x, y: actionObj.y }
+                                };
+                            }
+                            return { success: false, code: 'MISSING_TARGET', message: 'No target element or coordinates for hover action' };
+                        }
                         if (el.ownerDocument && el.ownerDocument !== document && el.ownerDocument.defaultView && el.ownerDocument.defaultView.frameElement) {
                             try { el.ownerDocument.defaultView.frameElement.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch(e) {}
                         }
-                        el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+                        if (actionObj.x === undefined && actionObj.y === undefined) {
+                            el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+                        }
                         var elDocH = el.ownerDocument || document;
                         var elWinH = elDocH.defaultView || window;
                         var rH = el.getBoundingClientRect ? el.getBoundingClientRect() : { left: 0, top: 0, width: 0, height: 0 };
-                        var cxH = Math.round(rH.left + rH.width / 2);
-                        var cyH = Math.round(rH.top + rH.height / 2);
+                        var cxH = Math.round(rH.left + (rH.width ? rH.width / 2 : 0));
+                        var cyH = Math.round(rH.top + (rH.height ? rH.height / 2 : 0));
+                        if (actionObj.x !== undefined && actionObj.y !== undefined) {
+                            cxH = (targetId && rH && (rH.width > 0 || rH.height > 0)) ? Math.round(rH.left + actionObj.x) : Math.round(actionObj.x);
+                            cyH = (targetId && rH && (rH.width > 0 || rH.height > 0)) ? Math.round(rH.top + actionObj.y) : Math.round(actionObj.y);
+                        }
                         var pH = { bubbles: true, cancelable: true, view: elWinH, clientX: cxH, clientY: cyH, screenX: cxH, screenY: cyH, pointerId: 1, pointerType: 'mouse', isPrimary: true };
                         var eH = { bubbles: false, cancelable: false, view: elWinH, clientX: cxH, clientY: cyH, screenX: cxH, screenY: cyH, pointerId: 1, pointerType: 'mouse', isPrimary: true };
                         el.dispatchEvent(new elWinH.PointerEvent('pointerover', pH));
@@ -2343,10 +2436,11 @@
                         el.dispatchEvent(new elWinH.MouseEvent('mousemove', pH));
 
                         this.emulateHover(el, cxH, cyH);
+                        if (this.updateVirtualCursor) this.updateVirtualCursor(cxH, cyH);
 
                         return {
                             success: true,
-                            message: 'Hovered over ' + targetId,
+                            message: targetId ? ('Hovered over ' + targetId) : ('Hovered at (' + cxH + ', ' + cyH + ')'),
                             elementId: targetId,
                             centerCoordinates: { x: cxH, y: cyH }
                         };
@@ -3532,46 +3626,55 @@
                         el = this.findInTree(document, elementId);
                     }
                 }
+                if (!el && this.lastInteractedElement && this.isNodeConnected(this.lastInteractedElement)) {
+                    el = this.lastInteractedElement;
+                }
+                if (!el && document.activeElement && document.activeElement !== document.body && document.activeElement !== document.documentElement) {
+                    el = document.activeElement;
+                }
 
                 if (el) {
-                    container = el.closest('dialog, [role="dialog"], [aria-modal="true"], form, [class*="modal"], [class*="popup"], [class*="overlay"], [class*="card"], [class*="panel"], main, article');
-                    if (!container) container = el.parentElement;
+                    container = el.closest('dialog, [role="dialog"], [aria-modal="true"], form, [class*="modal"], [class*="popup"], [class*="overlay"], [class*="card"], [class*="panel"], [role="region"], table, tr, li, article, section');
+                    if (container) {
+                        var cr = container.getBoundingClientRect();
+                        // Reject full-page wrappers: if container spans >85% width AND >80% height, fall back to localized element
+                        if (cr.width > window.innerWidth * 0.85 && cr.height > window.innerHeight * 0.8) {
+                            container = null;
+                        }
+                    }
+                    if (!container) container = (el.parentElement && el.parentElement !== document.body && el.parentElement !== document.documentElement) ? el.parentElement : el;
                 } else {
-                    // 1. Active Modals & Dialogs
-                    container = document.querySelector('dialog[open], [role="dialog"], [aria-modal="true"], .modal.show, .modal.active, .modal.open, .popup.show, .popup.active');
+                    // 1. Active Modals, Dialogs, Popovers & Menus
+                    container = document.querySelector('dialog[open], [role="dialog"], [aria-modal="true"], .modal.show, .modal.active, .modal.open, .popup.show, .popup.active, [role="menu"][aria-hidden="false"]');
                     // 2. Focused element container
                     if (!container && document.activeElement && document.activeElement !== document.body) {
-                        container = document.activeElement.closest('form, dialog, [role="dialog"], [class*="modal"], [class*="card"], [class*="panel"]');
+                        var foc = document.activeElement.closest('form, dialog, [role="dialog"], [class*="modal"], [class*="card"], [class*="panel"], table, tr, li');
+                        if (foc) {
+                            var focr = foc.getBoundingClientRect();
+                            if (focr.width <= window.innerWidth * 0.85 || focr.height <= window.innerHeight * 0.8) {
+                                container = foc;
+                            }
+                        }
                     }
                     // 3. Primary visible form / search box
                     if (!container) {
                         var forms = document.querySelectorAll('form:not([hidden]), [role="form"]:not([hidden]), [role="search"]:not([hidden])');
                         for (var fi = 0; fi < forms.length; fi++) {
                             var fr = forms[fi].getBoundingClientRect();
-                            if (fr.width >= 160 && fr.height >= 32 && fr.top < window.innerHeight && fr.bottom > 0) {
+                            if (fr.width >= 160 && fr.height >= 32 && fr.width <= window.innerWidth * 0.85 && fr.top < window.innerHeight && fr.bottom > 0) {
                                 container = forms[fi];
                                 break;
                             }
                         }
                     }
-                    // 4. Bounded content card or region
+                    // 4. Bounded content card, article, or list item
                     if (!container) {
-                        var mainCards = document.querySelectorAll('.card:not([hidden]), article:not([hidden]), [role="region"]:not([hidden]), [class*="content-wrapper"]:not([hidden])');
+                        var mainCards = document.querySelectorAll('.card:not([hidden]), article:not([hidden]), [role="region"]:not([hidden]), [class*="content-wrapper"]:not([hidden]), tr.athing, [class*="item"]:not([hidden])');
                         for (var ci = 0; ci < mainCards.length; ci++) {
-                            var cr = mainCards[ci].getBoundingClientRect();
-                            if (cr.width >= 240 && cr.height >= 120 && cr.width <= window.innerWidth * 0.95 && cr.top < window.innerHeight && cr.bottom > 0) {
+                            var mcr = mainCards[ci].getBoundingClientRect();
+                            if (mcr.width >= 160 && mcr.height >= 24 && (mcr.width <= window.innerWidth * 0.85 || mcr.height <= window.innerHeight * 0.8) && mcr.top < window.innerHeight && mcr.bottom > 0) {
                                 container = mainCards[ci];
                                 break;
-                            }
-                        }
-                    }
-                    // 5. Main content landmark / container (#main, main, #hnmain, etc.)
-                    if (!container) {
-                        var mainEl = document.querySelector('main:not([hidden]), [role="main"]:not([hidden]), #main, #content, #hnmain, [class*="main-content"]');
-                        if (mainEl) {
-                            var mr = mainEl.getBoundingClientRect();
-                            if (mr.width >= 100 && mr.height >= 50 && mr.top < window.innerHeight && mr.bottom > 0) {
-                                container = mainEl;
                             }
                         }
                     }
@@ -3579,27 +3682,31 @@
 
                 if (container) {
                     var r = container.getBoundingClientRect();
-                    if (r && r.width > 30 && r.height > 30) {
+                    if (r && r.width > 20 && r.height > 20) {
                         var pad = 16;
                         var left = Math.max(0, r.left - pad);
                         var top = Math.max(0, r.top - pad);
                         var right = Math.min(window.innerWidth, r.right + pad);
                         var bottom = Math.min(window.innerHeight, r.bottom + pad);
-                        return {
-                            x: Math.round(left),
-                            y: Math.round(top),
-                            width: Math.round(right - left),
-                            height: Math.round(bottom - top),
-                            containerTag: container.tagName ? container.tagName.toLowerCase() : 'container',
-                            isModal: Boolean(container.matches && container.matches('dialog, [role="dialog"], [aria-modal="true"], [class*="modal"]'))
-                        };
+                        var rw = Math.round(right - left);
+                        var rh = Math.round(bottom - top);
+                        if (rw > 0 && rh > 0) {
+                            return {
+                                x: Math.round(left),
+                                y: Math.round(top),
+                                width: rw,
+                                height: rh,
+                                containerTag: container.tagName ? container.tagName.toLowerCase() : 'container',
+                                isModal: Boolean(container.matches && container.matches('dialog, [role="dialog"], [aria-modal="true"], [class*="modal"]'))
+                            };
+                        }
                     }
                 }
 
                 if (el) {
                     var er = el.getBoundingClientRect();
                     if (er && er.width > 0 && er.height > 0) {
-                        var epad = 40;
+                        var epad = 24;
                         var eleft = Math.max(0, er.left - epad);
                         var etop = Math.max(0, er.top - epad);
                         var eright = Math.min(window.innerWidth, er.right + epad);
@@ -3615,7 +3722,7 @@
                     }
                 }
 
-                // 6. Viewport fallback: bounding box of visible interactive elements
+                // 5. Viewport fallback: bounding box of visible interactive elements
                 if (this.elementsBounds) {
                     var minX = window.innerWidth, minY = window.innerHeight, maxX = 0, maxY = 0, count = 0;
                     for (var bId in this.elementsBounds) {
@@ -3636,11 +3743,17 @@
                         var vTop = Math.max(0, Math.round(minY - vpad));
                         var vRight = Math.min(window.innerWidth, Math.round(maxX + vpad));
                         var vBottom = Math.min(window.innerHeight, Math.round(maxY + vpad));
+                        var vWidth = Math.round(vRight - vLeft);
+                        var vHeight = Math.round(vBottom - vTop);
+                        // If interactive elements span full viewport height, focus on the top hero / cluster
+                        if (vHeight > window.innerHeight * 0.8) {
+                            vHeight = Math.min(window.innerHeight, Math.max(300, Math.round(window.innerHeight * 0.5)));
+                        }
                         return {
                             x: vLeft,
                             y: vTop,
-                            width: Math.round(vRight - vLeft),
-                            height: Math.round(vBottom - vTop),
+                            width: vWidth,
+                            height: vHeight,
                             containerTag: 'viewport-content',
                             isModal: false
                         };

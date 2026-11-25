@@ -298,7 +298,7 @@ extension Tab: WKNavigationDelegate {
 
         if DinoOfflinePage.isOfflineError(error) {
             self.isShowingOfflinePage = true
-            self.title = "No Internet — Dino"
+            self.title = "uh oh! your internets broken"
             let targetURL = self.url ?? URL(string: "about:blank")!
             let offlineHTML = DinoOfflinePage.html(for: targetURL, error: error)
             self.webView.loadHTMLString(offlineHTML, baseURL: targetURL)
@@ -336,7 +336,7 @@ extension Tab: WKNavigationDelegate {
 
         if DinoOfflinePage.isOfflineError(error) {
             self.isShowingOfflinePage = true
-            self.title = "No Internet — Dino"
+            self.title = "uh oh! your internets broken"
             let targetURL = self.url ?? URL(string: "about:blank")!
             let offlineHTML = DinoOfflinePage.html(for: targetURL, error: error)
             self.webView.loadHTMLString(offlineHTML, baseURL: targetURL)

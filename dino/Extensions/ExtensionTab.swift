@@ -51,7 +51,7 @@ final class ExtensionTab: NSObject, WKWebExtensionTab {
     }
 
     func isPinned(for context: WKWebExtensionContext) -> Bool {
-        false
+        tab?.isPinned ?? false
     }
 
     func isPlayingAudio(for context: WKWebExtensionContext) -> Bool {

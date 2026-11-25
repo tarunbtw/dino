@@ -242,8 +242,9 @@ struct OmniboxModalView: View {
                     // Dimming backdrop clipped strictly to concentric page geometry
                     let pageShape = RoundedRectangle(cornerRadius: Theme.pageCornerRadius, style: .continuous)
                     if !store.isPickingSplit {
+                        let hasExistingTabs = store.tabs.contains(where: { !$0.isBlank && !$0.isGhost })
                         pageShape
-                            .fill(Theme.commandDim)
+                            .fill(hasExistingTabs ? Theme.commandDim : Color.clear)
                             .contentShape(pageShape)
                             .onTapGesture { dismiss() }
                     } else {
@@ -260,14 +261,14 @@ struct OmniboxModalView: View {
                 // Centered modal card
                 VStack(spacing: 0) {
                     // Search Field
-                    HStack(spacing: 10) {
+                    HStack(spacing: 12) {
                         Image(systemName: "magnifyingglass")
-                            .font(.system(size: 15))
+                            .font(.system(size: 16, weight: .medium))
                             .foregroundStyle(Theme.muted)
 
                         TextField("Search or enter address", text: $text)
                             .textFieldStyle(.plain)
-                            .font(Theme.font(size: 16))
+                            .font(Theme.font(size: 15.5))
                             .foregroundStyle(Theme.ink)
                             .focused($isFieldFocused)
                             .onSubmit { submit(rows: rows) }
@@ -291,7 +292,7 @@ struct OmniboxModalView: View {
                             }
                     }
                     .padding(.horizontal, 16)
-                    .frame(height: 48)
+                    .frame(height: 50)
 
                     if !rows.isEmpty {
                         Rectangle()
@@ -343,14 +344,14 @@ struct OmniboxModalView: View {
                         .padding(6)
                     }
                 }
-                .frame(width: store.isPickingSplit ? min(420, max(240, (proxy.size.width / 2) - 32)) : min(560, max(240, proxy.size.width - 64)))
+                .frame(width: store.isPickingSplit ? min(420, max(240, (proxy.size.width / 2) - 32)) : min(580, max(260, proxy.size.width - 80)))
                 .background {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(Theme.surface.opacity(isEmbeddedStage ? 0.90 : 1.0))
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(Theme.surface.opacity(isEmbeddedStage ? 0.94 : 1.0))
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay {
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
                         .strokeBorder(Theme.borderHover, lineWidth: 1)
                 }
                 .shadow(color: Color.black.opacity(0.35), radius: 24, y: 8)
@@ -358,7 +359,7 @@ struct OmniboxModalView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.leading, store.isPickingSplit ? (store.splitPickSide == .left ? (proxy.size.width / 2) : 0) : 0)
                 .padding(.trailing, store.isPickingSplit ? (store.splitPickSide == .right ? (proxy.size.width / 2) : 0) : 0)
-                .padding(.top, isEmbeddedStage ? max(48, (proxy.size.height - 48) * 0.42) : max(48, proxy.size.height * 0.22))
+                .padding(.top, max(88, (proxy.size.height - 48) * 0.42))
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }

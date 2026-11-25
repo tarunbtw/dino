@@ -16,7 +16,6 @@ struct AutopilotRailView: View {
 
     @State private var instructionInput: String = ""
     @State private var hitlInput: String = ""
-    @State private var hoveredActionIndex: Int? = nil
 
     private static let alertCoral = Color(hex: 0xF28B82)
 
@@ -188,12 +187,22 @@ struct AutopilotRailView: View {
     // MARK: - Resting State
 
     private var restingCanvasState: some View {
-        VStack(spacing: 18) {
+        VStack(spacing: 16) {
             Spacer()
 
             VStack(spacing: 8) {
-                Text("Agent")
-                    .font(.system(size: 18, weight: .semibold))
+                ZStack {
+                    Circle()
+                        .fill(Theme.accentFaint)
+                        .frame(width: 44, height: 44)
+
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(Theme.accent)
+                }
+
+                Text("Dino Copilot")
+                    .font(Theme.font(size: 16, weight: .semibold))
                     .foregroundStyle(Theme.ink)
 
                 Text("\(vault.activeProvider.displayName) · \(vault.selectedModel)")
@@ -208,107 +217,60 @@ struct AutopilotRailView: View {
                             Circle()
                                 .fill(Self.alertCoral)
                                 .frame(width: 5, height: 5)
-                            Text("Set \(vault.activeProvider.displayName) key")
+                            Text("Configure \(vault.activeProvider.displayName) key")
                                 .font(Theme.font(size: 11, weight: .medium))
                                 .foregroundStyle(Self.alertCoral)
                         }
-                        .padding(.horizontal, 9)
+                        .padding(.horizontal, 10)
                         .padding(.vertical, 4)
                         .background(Self.alertCoral.opacity(0.12), in: Capsule())
                     }
                     .buttonStyle(.plain)
-                } else if let site = store.activeTab?.url.map({ WebAddress.site(of: $0) }),
-                          !site.isEmpty && site != "about:blank" {
-                    Text(site)
-                        .font(Theme.font(size: 11))
-                        .foregroundStyle(Theme.muted)
-                        .lineLimit(1)
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 3)
-                        .background(Theme.page, in: Capsule())
-                        .overlay(Capsule().strokeBorder(Theme.border, lineWidth: 1))
+                    .padding(.top, 4)
                 }
             }
 
-            VStack(spacing: 4) {
+            // Minimal, clean suggestion pills
+            HStack(spacing: 8) {
                 let isBlank = store.activeTab?.isBlank ?? true
                 if isBlank {
-                    actionRow(
-                        index: 0,
-                        icon: "magnifyingglass",
-                        title: "Search the web",
-                        prompt: "Open DuckDuckGo and search for "
-                    )
-                    actionRow(
-                        index: 1,
-                        icon: "arrow.up.right",
-                        title: "Navigate to site",
-                        prompt: "Navigate to "
-                    )
+                    suggestionChip(title: "Search web", prompt: "Search the web for ", isTemplate: true)
+                    suggestionChip(title: "Navigate", prompt: "Navigate to ", isTemplate: true)
                 } else {
-                    actionRow(
-                        index: 0,
-                        icon: "doc.plaintext",
-                        title: "Summarize page",
-                        prompt: "Summarize the key information and takeaways on this page"
-                    )
-                    actionRow(
-                        index: 1,
-                        icon: "square.and.pencil",
-                        title: "Fill form fields",
-                        prompt: "Inspect the form fields on this page and help me fill them"
-                    )
-                    actionRow(
-                        index: 2,
-                        icon: "tablecells",
-                        title: "Extract data",
-                        prompt: "Extract the primary data or tables from this page into structured text"
-                    )
+                    suggestionChip(title: "Summarize", prompt: "Summarize the key information and takeaways on this page", isTemplate: false)
+                    suggestionChip(title: "Extract Table", prompt: "Extract the primary table or list from this page into structured text", isTemplate: false)
                 }
             }
-            .padding(.horizontal, 16)
+            .padding(.top, 4)
 
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func actionRow(index: Int, icon: String, title: String, prompt: String) -> some View {
+    private func suggestionChip(title: String, prompt: String, isTemplate: Bool = false) -> some View {
         Button(action: {
-            submitInstruction(prompt)
-        }) {
-            HStack(spacing: 10) {
-                Image(systemName: icon)
-                    .font(.system(size: 11.5, weight: .medium))
-                    .foregroundStyle(hoveredActionIndex == index ? Theme.accent : Theme.muted)
-                    .frame(width: 16)
-
-                Text(title)
-                    .font(Theme.font(size: 12.5))
-                    .foregroundStyle(Theme.ink)
-
-                Spacer()
-
-                Image(systemName: "arrow.right")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(hoveredActionIndex == index ? Theme.muted : Theme.faint)
+            if isTemplate {
+                instructionInput = prompt
+            } else {
+                if vault.activeProvider.requiresAPIKey && !vault.hasKey(for: vault.activeProvider) {
+                    instructionInput = prompt
+                    runtime.messages.append(AgentChatMessage(sender: .error, text: "API key required: Please configure your \(vault.activeProvider.displayName) API key in Settings (⌘,) to run Agent tasks."))
+                    return
+                }
+                submitInstruction(prompt)
             }
-            .padding(.horizontal, 11)
-            .frame(height: 34)
-            .background(
-                RoundedRectangle(cornerRadius: Theme.tabRadius, style: .continuous)
-                    .fill(hoveredActionIndex == index ? Theme.surfaceHover : Theme.page)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.tabRadius, style: .continuous)
-                    .strokeBorder(Theme.border, lineWidth: 1)
-            )
-            .contentShape(Rectangle())
+        }) {
+            Text(title)
+                .font(Theme.font(size: 11.5, weight: .medium))
+                .foregroundStyle(Theme.muted)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Theme.surfaceHover, in: Capsule())
+                .overlay(Capsule().strokeBorder(Theme.border, lineWidth: 1))
+                .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .onHover { isHovered in
-            hoveredActionIndex = isHovered ? index : nil
-        }
     }
 
     // MARK: - Conversation Feed
@@ -439,23 +401,16 @@ struct AutopilotRailView: View {
 
     private func userChatBubble(message: AgentChatMessage) -> some View {
         HStack(alignment: .top, spacing: 6) {
-            Spacer(minLength: 28)
-
-            CopyButton(text: message.text)
-                .padding(.top, 4)
+            Spacer(minLength: 32)
 
             Text(message.text)
                 .font(Theme.font(size: 12.5))
                 .foregroundStyle(Theme.ink)
-                .padding(.horizontal, 11)
-                .padding(.vertical, 7)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
                 .background(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .fill(Theme.surfaceHover)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .strokeBorder(Theme.border, lineWidth: 1)
                 )
                 .textSelection(.enabled)
         }
@@ -466,18 +421,16 @@ struct AutopilotRailView: View {
             Text(message.text)
                 .font(Theme.font(size: 12.5))
                 .foregroundStyle(Theme.ink)
-                .lineSpacing(3)
+                .lineSpacing(3.5)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
-
-            CopyButton(text: message.text)
         }
-        .padding(10)
-        .background(Theme.page, in: RoundedRectangle(cornerRadius: Theme.tabRadius, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.tabRadius, style: .continuous)
-                .strokeBorder(Theme.border, lineWidth: 1)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Theme.page)
         )
     }
 
@@ -574,7 +527,7 @@ struct AutopilotRailView: View {
 
     private var bottomComposerBar: some View {
         HStack(spacing: 8) {
-            TextField("Ask Agent…", text: $instructionInput)
+            TextField("Ask Agent to browse, search, or summarize…", text: $instructionInput)
                 .textFieldStyle(.plain)
                 .font(Theme.font(size: 12.5))
                 .foregroundStyle(Theme.ink)
@@ -590,10 +543,10 @@ struct AutopilotRailView: View {
                     ZStack {
                         Circle()
                             .fill(Self.alertCoral)
-                            .frame(width: 22, height: 22)
+                            .frame(width: 24, height: 24)
 
                         Image(systemName: "stop.fill")
-                            .font(.system(size: 8, weight: .bold))
+                            .font(.system(size: 8.5, weight: .bold))
                             .foregroundStyle(Theme.frame)
                     }
                 }
@@ -607,10 +560,10 @@ struct AutopilotRailView: View {
                     ZStack {
                         Circle()
                             .fill(canSend ? Theme.accent : Theme.surfaceActive)
-                            .frame(width: 22, height: 22)
+                            .frame(width: 24, height: 24)
 
                         Image(systemName: "arrow.up")
-                            .font(.system(size: 9.5, weight: .bold))
+                            .font(.system(size: 10, weight: .bold))
                             .foregroundStyle(canSend ? Theme.frame : Theme.muted)
                     }
                 }
@@ -619,14 +572,14 @@ struct AutopilotRailView: View {
                 .help("Send")
             }
         }
-        .padding(.horizontal, 11)
+        .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(
-            RoundedRectangle(cornerRadius: Theme.tabRadius, style: .continuous)
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(Theme.page)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: Theme.tabRadius, style: .continuous)
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .strokeBorder(Theme.border, lineWidth: 1)
         )
         .padding(.horizontal, 10)
@@ -647,7 +600,7 @@ struct AutopilotRailView: View {
         }
 
         if vault.activeProvider.requiresAPIKey && !vault.hasKey(for: vault.activeProvider) {
-            store.openSettings(section: "Agent")
+            runtime.messages.append(AgentChatMessage(sender: .error, text: "API key required: Please configure your \(vault.activeProvider.displayName) API key in Settings (⌘,) to run Agent tasks."))
             return
         }
 
