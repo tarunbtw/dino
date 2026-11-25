@@ -237,7 +237,7 @@ enum ExtensionShims {
 
     static func answer(_ message: Any, from context: WKWebExtensionContext, manager: ExtensionManager) async throws -> Any? {
         guard let body = message as? [String: Any], let api = body["api"] as? String else {
-            return ["error": "Not a Dino message"]
+            return ["value": NSNull()]
         }
         let args = body["args"] as? [Any] ?? []
         do {
@@ -442,6 +442,12 @@ enum ExtensionShims {
             let path = first as? String ?? ""
             popups[id, default: [:]]["*"] = path
             return nil
+        case "action.getBadgeText":
+            return ""
+        case "action.getBadgeBackgroundColor":
+            return [0, 0, 0, 0]
+        case "action.getTitle":
+            return context.webExtension.displayName ?? ""
 
         // MARK: permissions
         case "permissions.granted":
@@ -555,6 +561,16 @@ enum ExtensionShims {
             return false
         case "proxy.settings":
             return ["mode": "system"]
+
+        // MARK: declarativeNetRequest
+        case _ where api.hasPrefix("declarativeNetRequest."):
+            if api.hasSuffix("getDynamicRules") || api.hasSuffix("getSessionRules") {
+                return []
+            }
+            if api.hasSuffix("getMatchedRules") {
+                return ["rulesMatchedInfo": []]
+            }
+            return nil
 
         // MARK: bookmarks & history & other stubs
         case _ where api.hasPrefix("bookmarks."):
