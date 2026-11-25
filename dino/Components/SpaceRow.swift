@@ -8,37 +8,6 @@
 import SwiftUI
 import AppKit
 
-/// Deterministic Blobatar character avatar tinted to a Space's configured color hue.
-struct BlobatarAvatar: View {
-    let seed: String
-    let colorHex: String
-    var size: CGFloat = 20
-    var animated: Bool = false
-
-    private var derivedHue: Double? {
-        let clean = colorHex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
-        guard let val = UInt32(clean, radix: 16) else { return nil }
-        let nsColor = NSColor(hex: val).usingColorSpace(.sRGB) ?? NSColor(hex: val)
-        var hue: CGFloat = 0
-        var sat: CGFloat = 0
-        var bri: CGFloat = 0
-        var alpha: CGFloat = 0
-        nsColor.getHue(&hue, saturation: &sat, brightness: &bri, alpha: &alpha)
-        return sat >= 0.08 ? Double(hue * 360.0) : nil
-    }
-
-    var body: some View {
-        BlobatarView(
-            seed: seed,
-            hue: derivedHue,
-            size: Double(size),
-            background: false,
-            animation: animated ? .always : .hover
-        )
-        .frame(width: size, height: size)
-    }
-}
-
 struct SpaceRow: View {
     @ObservedObject var store: BrowserStore
     @State private var isHovering = false
