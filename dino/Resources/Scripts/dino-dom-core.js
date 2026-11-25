@@ -2130,6 +2130,10 @@
                             var rectC = el.getBoundingClientRect ? el.getBoundingClientRect() : { left: 0, top: 0, width: 0, height: 0 };
                             var cxC = Math.round(rectC.left + (rectC.width ? rectC.width / 2 : 0));
                             var cyC = Math.round(rectC.top + (rectC.height ? rectC.height / 2 : 0));
+                            if (actionObj.x !== undefined && actionObj.y !== undefined) {
+                                cxC = Math.round(rectC.left + actionObj.x);
+                                cyC = Math.round(rectC.top + actionObj.y);
+                            }
 
                             // Occlusion hit-testing: unless force: true, clicks hit what is physically on top
                             if (!actionObj.force) {
@@ -2189,28 +2193,30 @@
                                 button: 0,
                                 buttons: 0
                             });
+                            var clickEvt = new elWin.MouseEvent('click', {
+                                bubbles: true,
+                                cancelable: true,
+                                view: elWin,
+                                clientX: cxC,
+                                clientY: cyC,
+                                screenX: cxC,
+                                screenY: cyC,
+                                button: 0,
+                                buttons: 0
+                            });
 
                             targetToClick.dispatchEvent(pdown);
                             targetToClick.dispatchEvent(mdown);
                             targetToClick.dispatchEvent(pup);
                             targetToClick.dispatchEvent(mup);
+                            targetToClick.dispatchEvent(clickEvt);
 
-                            // Native click triggers standard activation behavior (checkboxes, buttons, navigation)
-                            try {
-                                targetToClick.click();
-                            } catch(e) {
-                                targetToClick.dispatchEvent(new elWin.MouseEvent('click', {
-                                    bubbles: true,
-                                    cancelable: true,
-                                    view: elWin,
-                                    clientX: cxC,
-                                    clientY: cyC,
-                                    screenX: cxC,
-                                    screenY: cyC,
-                                    button: 0,
-                                    buttons: 0
-                                }));
+                            var isStandardClickTarget = (targetToClick.tagName === 'BUTTON' || targetToClick.tagName === 'A' || targetToClick.tagName === 'INPUT');
+                            if (isStandardClickTarget && actionObj.x === undefined && actionObj.y === undefined) {
+                                try { targetToClick.click(); } catch(e) {}
                             }
+
+                            if (this.pulseVirtualCursor) this.pulseVirtualCursor(cxC, cyC);
 
                             if (wasObscured) {
                                 return {
@@ -2236,8 +2242,16 @@
                         } else if (actionObj.x !== undefined && actionObj.y !== undefined) {
                             var hit = document.elementFromPoint(actionObj.x, actionObj.y);
                             if (hit) {
-                                hit.click();
-                                return { success: true, message: 'Clicked coordinates (' + actionObj.x + ', ' + actionObj.y + ')' };
+                                var hitDoc = hit.ownerDocument || document;
+                                var hitWin = hitDoc.defaultView || window;
+                                var pInit = { bubbles: true, cancelable: true, view: hitWin, clientX: actionObj.x, clientY: actionObj.y, screenX: actionObj.x, screenY: actionObj.y, button: 0, buttons: 1, pointerId: 1, pointerType: 'mouse', isPrimary: true };
+                                hit.dispatchEvent(new hitWin.PointerEvent('pointerdown', pInit));
+                                hit.dispatchEvent(new hitWin.MouseEvent('mousedown', pInit));
+                                hit.dispatchEvent(new hitWin.PointerEvent('pointerup', Object.assign({}, pInit, { buttons: 0 })));
+                                hit.dispatchEvent(new hitWin.MouseEvent('mouseup', Object.assign({}, pInit, { buttons: 0 })));
+                                hit.dispatchEvent(new hitWin.MouseEvent('click', Object.assign({}, pInit, { buttons: 0 })));
+                                if (this.pulseVirtualCursor) this.pulseVirtualCursor(actionObj.x, actionObj.y);
+                                return { success: true, message: 'Clicked coordinates (' + actionObj.x + ', ' + actionObj.y + ')', centerCoordinates: { x: actionObj.x, y: actionObj.y } };
                             }
                             return { success: false, code: 'ELEMENT_NOT_FOUND', message: 'No element at coordinates (' + actionObj.x + ', ' + actionObj.y + ')' };
                         }
@@ -2253,9 +2267,13 @@
                                 try { elWinD.frameElement.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch(e) {}
                             }
                             el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-                            var rectD = el.getBoundingClientRect();
-                            var cxD = rectD.left + rectD.width / 2;
-                            var cyD = rectD.top + rectD.height / 2;
+                            var rectD = el.getBoundingClientRect ? el.getBoundingClientRect() : { left: 0, top: 0, width: 0, height: 0 };
+                            var cxD = Math.round(rectD.left + (rectD.width ? rectD.width / 2 : 0));
+                            var cyD = Math.round(rectD.top + (rectD.height ? rectD.height / 2 : 0));
+                            if (actionObj.x !== undefined && actionObj.y !== undefined) {
+                                cxD = Math.round(rectD.left + actionObj.x);
+                                cyD = Math.round(rectD.top + actionObj.y);
+                            }
 
                             var targetToDbl = el;
                             var hitTopD = elDocD.elementFromPoint(cxD, cyD);
@@ -2379,16 +2397,35 @@
                         return { success: false, code: 'MISSING_TARGET', message: 'No target element or coordinates specified for right-click action' };
 
                     case 'hover':
-                        if (!el) return { success: false, code: 'MISSING_TARGET', message: 'No target element for hover action' };
+                        if (!el && actionObj.x !== undefined && actionObj.y !== undefined) {
+                            el = document.elementFromPoint(actionObj.x, actionObj.y);
+                        }
+                        if (!el) {
+                            if (actionObj.x !== undefined && actionObj.y !== undefined) {
+                                if (this.updateVirtualCursor) this.updateVirtualCursor(actionObj.x, actionObj.y);
+                                return {
+                                    success: true,
+                                    message: 'Hovered at (' + actionObj.x + ', ' + actionObj.y + ')',
+                                    centerCoordinates: { x: actionObj.x, y: actionObj.y }
+                                };
+                            }
+                            return { success: false, code: 'MISSING_TARGET', message: 'No target element or coordinates for hover action' };
+                        }
                         if (el.ownerDocument && el.ownerDocument !== document && el.ownerDocument.defaultView && el.ownerDocument.defaultView.frameElement) {
                             try { el.ownerDocument.defaultView.frameElement.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch(e) {}
                         }
-                        el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+                        if (actionObj.x === undefined && actionObj.y === undefined) {
+                            el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+                        }
                         var elDocH = el.ownerDocument || document;
                         var elWinH = elDocH.defaultView || window;
                         var rH = el.getBoundingClientRect ? el.getBoundingClientRect() : { left: 0, top: 0, width: 0, height: 0 };
-                        var cxH = Math.round(rH.left + rH.width / 2);
-                        var cyH = Math.round(rH.top + rH.height / 2);
+                        var cxH = Math.round(rH.left + (rH.width ? rH.width / 2 : 0));
+                        var cyH = Math.round(rH.top + (rH.height ? rH.height / 2 : 0));
+                        if (actionObj.x !== undefined && actionObj.y !== undefined) {
+                            cxH = (targetId && rH && (rH.width > 0 || rH.height > 0)) ? Math.round(rH.left + actionObj.x) : Math.round(actionObj.x);
+                            cyH = (targetId && rH && (rH.width > 0 || rH.height > 0)) ? Math.round(rH.top + actionObj.y) : Math.round(actionObj.y);
+                        }
                         var pH = { bubbles: true, cancelable: true, view: elWinH, clientX: cxH, clientY: cyH, screenX: cxH, screenY: cyH, pointerId: 1, pointerType: 'mouse', isPrimary: true };
                         var eH = { bubbles: false, cancelable: false, view: elWinH, clientX: cxH, clientY: cyH, screenX: cxH, screenY: cyH, pointerId: 1, pointerType: 'mouse', isPrimary: true };
                         el.dispatchEvent(new elWinH.PointerEvent('pointerover', pH));
@@ -2399,10 +2436,11 @@
                         el.dispatchEvent(new elWinH.MouseEvent('mousemove', pH));
 
                         this.emulateHover(el, cxH, cyH);
+                        if (this.updateVirtualCursor) this.updateVirtualCursor(cxH, cyH);
 
                         return {
                             success: true,
-                            message: 'Hovered over ' + targetId,
+                            message: targetId ? ('Hovered over ' + targetId) : ('Hovered at (' + cxH + ', ' + cyH + ')'),
                             elementId: targetId,
                             centerCoordinates: { x: cxH, y: cyH }
                         };

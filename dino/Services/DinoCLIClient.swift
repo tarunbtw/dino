@@ -129,7 +129,9 @@ enum DinoCLIClient {
         let cmd = command.lowercased()
         switch cmd {
         case "click", "dblclick", "double-click":
-            return ["--tab", "--wait", "-w", "--port", "--socket"]
+            return ["--tab", "--wait", "-w", "--port", "--socket", "--coords", "-c", "--offset", "--offset-coords", "--offset-x", "--offset-y", "--x", "-x", "--y", "-y"]
+        case "hover":
+            return ["--tab", "--wait", "-w", "--port", "--socket", "--coords", "-c", "--offset", "--offset-coords", "--offset-x", "--offset-y", "--x", "-x", "--y", "-y"]
         case "snap", "snapshot":
             return ["--tab", "--target", "-t", "--role", "-r", "--text", "--depth", "--limit", "--offset", "--port", "--socket"]
         case "diff":
@@ -1503,11 +1505,13 @@ enum DinoCLIClient {
         let actionType = isRight ? "right_click" : (isDouble ? "dblclick" : "click")
 
         var bodyObj: [String: Any] = [
+            "action": actionType,
             "type": actionType,
             "native": isNative
         ]
         if let r = ref, !r.isEmpty {
             bodyObj["elementId"] = r
+            bodyObj["target"] = r
         }
         if let x = posX { bodyObj["x"] = x }
         if let y = posY { bodyObj["y"] = y }
@@ -1688,11 +1692,13 @@ enum DinoCLIClient {
 
         let isNative = args.boolFlag(["--native"])
         var bodyObj: [String: Any] = [
+            "action": "hover",
             "type": "hover",
             "native": isNative
         ]
         if let r = ref, !r.isEmpty {
             bodyObj["elementId"] = r
+            bodyObj["target"] = r
         }
         if let x = posX { bodyObj["x"] = x }
         if let y = posY { bodyObj["y"] = y }
