@@ -119,7 +119,7 @@ extension Tab: WKScriptMessageHandler {
                         updatedAt: Date.now()
                     };
                     """
-                    self.webView.evaluateJavaScript(updateScript, completionHandler: nil)
+                    self.webView.evaluateJavaScript(updateScript, in: nil, in: .defaultClient, completionHandler: nil)
                 }
             }
         } else if name == "dinoLinkHover", let dict = body as? [String: Any] {
