@@ -232,6 +232,16 @@ final class Tab: NSObject, Identifiable, ObservableObject {
     @Published var lastNavigationStartTime: Date? = nil
     @Published var lastNavigationFinishTime: Date? = nil
     @Published var lastActionTime: Date? = nil
+    
+    // MARK: - Automation Driver
+    private var _driver: TabAutomationDriver?
+    var driver: TabAutomationDriver {
+        if let d = _driver { return d }
+        let d = TabAutomationDriver(tab: self)
+        _driver = d
+        return d
+    }
+    
     var allowNextFileNavigation: Bool = false
     var currentNavigation: WKNavigation? = nil
     var blockedURLPatterns: [String] = []

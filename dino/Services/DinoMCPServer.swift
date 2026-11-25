@@ -452,23 +452,22 @@ final class DinoMCPServer {
             return
         }
 
-        callDinoHTTP(method: "GET", path: endpoint) { data, _, error in
-            if let error = error {
-                sendError(id: id, code: -32603, message: error.localizedDescription)
-                return
-            }
-            let text = data.flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-            let result: [String: Any] = [
-                "contents": [
-                    [
-                        "uri": uri,
-                        "mimeType": "application/json",
-                        "text": text
-                    ]
+        let (data, _, error) = callDinoTransport(method: "GET", path: endpoint)
+        if let error = error {
+            sendError(id: id, code: -32603, message: error)
+            return
+        }
+        let text = data.flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+        let result: [String: Any] = [
+            "contents": [
+                [
+                    "uri": uri,
+                    "mimeType": "application/json",
+                    "text": text
                 ]
             ]
-            sendResponse(id: id, result: result)
-        }
+        ]
+        sendResponse(id: id, result: result)
     }
 
     private static func handlePromptGet(name: String, args: [String: String], id: Any?) {
@@ -503,75 +502,50 @@ final class DinoMCPServer {
         sendResponse(id: id, result: result)
     }
 
-    private static func callDinoHTTP(method: String, path: String, body: [String: Any]? = nil, completion: @escaping (Data?, HTTPURLResponse?, Error?) -> Void) {
-        guard let url = URL(string: "http://127.0.0.1:\(port)\(path)") else {
-            completion(nil, nil, NSError(domain: "DinoMCP", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid URL"]))
-            return
+    // MARK: - Unified IPC Transport (Local POSIX Unix Socket with Loopback HTTP Fallback)
+
+    private static func callDinoTransport(method: String, path: String, body: [String: Any]? = nil) -> (Data?, String?, String?) {
+        let bodyData = body.flatMap { try? JSONSerialization.data(withJSONObject: $0) }
+        let sock = DinoUnixSocketBridge.defaultSocketPath
+
+        // 1. First attempt fast local POSIX AF_UNIX domain socket (~/.dino/dino.sock)
+        if let resp = DinoCLIClient.sendUnixSocketRequest(method: method, path: path, body: bodyData, socketPath: sock, timeoutSeconds: 30) {
+            let contentType = resp.headers["content-type"] ?? resp.headers["Content-Type"]
+            return (resp.body, contentType, nil)
         }
 
-        var request = URLRequest(url: url)
-        request.httpMethod = method
-        request.timeoutInterval = 35.0
-
-        if let token = loadToken() {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        // 2. Loopback HTTP fallback (:9222)
+        let p = UInt16(port)
+        if let resp = DinoCLIClient.sendHTTPRequest(method: method, path: path, body: bodyData, port: p, timeoutSeconds: 30) {
+            let contentType = resp.headers["content-type"] ?? resp.headers["Content-Type"]
+            return (resp.body, contentType, nil)
         }
 
-        if let body = body {
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        }
-
-        var resultData: Data? = nil
-        var resultResponse: HTTPURLResponse? = nil
-        var resultError: Error? = nil
-
-        let semaphore = DispatchSemaphore(value: 0)
-        let task = URLSession.shared.dataTask(with: request) { data, response, error in
-            resultData = data
-            resultResponse = response as? HTTPURLResponse
-            resultError = error
-            semaphore.signal()
-        }
-        task.resume()
-        _ = semaphore.wait(timeout: .now() + 35.0)
-
-        completion(resultData, resultResponse, resultError)
+        return (nil, nil, "Could not connect to Dino browser engine at \(sock) or http://127.0.0.1:\(port). Dino browser is not currently running. Please launch Dino to enable automation.")
     }
 
     private static func callDino(method: String, path: String, body: [String: Any]? = nil, completion: @escaping (Any?, String?) -> Void) {
-        callDinoHTTP(method: method, path: path, body: body) { data, _, error in
-            if let error = error as NSError? {
-                if error.domain == NSURLErrorDomain && error.code == NSURLErrorCannotConnectToHost {
-                    completion(nil, "Could not connect to Dino browser engine at http://127.0.0.1:\(port) (ECONNREFUSED). Dino browser is not currently running. Please launch Dino to enable automation.")
-                } else {
-                    completion(nil, "Network error: \(error.localizedDescription)")
-                }
-                return
-            }
-            guard let data = data else {
-                completion(nil, "Empty response from Dino")
-                return
-            }
-            if let json = try? JSONSerialization.jsonObject(with: data) {
-                completion(json, nil)
-            } else if let text = String(data: data, encoding: .utf8) {
-                completion(text, nil)
-            } else {
-                completion(nil, "Unparseable response")
-            }
+        let (data, _, error) = callDinoTransport(method: method, path: path, body: body)
+        if let error = error {
+            completion(nil, error)
+            return
+        }
+        guard let data = data else {
+            completion(nil, "Empty response from Dino")
+            return
+        }
+        if let json = try? JSONSerialization.jsonObject(with: data) {
+            completion(json, nil)
+        } else if let text = String(data: data, encoding: .utf8) {
+            completion(text, nil)
+        } else {
+            completion(nil, "Unparseable response")
         }
     }
 
     private static func callDinoRaw(method: String, path: String, completion: @escaping (Data?, String?, String?) -> Void) {
-        callDinoHTTP(method: method, path: path) { data, response, error in
-            if let error = error {
-                completion(nil, nil, error.localizedDescription)
-                return
-            }
-            let contentType = response?.value(forHTTPHeaderField: "Content-Type")
-            completion(data, contentType, nil)
-        }
+        let (data, contentType, error) = callDinoTransport(method: method, path: path, body: nil)
+        completion(data, contentType, error)
     }
 
     private static func respondTool(id: Any?, res: Any?, error: String?) {

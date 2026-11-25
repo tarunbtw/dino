@@ -370,7 +370,7 @@ enum DinoCLIClient {
         return parseHTTPResponse(data: respData)
     }
 
-    private static func sendHTTPRequest(
+    static func sendHTTPRequest(
         method: String,
         path: String,
         body: Data?,
