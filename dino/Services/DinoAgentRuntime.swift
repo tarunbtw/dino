@@ -400,7 +400,11 @@ final class DinoAgentRuntime: ObservableObject {
 
                 appendLog(step: stepCount, thought: stepResponse.thought, action: "Clicking [\(ref)]", isSuccess: true)
                 let action = DinoAction(action: "click", target: ref)
-                let result = (try? await drivingTab.performAction(action)) ?? DinoActionResult(success: false, message: "Execution error")
+                var result = (try? await drivingTab.performAction(action)) ?? DinoActionResult(success: false, message: "Execution error")
+                // Automatic hardware fallback if synthetic DOM click failed or was unhandled
+                if !result.success, let nativeRes = try? await drivingTab.driver.performNativeAction(action), nativeRes.success {
+                    result = nativeRes
+                }
                 if result.success {
                     history.append(["role": "user", "text": "Clicked element [\(ref)]."])
                 } else {
@@ -452,6 +456,29 @@ final class DinoAgentRuntime: ObservableObject {
                 history.append(["role": "user", "text": "Navigated to \(normalized)."])
                 try? await Task.sleep(nanoseconds: 1_200_000_000)
                 await drivingTab.waitForNavigationSettled(timeout: 2.5)
+
+            case "press_key", "key":
+                guard let key = (args["key"] as? String) ?? (args["name"] as? String) else { continue }
+                appendLog(step: stepCount, thought: stepResponse.thought, action: "Pressing key \(key)", isSuccess: true)
+                let action = DinoAction(action: "keypress", key: key)
+                _ = try? await drivingTab.performAction(action)
+                history.append(["role": "user", "text": "Pressed key \(key)."])
+                try? await Task.sleep(nanoseconds: 400_000_000)
+
+            case "hover":
+                guard let rawRef = args["ref"] as? String else { continue }
+                let ref = rawRef.trimmingCharacters(in: CharacterSet(charactersIn: "[] \t\r\n"))
+                appendLog(step: stepCount, thought: stepResponse.thought, action: "Hovering over [\(ref)]", isSuccess: true)
+                let action = DinoAction(action: "hover", target: ref)
+                _ = try? await drivingTab.performAction(action)
+                history.append(["role": "user", "text": "Hovered over [\(ref)]."])
+                try? await Task.sleep(nanoseconds: 500_000_000)
+
+            case "wait":
+                let sec = (args["seconds"] as? Double) ?? (args["duration"] as? Double) ?? 2.0
+                appendLog(step: stepCount, thought: stepResponse.thought, action: "Waiting \(sec)s for content to update", isSuccess: true)
+                try? await Task.sleep(nanoseconds: UInt64(min(sec, 10.0) * 1_000_000_000))
+                history.append(["role": "user", "text": "Waited \(sec)s."])
 
             default:
                 appendLog(step: stepCount, thought: stepResponse.thought, action: "Unknown tool: \(toolName)", isSuccess: false)
