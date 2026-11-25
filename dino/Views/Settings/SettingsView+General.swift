@@ -79,10 +79,10 @@ extension SettingsView {
                     backdropThumbnail
 
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Empty tab image")
+                        Text("Empty tab background")
                             .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(Theme.ink)
-                        Text(settings.customBackdropPath.isEmpty ? "Default" : "Custom (image or GIF)")
+                        Text(settings.customBackdropPath.isEmpty ? "Solid Theme (Default)" : "Custom Image / GIF")
                             .font(.system(size: 11))
                             .foregroundStyle(Theme.muted)
                     }
@@ -90,14 +90,14 @@ extension SettingsView {
                     Spacer()
 
                     if !settings.customBackdropPath.isEmpty {
-                        Button("Reset") {
+                        Button("Remove") {
                             settings.resetCustomBackdrop()
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
                     }
 
-                    Button("Choose…") {
+                    Button(settings.customBackdropPath.isEmpty ? "Choose Image…" : "Change…") {
                         pickCustomBackdrop()
                     }
                     .buttonStyle(.bordered)
@@ -246,10 +246,12 @@ extension SettingsView {
                     .id(customPath)
                     .aspectRatio(imgSize, contentMode: .fill)
             } else {
-                Image("DinoBackdrop")
-                    .resizable()
-                    .interpolation(.high)
-                    .aspectRatio(contentMode: .fill)
+                ZStack {
+                    Theme.page
+                    Image(systemName: "paintpalette")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Theme.muted)
+                }
             }
         }
         .frame(width: 64, height: 40)
