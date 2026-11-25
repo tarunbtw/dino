@@ -659,6 +659,9 @@
 
                     // 3. Resolve live top-level DOM node first (accurate geometry & isTextEditable)
                     var resolvedNode = (this.elements && this.elements[element] && this.isNodeConnected(this.elements[element]) ? this.elements[element] : null) || this.findInTree(document, element);
+                    if (!resolvedNode) {
+                        resolvedNode = this.reanchorElement(element);
+                    }
                     if (resolvedNode) {
                         element = resolvedNode;
                         this.lastInteractedElement = resolvedNode;
@@ -1332,6 +1335,10 @@
                         placeholder: el.placeholder || null,
                         ariaLabel: el.getAttribute('aria-label') || null,
                         testId: el.getAttribute('data-testid') || null,
+                        docY: Math.round(window.scrollY + rect.top),
+                        docX: Math.round(window.scrollX + rect.left),
+                        width: Math.round(rect.width),
+                        height: Math.round(rect.height),
                         ordinal: i
                     };
 
@@ -1737,6 +1744,7 @@
                     if (!item.inViewport) desc += ' (offscreen)';
                     desc += '>';
                     if (item.hasContextMenu) desc += ' (context-menu)';
+                    if (item.tag === 'canvas') desc += ' (interactive-canvas)';
                     if (item.isObscured) desc += ' (obscured)';
                     summaryLines.push(desc);
                 }
@@ -1765,6 +1773,35 @@
                     securityBoundary: { untrusted: true, origin: displayUrl },
                     tokenEstimate: tokenEst
                 };
+            },
+
+            // Re-anchors a virtualized or unmounted element by scrolling to its last known document offset
+            reanchorElement: function(targetId) {
+                if (!targetId) return null;
+                var sig = (this.elementSignatures && this.elementSignatures[targetId]) || null;
+                if (!sig || sig.docY === undefined) return null;
+
+                // 1. Scroll document to anchor position
+                var targetScrollY = Math.max(0, sig.docY - Math.round(window.innerHeight / 2));
+                window.scrollTo({ top: targetScrollY, behavior: 'instant' });
+
+                // 2. Allow synchronous layout / virtual list to register new scroll position
+                if (document.body) { void document.body.offsetHeight; }
+
+                // 3. Attempt to find the re-mounted live node
+                var el = this.elements && this.elements[targetId] && this.isNodeConnected(this.elements[targetId]) ? this.elements[targetId] : null;
+                if (!el) el = this.selfHealElement(targetId);
+                if (!el) {
+                    try { el = document.querySelector('[data-dino-id="' + CSS.escape(targetId) + '"]'); } catch(e) {}
+                }
+                if (el) {
+                    this.elements[targetId] = el;
+                    if (el.scrollIntoView) {
+                        try { el.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch(e) {}
+                    }
+                    return el;
+                }
+                return null;
             },
 
             // Resolves a replacement node for a stale reference when DOM changes occurred without intermediate snapshot

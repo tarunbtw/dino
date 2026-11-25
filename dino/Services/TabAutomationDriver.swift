@@ -498,19 +498,30 @@ final class TabAutomationDriver {
                let w = (rect["width"] as? NSNumber)?.doubleValue,
                let h = (rect["height"] as? NSNumber)?.doubleValue,
                (w > 0 || h > 0) {
-                targetPoint = CGPoint(x: x + w / 2.0, y: y + h / 2.0)
+                if let ax = action.x, let ay = action.y {
+                    targetPoint = CGPoint(x: x + ax, y: y + ay)
+                } else {
+                    targetPoint = CGPoint(x: x + w / 2.0, y: y + h / 2.0)
+                }
                 isTargetEditable = rect["isEditable"] as? Bool ?? false
                 targetTagName = (rect["tagName"] as? String ?? "").lowercased()
             } else {
+                let hasSignature = ((try? await evalIsolated("Boolean(window.__dino && window.__dino.elementSignatures && window.__dino.elementSignatures[\"\(escaped)\"])")) as? Bool) ?? false
                 let isRef = (target.range(of: "^(f[0-9]+:)?[e][0-9]+$", options: .regularExpression) != nil)
                 let isExplicitSelector = (action.selector != nil)
-                let code = isRef ? "STALE_REF" : (isExplicitSelector ? "SELECTOR_NOT_FOUND" : "ELEMENT_NOT_FOUND")
+                let code: String
                 let message: String
-                if isRef {
+                if hasSignature {
+                    code = "ELEMENT_UNMOUNTED"
+                    message = "Target element '\(target)' was unmounted or scrolled offscreen (virtual list). Use 'dino scroll to \(target)' or 'dino snap -v' to refresh viewport."
+                } else if isRef {
+                    code = "STALE_REF"
                     message = "Target element '\(target)' not found. Please re-snapshot."
                 } else if isExplicitSelector {
+                    code = "SELECTOR_NOT_FOUND"
                     message = "Target element matching selector '\(target)' not found in DOM."
                 } else {
+                    code = "ELEMENT_NOT_FOUND"
                     message = "Target element '\(target)' not found or has zero geometry in viewport."
                 }
                 return DinoActionResult(
@@ -520,9 +531,7 @@ final class TabAutomationDriver {
                     code: code
                 )
             }
-        }
-
-        if let ax = action.x, let ay = action.y {
+        } else if let ax = action.x, let ay = action.y {
             targetPoint = CGPoint(x: ax, y: ay)
         }
 

@@ -74,7 +74,8 @@ enum DinoCLIClient {
         "--element", "-e", "--world", "--port", "--socket", "--policy",
         "--press", "-p", "--wait", "-w", "--url", "--to-target", "--to-selector",
         "--to-x", "--to-y", "--output", "-o", "--pixels", "--modifiers", "--value",
-        "--state", "--response", "--timeout", "--name"
+        "--state", "--response", "--timeout", "--name", "--coords", "--offset",
+        "--offset-x", "--offset-y", "-x", "-y"
     ]
 
     private static let allowedCommandOptions: [String: Set<String>] = [
@@ -88,13 +89,13 @@ enum DinoCLIClient {
         "back": ["--wait", "-w", "--tab"],
         "forward": ["--wait", "-w", "--tab"],
         "reload": ["--wait", "-w", "--tab"],
-        "click": ["--native", "--right", "-r", "--middle", "--double", "--wait", "-w", "--tab"],
-        "dblclick": ["--native", "--wait", "-w", "--tab"],
-        "double-click": ["--native", "--wait", "-w", "--tab"],
+        "click": ["--native", "--right", "-r", "--middle", "--double", "--wait", "-w", "--tab", "--coords", "-c", "--offset", "--offset-x", "--offset-y", "-x", "-y", "--context-menu"],
+        "dblclick": ["--native", "--wait", "-w", "--tab", "--coords", "-c", "--offset", "--offset-x", "--offset-y", "-x", "-y"],
+        "double-click": ["--native", "--wait", "-w", "--tab", "--coords", "-c", "--offset", "--offset-x", "--offset-y", "-x", "-y"],
         "type": ["--press", "-p", "--press-enter", "--enter", "--return", "--submit", "--clear", "--native", "--wait", "-w", "--tab"],
         "press": ["--native", "--modifiers", "--wait", "-w", "--tab"],
-        "drag": ["--native", "--to-target", "--to-selector", "--to-x", "--to-y", "--wait", "-w", "--tab"],
-        "hover": ["--tab"],
+        "drag": ["--native", "--to-target", "--to-selector", "--to-x", "--to-y", "--wait", "-w", "--tab", "--coords", "-c"],
+        "hover": ["--tab", "--native", "--coords", "-c", "--offset", "--offset-x", "--offset-y", "-x", "-y"],
         "select": ["--text", "--value", "--wait", "-w", "--tab"],
         "scroll": ["--up", "--down", "--left", "--right", "--top", "--bottom", "--pixels", "--tab", "--native", "-n", "--target", "-t", "--selector", "-s", "--to"],
         "wait": ["--mode", "-m", "--duration", "--timeout", "--selector", "-s", "--target", "-t", "--url", "--text", "--state", "--tab"],
@@ -1477,8 +1478,22 @@ enum DinoCLIClient {
     }
 
     private static func handleClick(args: ParsedArgs, port: UInt16?, socketPath: String?, isDouble: Bool = false) {
-        guard let ref = args.positionals.first, !ref.isEmpty else {
-            emitError("dino click: element reference is required (e.g. 'dino click e5')")
+        var posX: Double? = args.stringOption(["--x", "-x"]).flatMap(Double.init)
+        var posY: Double? = args.stringOption(["--y", "-y"]).flatMap(Double.init)
+        if let coords = args.stringOption(["--coords", "-c"]) {
+            let parts = coords.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+            if parts.count == 2 { posX = parts[0]; posY = parts[1] }
+        }
+        if let offset = args.stringOption(["--offset", "--offset-coords"]) {
+            let parts = offset.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+            if parts.count == 2 { posX = parts[0]; posY = parts[1] }
+        }
+        if let ox = args.stringOption(["--offset-x"]).flatMap(Double.init) { posX = ox }
+        if let oy = args.stringOption(["--offset-y"]).flatMap(Double.init) { posY = oy }
+
+        let ref = args.positionals.first
+        guard (ref != nil && !ref!.isEmpty) || (posX != nil && posY != nil) else {
+            emitError("dino click: element reference or coordinates are required (e.g. 'dino click e5' or 'dino click --coords 300,400')")
             exit(1)
         }
 
@@ -1489,9 +1504,14 @@ enum DinoCLIClient {
 
         var bodyObj: [String: Any] = [
             "type": actionType,
-            "elementId": ref,
             "native": isNative
         ]
+        if let r = ref, !r.isEmpty {
+            bodyObj["elementId"] = r
+        }
+        if let x = posX { bodyObj["x"] = x }
+        if let y = posY { bodyObj["y"] = y }
+
         let tabArg = args.stringOption(["--tab"])
         let resolvedTid = tabArg.flatMap { resolveTabId($0, port: port, socketPath: socketPath) }
         if let tid = resolvedTid {
@@ -1521,9 +1541,15 @@ enum DinoCLIClient {
         if let obs = json["obscured"] as? Bool, obs {
             let interceptor = json["interceptedBy"] as? String
             let tag = interceptor != nil ? "<\(interceptor!)>" : "overlay"
-            desc += " \(ref) (warning: obscured, intercepted by \(tag))"
-        } else {
-            desc += " \(ref)"
+            desc += " \(ref ?? "") (warning: obscured, intercepted by \(tag))"
+        } else if let r = ref, !r.isEmpty {
+            if let x = posX, let y = posY {
+                desc += " \(r) offset (\(Int(x)), \(Int(y)))"
+            } else {
+                desc += " \(r)"
+            }
+        } else if let x = posX, let y = posY {
+            desc += " at (\(Int(x)), \(Int(y)))"
         }
         emitOutput(desc)
         exit(0)
@@ -1641,17 +1667,36 @@ enum DinoCLIClient {
     }
 
     private static func handleHover(args: ParsedArgs, port: UInt16?, socketPath: String?) {
-        guard let ref = args.positionals.first, !ref.isEmpty else {
-            emitError("dino hover: element reference required (e.g. 'dino hover e5')")
+        var posX: Double? = args.stringOption(["--x", "-x"]).flatMap(Double.init)
+        var posY: Double? = args.stringOption(["--y", "-y"]).flatMap(Double.init)
+        if let coords = args.stringOption(["--coords", "-c"]) {
+            let parts = coords.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+            if parts.count == 2 { posX = parts[0]; posY = parts[1] }
+        }
+        if let offset = args.stringOption(["--offset", "--offset-coords"]) {
+            let parts = offset.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+            if parts.count == 2 { posX = parts[0]; posY = parts[1] }
+        }
+        if let ox = args.stringOption(["--offset-x"]).flatMap(Double.init) { posX = ox }
+        if let oy = args.stringOption(["--offset-y"]).flatMap(Double.init) { posY = oy }
+
+        let ref = args.positionals.first
+        guard (ref != nil && !ref!.isEmpty) || (posX != nil && posY != nil) else {
+            emitError("dino hover: element reference or coordinates required (e.g. 'dino hover e5' or 'dino hover --coords 300,400')")
             exit(1)
         }
 
         let isNative = args.boolFlag(["--native"])
         var bodyObj: [String: Any] = [
             "type": "hover",
-            "elementId": ref,
             "native": isNative
         ]
+        if let r = ref, !r.isEmpty {
+            bodyObj["elementId"] = r
+        }
+        if let x = posX { bodyObj["x"] = x }
+        if let y = posY { bodyObj["y"] = y }
+
         if let tabArg = args.stringOption(["--tab"]),
            let tid = resolveTabId(tabArg, port: port, socketPath: socketPath) {
             bodyObj["tabId"] = tid
@@ -1665,7 +1710,17 @@ enum DinoCLIClient {
         let resp = request(method: "POST", path: "/action", body: bodyData, socketPath: socketPath, port: port)
         _ = validateActionResponse(resp, command: "hover")
 
-        emitOutput("Hovered \(ref)")
+        if let r = ref, !r.isEmpty {
+            if let x = posX, let y = posY {
+                emitOutput("Hovered \(r) offset (\(Int(x)), \(Int(y)))")
+            } else {
+                emitOutput("Hovered \(r)")
+            }
+        } else if let x = posX, let y = posY {
+            emitOutput("Hovered at (\(Int(x)), \(Int(y)))")
+        } else {
+            emitOutput("Hovered")
+        }
         exit(0)
     }
 
@@ -2708,9 +2763,22 @@ enum DinoCLIClient {
 
     private static func handleDownloads(args: ParsedArgs, port: UInt16?, socketPath: String?) {
         let sub = args.positionals.first?.lowercased()
+        if sub == "dir" || sub == "path" {
+            let resp = request(method: "GET", path: "/downloads", socketPath: socketPath, port: port)
+            if let dir = resp.jsonObject?["downloadsDirectory"] as? String {
+                emitOutput(dir)
+            } else {
+                emitOutput("~/.dino/downloads")
+            }
+            exit(0)
+        }
+
         if sub == "wait" || args.boolFlag(["--wait", "-w"]) {
-            let timeout = args.stringOption(["--timeout", "-t"]).flatMap(Int.init) ?? 10000
-            let bodyObj = ["timeout": timeout]
+            let timeout = args.stringOption(["--timeout", "-t"]).flatMap(Int.init) ?? 15000
+            var bodyObj: [String: Any] = ["timeoutMs": timeout]
+            if let fn = args.stringOption(["--filename", "-f"]) ?? (args.positionals.count > 1 ? args.positionals[1] : nil) {
+                bodyObj["filename"] = fn
+            }
             let bodyData = try? JSONSerialization.data(withJSONObject: bodyObj)
             let waitTimeoutSecs = max(5, (timeout / 1000) + 5)
             let resp = request(method: "POST", path: "/downloads/wait", body: bodyData, timeoutSeconds: waitTimeoutSecs, socketPath: socketPath, port: port)
