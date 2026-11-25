@@ -10,7 +10,7 @@ import Network
 import WebKit
 
 extension DinoAgentServer {
-    func handleTabsRoute(method: String, cleanPath: String, bodyData: Data?, queryItem: ((String) -> String?)? = nil, connection: NWConnection, origin: String?) -> Bool {
+    func handleTabsRoute(method: String, cleanPath: String, bodyData: Data?, queryItem: ((String) -> String?)? = nil, connection: NWConnection, origin: String?) async -> Bool {
         guard let store = self.store else { return false }
 
         let segments = cleanPath.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
@@ -102,6 +102,11 @@ extension DinoAgentServer {
 
             let newTab = store.newTab(url: targetURL, isIncognito: isIncognito, isGhost: isGhost, select: select)
             DinoCDPSessionManager.shared.notifyTargetCreated(tab: newTab, serverPort: self.port)
+            if targetURL != nil {
+                // ponytail: Deterministically await initial navigation settle so agents can immediately
+                // snapshot or evaluate scripts without triggering NAVIGATION_BUSY race conditions.
+                _ = await newTab.driver.waitForNavigationSettled(timeout: 8.0)
+            }
             let newTitle = (newTab.webView.title?.isEmpty == false ? newTab.webView.title : newTab.title) ?? ""
             let newURL = (newTab.webView.url?.absoluteString ?? newTab.url?.absoluteString) ?? ""
             sendJSON(connection: connection, object: [

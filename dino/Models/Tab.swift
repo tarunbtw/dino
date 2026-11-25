@@ -339,7 +339,16 @@ final class Tab: NSObject, Identifiable, ObservableObject {
 
         self.isBlank = (initialURL == nil || initialURL?.absoluteString == "about:blank")
         
-        let effectiveConfig = configuration ?? ExtensionManager.shared.configuration(for: initialURL) ?? WebKitPool.makeConfiguration(profile: effectiveProfile, isIncognito: isIncognito)
+        let baseConfig = configuration ?? ExtensionManager.shared.configuration(for: initialURL) ?? WebKitPool.makeConfiguration(profile: effectiveProfile, isIncognito: isIncognito)
+        // ponytail: Clone WKWebViewConfiguration and give this tab a dedicated WKUserContentController
+        // so child/popup tabs never mutate or steal script message handlers from their parent tab.
+        let effectiveConfig = (baseConfig.copy() as? WKWebViewConfiguration) ?? baseConfig
+        let ucc = WKUserContentController()
+        for script in baseConfig.userContentController.userScripts {
+            ucc.addUserScript(script)
+        }
+        effectiveConfig.userContentController = ucc
+
         let webView = BrowserWebView(frame: NSRect(x: 0, y: 0, width: 1180, height: 730), configuration: effectiveConfig)
         webView.appearance = SettingsStore.shared.currentAppearance
         webView.customUserAgent = WebKitPool.customUserAgent
@@ -361,16 +370,6 @@ final class Tab: NSObject, Identifiable, ObservableObject {
         self.webView.navigationDelegate = self
         self.webView.uiDelegate = self
         
-        let ucc = effectiveConfig.userContentController
-        ucc.removeScriptMessageHandler(forName: "dinoConsole")
-        ucc.removeScriptMessageHandler(forName: "dinoInspect")
-        ucc.removeScriptMessageHandler(forName: "dinoNetwork", contentWorld: .page)
-        ucc.removeScriptMessageHandler(forName: "dinoNetwork", contentWorld: .defaultClient)
-        ucc.removeScriptMessageHandler(forName: "dinoZapper")
-        ucc.removeScriptMessageHandler(forName: "dinoFrameBridge")
-        ucc.removeScriptMessageHandler(forName: "dinoLinkHover")
-        ucc.removeScriptMessageHandler(forName: "dinoAutofill")
-        ucc.removeScriptMessageHandler(forName: "dinoMedia")
         ucc.add(WeakScriptMessageHandler(delegate: self), name: "dinoConsole")
         ucc.add(WeakScriptMessageHandler(delegate: self), name: "dinoInspect")
         ucc.add(WeakScriptMessageHandler(delegate: self), contentWorld: .page, name: "dinoNetwork")
@@ -422,22 +421,22 @@ final class Tab: NSObject, Identifiable, ObservableObject {
 
     // MARK: - Tab Tier Virtualization (Hot / Warm / Cold)
 
-    /// Suspends an idle background tab, releasing its GPU pipeline and WebContent memory.
+    /// Marks an idle background tab as cold, preserving its live DOM and JavaScript state.
     func dehydrateToCold() {
-        guard tier != .cold, !isLoading, let _ = self.url, !isBlank, !isInternalPage else { return }
+        guard tier != .cold, !isLoading, self.url != nil, !isBlank, !isInternalPage else { return }
         tier = .cold
-        _ = webView.load(URLRequest(url: URL(string: "about:blank")!))
+        // ponytail: Do not navigate to about:blank. WebKit automatically suspends idle
+        // background WebContent processes without destroying DOM state, form inputs, or SPA sessions.
     }
 
-    /// Rehydrates a cold tab back into full GPU execution.
+    /// Rehydrates a cold tab back into the active foreground tier.
     func hydrateToHot() {
         lastActiveTime = Date()
-        guard tier == .cold, let u = self.url, !isBlank, !isInternalPage else {
-            tier = .hot
-            return
-        }
         tier = .hot
-        load(url: u)
+        // If webView never completed initial load (e.g. restored from lazy session), trigger load now.
+        if webView.url == nil, let u = self.url, !isBlank, !isInternalPage {
+            load(url: u)
+        }
     }
 
     // MARK: - Swipe Gesture Coordinator

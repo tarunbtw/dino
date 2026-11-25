@@ -184,14 +184,20 @@ final class DinoMCPServer {
         case "tools/call":
             let toolName = params["name"] as? String ?? ""
             let toolArgs = params["arguments"] as? [String: Any] ?? [:]
-            executeTool(name: toolName, args: toolArgs, id: id)
+            // ponytail: Dispatch tool execution onto background thread so stdio message loop
+            // remains non-blocking and instantly handles pings and cancellations.
+            DispatchQueue.global(qos: .userInitiated).async {
+                executeTool(name: toolName, args: toolArgs, id: id)
+            }
 
         case "resources/list":
             sendResponse(id: id, result: ["resources": resourcesManifest])
 
         case "resources/read":
             let uri = params["uri"] as? String ?? ""
-            handleResourceRead(uri: uri, id: id)
+            DispatchQueue.global(qos: .userInitiated).async {
+                handleResourceRead(uri: uri, id: id)
+            }
 
         case "prompts/list":
             sendResponse(id: id, result: ["prompts": promptsManifest])
@@ -597,10 +603,14 @@ final class DinoMCPServer {
         outputJSON(msg)
     }
 
+    private static let stdoutLock = NSLock()
+
     private static func outputJSON(_ obj: [String: Any]) {
         guard let data = try? JSONSerialization.data(withJSONObject: obj) else { return }
         var out = data
         out.append(UInt8(ascii: "\n"))
+        stdoutLock.lock()
+        defer { stdoutLock.unlock() }
         FileHandle.standardOutput.write(out)
     }
 

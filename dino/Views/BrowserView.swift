@@ -406,6 +406,8 @@ private struct TabStageView: View {
                                 .font(.system(size: 12))
                                 .foregroundStyle(Theme.muted)
                         }
+                    } else if !store.isAddressBarFocused {
+                        OmniboxModalView(store: store, isPresented: .constant(true), isEmbeddedStage: true)
                     }
                 }
                 .contentShape(Rectangle())

@@ -22,13 +22,37 @@ final class TabAutomationDriver {
         self.tab = tab
     }
 
+    // MARK: - Isolated Content World Execution Helpers (Ponytail: immune to in-page tampering and bot detection)
+
+    @discardableResult
+    func evalIsolated(_ script: String) async throws -> Any? {
+        try await withCheckedThrowingContinuation { continuation in
+            webView.evaluateJavaScript(script, in: nil, in: .defaultClient) { result in
+                switch result {
+                case .success(let val): continuation.resume(returning: val)
+                case .failure(let err): continuation.resume(throwing: err)
+                }
+            }
+        }
+    }
+
+    @discardableResult
+    func tryEvalIsolated(_ script: String) async -> Any? {
+        try? await evalIsolated(script)
+    }
+
+    func evalIsolatedString(_ script: String) async throws -> String {
+        let val = try await evalIsolated(script)
+        return (val as? String) ?? ""
+    }
+
     // MARK: - Script Injection & Settling
 
-    /// Injects DinoDOMScript only if window.__dino is not already initialized.
+    /// Injects DinoDOMScript only if window.__dino is not already initialized in the isolated world.
     func ensureDinoScriptInjected() async {
-        let isLoaded = (try? await webView.evaluateJavaScript("Boolean(window.__dino || window.__dino)")) as? Bool ?? false
+        let isLoaded = ((try? await evalIsolated("Boolean(window.__dino)")) as? Bool) ?? false
         if !isLoaded {
-            _ = try? await webView.evaluateJavaScript(DinoDOMScript.core)
+            _ = try? await evalIsolated(DinoDOMScript.core)
         }
     }
 
@@ -36,7 +60,7 @@ final class TabAutomationDriver {
     func checkHitlStatus() async -> (detected: Bool, type: String?, resolved: Bool) {
         await ensureDinoScriptInjected()
         let script = "JSON.stringify(window.__dino && window.__dino.detectChallenge ? window.__dino.detectChallenge() : { detected: false, resolved: true })"
-        if let jsonStr = try? await webView.evaluateJavaScript(script) as? String,
+        if let jsonStr = try? await evalIsolatedString(script),
            let data = jsonStr.data(using: .utf8),
            let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let detected = dict["detected"] as? Bool {
@@ -64,12 +88,14 @@ final class TabAutomationDriver {
     }
 
     /// Waits for in-flight web view navigation to settle up to a given timeout.
-    func waitForNavigationSettled(timeout: TimeInterval = 0.5, pollIntervalMs: UInt64 = 30) async {
-        guard webView.isLoading else { return }
+    @discardableResult
+    func waitForNavigationSettled(timeout: TimeInterval = 4.0, pollIntervalMs: UInt64 = 25) async -> Bool {
+        guard webView.isLoading else { return true }
         let deadline = Date().addingTimeInterval(timeout)
         while webView.isLoading && Date() < deadline {
             try? await Task.sleep(nanoseconds: pollIntervalMs * 1_000_000)
         }
+        return !webView.isLoading
     }
 
     // MARK: - Perception
@@ -87,17 +113,17 @@ final class TabAutomationDriver {
         depth: Int? = nil,
         track: Bool = false
     ) async throws -> DinoSnapshot {
-        await waitForNavigationSettled(timeout: 0.6)
+        _ = await waitForNavigationSettled(timeout: 1.5)
         await ensureDinoScriptInjected()
 
         // Ensure DOM readiness: wait briefly if document or document.body is still loading
         let readyScript = "Boolean(document && document.body && document.readyState !== 'loading')"
-        let isReady = (try? await webView.evaluateJavaScript(readyScript)) as? Bool ?? false
+        let isReady = (try? await evalIsolated(readyScript)) as? Bool ?? false
         if !isReady {
             let start = Date()
-            while Date().timeIntervalSince(start) < 0.4 {
+            while Date().timeIntervalSince(start) < 0.6 {
                 try? await Task.sleep(nanoseconds: 30_000_000)
-                let readyNow = (try? await webView.evaluateJavaScript(readyScript)) as? Bool ?? false
+                let readyNow = (try? await evalIsolated(readyScript)) as? Bool ?? false
                 if readyNow { break }
             }
             await ensureDinoScriptInjected()
@@ -111,7 +137,7 @@ final class TabAutomationDriver {
         return { count: 0 };
         """
         await withCheckedContinuation { continuation in
-            webView.callAsyncJavaScript(syncScript, arguments: [:], in: nil, in: .page) { _ in
+            webView.callAsyncJavaScript(syncScript, arguments: [:], in: nil, in: .defaultClient) { _ in
                 continuation.resume()
             }
         }
@@ -125,18 +151,18 @@ final class TabAutomationDriver {
         if track { opts["track"] = true }
         let optsData = (try? JSONSerialization.data(withJSONObject: opts)) ?? Data()
         let optsJSON = String(data: optsData, encoding: .utf8) ?? "{}"
-        let jsonString = try await webView.evaluateJavaScript("JSON.stringify(window.__dino.getSemanticTree(\(optsJSON)))") as? String ?? "{}"
+        let jsonString = (try? await evalIsolatedString("JSON.stringify(window.__dino.getSemanticTree(\(optsJSON)))")) ?? "{}"
         guard let data = jsonString.data(using: .utf8) else {
             throw NSError(domain: "DinoAgent", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to parse snapshot JSON"])
         }
         var snapshot = try JSONDecoder().decode(DinoSnapshot.self, from: data)
 
         // Self-healing retry: if snapshot returned 0 elements immediately following a navigation,
-        // retry once after 60ms to catch DOM construction if HTML parsing just completed.
+        // retry once after 80ms to catch DOM construction if HTML parsing just completed.
         if snapshot.elements.isEmpty && (tab.url?.absoluteString != "about:blank") && role == nil && text == nil {
-            try? await Task.sleep(nanoseconds: 60_000_000)
+            try? await Task.sleep(nanoseconds: 80_000_000)
             await ensureDinoScriptInjected()
-            if let retryJSON = try? await webView.evaluateJavaScript("JSON.stringify(window.__dino.getSemanticTree(\(optsJSON)))") as? String,
+            if let retryJSON = try? await evalIsolatedString("JSON.stringify(window.__dino.getSemanticTree(\(optsJSON)))"),
                let retryData = retryJSON.data(using: .utf8),
                let retrySnapshot = try? JSONDecoder().decode(DinoSnapshot.self, from: retryData),
                !retrySnapshot.elements.isEmpty {
@@ -149,15 +175,15 @@ final class TabAutomationDriver {
 
     /// Computes compact DOM mutation diff between sequential actions (<80 tokens).
     func getDiff(viewportOnly: Bool = false) async throws -> [String: Any] {
-        await waitForNavigationSettled(timeout: 0.3)
+        _ = await waitForNavigationSettled(timeout: 1.0)
         await ensureDinoScriptInjected()
 
         let opts: [String: Any] = ["viewportOnly": viewportOnly]
         let optsData = (try? JSONSerialization.data(withJSONObject: opts)) ?? Data()
         let optsJSON = String(data: optsData, encoding: .utf8) ?? "{}"
         let script = "JSON.stringify(window.__dino.getDiff(\(optsJSON)))"
-        guard let jsonString = try await webView.evaluateJavaScript(script) as? String,
-              let data = jsonString.data(using: .utf8),
+        let jsonString = (try? await evalIsolatedString(script)) ?? "{}"
+        guard let data = jsonString.data(using: .utf8),
               let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw NSError(domain: "DinoAgent", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to compute DOM diff"])
         }
@@ -176,8 +202,8 @@ final class TabAutomationDriver {
         let queryArray = String(data: queryData, encoding: .utf8) ?? "[\"\"]"
 
         let script = "JSON.stringify(window.__dino.findSemantic((\(queryArray))[0], \(optsJSON)))"
-        guard let jsonString = try await webView.evaluateJavaScript(script) as? String,
-              let data = jsonString.data(using: .utf8),
+        let jsonString = (try? await evalIsolatedString(script)) ?? "{}"
+        guard let data = jsonString.data(using: .utf8),
               let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw NSError(domain: "DinoAgent", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to perform semantic element find"])
         }
@@ -195,7 +221,7 @@ final class TabAutomationDriver {
         if let dr = action.dialogResponse {
             tab.dialogPromptResponse = dr
         }
-        await waitForNavigationSettled(timeout: 0.4)
+        _ = await waitForNavigationSettled(timeout: 2.5)
         if webView.isLoading {
             return DinoActionResult(success: false, message: "Cannot execute action '\(action.action)': active page is currently navigating. Wait for navigation to complete before dispatching actions.", elementId: action.target, lastDialog: tab.lastDialog, hasPendingDialog: tab.pendingDialog != nil)
         }
@@ -299,7 +325,7 @@ final class TabAutomationDriver {
             Task { @MainActor [weak self] in
                 guard let self = self else { return }
                 do {
-                    let resultString = try await self.webView.evaluateJavaScript("JSON.stringify(window.__dino.performAction(\(actionJSON)))") as? String ?? "{}"
+                    let resultString = (try? await self.evalIsolatedString("JSON.stringify(window.__dino.performAction(\(actionJSON)))")) ?? "{}"
                     guard let resultData = resultString.data(using: .utf8) else {
                         safeResume(DinoActionResult(success: false, message: "Failed to parse action result JSON", elementId: action.target, code: "ACTION_PARSE_ERROR", lastDialog: self.tab.lastDialog, hasPendingDialog: self.tab.pendingDialog != nil))
                         return
@@ -464,7 +490,7 @@ final class TabAutomationDriver {
         if let target = action.target, hasTarget {
             let escaped = target.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
             let script = "JSON.stringify(window.__dino.getElementViewportRect(\"\(escaped)\"))"
-            if let rectStr = try? await webView.evaluateJavaScript(script) as? String,
+            if let rectStr = try? await evalIsolatedString(script),
                let rectData = rectStr.data(using: .utf8),
                let rect = try? JSONSerialization.jsonObject(with: rectData) as? [String: Any],
                let x = (rect["left"] as? NSNumber)?.doubleValue,
@@ -515,9 +541,6 @@ final class TabAutomationDriver {
                 return DinoActionResult(success: false, message: "Missing target element or (x, y) coordinates for native click", elementId: action.target, code: "MISSING_TARGET")
             }
             let winPoint = webView.convert(pt, to: nil)
-            let screenPoint = webView.window?.convertPoint(toScreen: winPoint) ?? winPoint
-            let primaryScreenH = NSScreen.screens.first?.frame.height ?? 1080
-            let cgPos = CGPoint(x: screenPoint.x, y: primaryScreenH - screenPoint.y)
 
             // Organic preceding mouseMoved event for Cloudflare Turnstile & anti-bot event validation
             let moveEvent = NSEvent.mouseEvent(
@@ -532,7 +555,7 @@ final class TabAutomationDriver {
                 pressure: 0.0
             )
             if let move = moveEvent { webView.mouseMoved(with: move) }
-            _ = try? await webView.evaluateJavaScript("window.__dino && window.__dino.updateVirtualCursor && window.__dino.updateVirtualCursor(\(pt.x), \(pt.y));")
+            await tryEvalIsolated("window.__dino && window.__dino.updateVirtualCursor && window.__dino.updateVirtualCursor(\(pt.x), \(pt.y));")
             try? await Task.sleep(nanoseconds: 12_000_000)
 
             let downEvent = NSEvent.mouseEvent(
@@ -558,22 +581,12 @@ final class TabAutomationDriver {
                 pressure: 0.0
             )
 
-            // Low-level CoreGraphics HID injection for hardware queues (GUI mode only)
-            if !DinoHeadlessManager.isHeadless {
-                if let cgDown = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: cgPos, mouseButton: .left) {
-                    cgDown.postToPid(ProcessInfo.processInfo.processIdentifier)
-                }
-            }
+            // ponytail: Single-dispatch native AppKit mouse events in window coordinates.
+            // Avoids duplicate event firings and multi-monitor CoreGraphics coordinate distortion.
             if let down = downEvent { webView.mouseDown(with: down) }
             try? await Task.sleep(nanoseconds: 35_000_000)
-
-            if !DinoHeadlessManager.isHeadless {
-                if let cgUp = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: cgPos, mouseButton: .left) {
-                    cgUp.postToPid(ProcessInfo.processInfo.processIdentifier)
-                }
-            }
             if let up = upEvent { webView.mouseUp(with: up) }
-            _ = try? await webView.evaluateJavaScript("if (window.__dino && window.__dino.pulseVirtualCursor) window.__dino.pulseVirtualCursor(\(pt.x), \(pt.y)); else if (window.__dino && window.__dino.updateVirtualCursor) window.__dino.updateVirtualCursor(\(pt.x), \(pt.y));")
+            await tryEvalIsolated("if (window.__dino && window.__dino.pulseVirtualCursor) window.__dino.pulseVirtualCursor(\(pt.x), \(pt.y)); else if (window.__dino && window.__dino.updateVirtualCursor) window.__dino.updateVirtualCursor(\(pt.x), \(pt.y));")
             try? await Task.sleep(nanoseconds: 30_000_000)
 
             return DinoActionResult(
@@ -593,53 +606,26 @@ final class TabAutomationDriver {
                 return DinoActionResult(success: false, message: "Missing target element or (x, y) coordinates for native double click", elementId: action.target, code: "MISSING_TARGET")
             }
             let winPoint = webView.convert(pt, to: nil)
-            let screenPoint = webView.window?.convertPoint(toScreen: winPoint) ?? winPoint
-            let primaryScreenH = NSScreen.screens.first?.frame.height ?? 1080
-            let cgPos = CGPoint(x: screenPoint.x, y: primaryScreenH - screenPoint.y)
 
             // Click 1
-            if !DinoHeadlessManager.isHeadless {
-                if let cgDown1 = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: cgPos, mouseButton: .left) {
-                    cgDown1.setIntegerValueField(.mouseEventClickState, value: 1)
-                    cgDown1.postToPid(ProcessInfo.processInfo.processIdentifier)
-                }
-            }
             if let down1 = NSEvent.mouseEvent(with: .leftMouseDown, location: winPoint, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1.0) {
                 webView.mouseDown(with: down1)
             }
             try? await Task.sleep(nanoseconds: 20_000_000)
-            if !DinoHeadlessManager.isHeadless {
-                if let cgUp1 = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: cgPos, mouseButton: .left) {
-                    cgUp1.setIntegerValueField(.mouseEventClickState, value: 1)
-                    cgUp1.postToPid(ProcessInfo.processInfo.processIdentifier)
-                }
-            }
             if let up1 = NSEvent.mouseEvent(with: .leftMouseUp, location: winPoint, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 0.0) {
                 webView.mouseUp(with: up1)
             }
             try? await Task.sleep(nanoseconds: 25_000_000)
 
             // Click 2 (with clickCount = 2)
-            if !DinoHeadlessManager.isHeadless {
-                if let cgDown2 = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: cgPos, mouseButton: .left) {
-                    cgDown2.setIntegerValueField(.mouseEventClickState, value: 2)
-                    cgDown2.postToPid(ProcessInfo.processInfo.processIdentifier)
-                }
-            }
             if let down2 = NSEvent.mouseEvent(with: .leftMouseDown, location: winPoint, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: windowNumber, context: nil, eventNumber: 0, clickCount: 2, pressure: 1.0) {
                 webView.mouseDown(with: down2)
             }
             try? await Task.sleep(nanoseconds: 20_000_000)
-            if !DinoHeadlessManager.isHeadless {
-                if let cgUp2 = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: cgPos, mouseButton: .left) {
-                    cgUp2.setIntegerValueField(.mouseEventClickState, value: 2)
-                    cgUp2.postToPid(ProcessInfo.processInfo.processIdentifier)
-                }
-            }
             if let up2 = NSEvent.mouseEvent(with: .leftMouseUp, location: winPoint, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: windowNumber, context: nil, eventNumber: 0, clickCount: 2, pressure: 0.0) {
                 webView.mouseUp(with: up2)
             }
-            _ = try? await webView.evaluateJavaScript("if (window.__dino && window.__dino.pulseVirtualCursor) window.__dino.pulseVirtualCursor(\(pt.x), \(pt.y)); else if (window.__dino && window.__dino.updateVirtualCursor) window.__dino.updateVirtualCursor(\(pt.x), \(pt.y));")
+            await tryEvalIsolated("if (window.__dino && window.__dino.pulseVirtualCursor) window.__dino.pulseVirtualCursor(\(pt.x), \(pt.y)); else if (window.__dino && window.__dino.updateVirtualCursor) window.__dino.updateVirtualCursor(\(pt.x), \(pt.y));")
             try? await Task.sleep(nanoseconds: 30_000_000)
 
             return DinoActionResult(
@@ -659,11 +645,8 @@ final class TabAutomationDriver {
                 return DinoActionResult(success: false, message: "Missing target element or (x, y) coordinates for native right click", elementId: action.target, code: "MISSING_TARGET")
             }
             let winPoint = webView.convert(pt, to: nil)
-            let screenPoint = webView.window?.convertPoint(toScreen: winPoint) ?? winPoint
-            let primaryScreenH = NSScreen.screens.first?.frame.height ?? 1080
-            let cgPos = CGPoint(x: screenPoint.x, y: primaryScreenH - screenPoint.y)
 
-            // Organic preceding mouseMoved event for Cloudflare Turnstile & anti-bot event validation
+            // Preceding mouseMoved
             let moveEvent = NSEvent.mouseEvent(
                 with: .mouseMoved,
                 location: winPoint,
@@ -676,7 +659,7 @@ final class TabAutomationDriver {
                 pressure: 0.0
             )
             if let move = moveEvent { webView.mouseMoved(with: move) }
-            _ = try? await webView.evaluateJavaScript("window.__dino && window.__dino.updateVirtualCursor && window.__dino.updateVirtualCursor(\(pt.x), \(pt.y));")
+            await tryEvalIsolated("window.__dino && window.__dino.updateVirtualCursor && window.__dino.updateVirtualCursor(\(pt.x), \(pt.y));")
             try? await Task.sleep(nanoseconds: 12_000_000)
 
             let downEvent = NSEvent.mouseEvent(
@@ -702,21 +685,10 @@ final class TabAutomationDriver {
                 pressure: 0.0
             )
 
-            if !DinoHeadlessManager.isHeadless {
-                if let cgDown = CGEvent(mouseEventSource: nil, mouseType: .rightMouseDown, mouseCursorPosition: cgPos, mouseButton: .left) {
-                    cgDown.postToPid(ProcessInfo.processInfo.processIdentifier)
-                }
-            }
             if let down = downEvent { webView.rightMouseDown(with: down) }
             try? await Task.sleep(nanoseconds: 35_000_000)
-
-            if !DinoHeadlessManager.isHeadless {
-                if let cgUp = CGEvent(mouseEventSource: nil, mouseType: .rightMouseUp, mouseCursorPosition: cgPos, mouseButton: .left) {
-                    cgUp.postToPid(ProcessInfo.processInfo.processIdentifier)
-                }
-            }
             if let up = upEvent { webView.rightMouseUp(with: up) }
-            _ = try? await webView.evaluateJavaScript("if (window.__dino && window.__dino.pulseVirtualCursor) window.__dino.pulseVirtualCursor(\(pt.x), \(pt.y)); else if (window.__dino && window.__dino.updateVirtualCursor) window.__dino.updateVirtualCursor(\(pt.x), \(pt.y));")
+            await tryEvalIsolated("if (window.__dino && window.__dino.pulseVirtualCursor) window.__dino.pulseVirtualCursor(\(pt.x), \(pt.y)); else if (window.__dino && window.__dino.updateVirtualCursor) window.__dino.updateVirtualCursor(\(pt.x), \(pt.y));")
             try? await Task.sleep(nanoseconds: 30_000_000)
 
             return DinoActionResult(
@@ -799,7 +771,7 @@ final class TabAutomationDriver {
                 } catch(e) {}
             })()
             """
-            _ = try? await webView.evaluateJavaScript(jsDispatch)
+            _ = await tryEvalIsolated(jsDispatch)
 
             try? await Task.sleep(nanoseconds: 30_000_000)
 
@@ -825,7 +797,7 @@ final class TabAutomationDriver {
             } else if let toTarget = (action.toTarget ?? action.toElementId ?? action.toSelector)?.trimmingCharacters(in: .whitespacesAndNewlines), !toTarget.isEmpty {
                 let escaped = toTarget.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
                 let script = "JSON.stringify(window.__dino.getElementViewportRect(\"\(escaped)\"))"
-                if let rectStr = try? await webView.evaluateJavaScript(script) as? String,
+                if let rectStr = try? await evalIsolatedString(script),
                    let rectData = rectStr.data(using: .utf8),
                    let rect = try? JSONSerialization.jsonObject(with: rectData) as? [String: Any],
                    let x = (rect["left"] as? NSNumber)?.doubleValue,
@@ -843,18 +815,8 @@ final class TabAutomationDriver {
             }
             let fromWin = webView.convert(fromPt, to: nil)
             let toWin = webView.convert(toPt, to: nil)
-            let screenFromPoint = webView.window?.convertPoint(toScreen: fromWin) ?? fromWin
-            let screenToPoint = webView.window?.convertPoint(toScreen: toWin) ?? toWin
-            let primaryScreenH = NSScreen.screens.first?.frame.height ?? 1080
-            let cgFromPos = CGPoint(x: screenFromPoint.x, y: primaryScreenH - screenFromPoint.y)
-            let cgToPos = CGPoint(x: screenToPoint.x, y: primaryScreenH - screenToPoint.y)
 
-            // 1. Native mouse down (CoreGraphics & AppKit)
-            if !DinoHeadlessManager.isHeadless {
-                if let cgDown = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: cgFromPos, mouseButton: .left) {
-                    cgDown.postToPid(ProcessInfo.processInfo.processIdentifier)
-                }
-            }
+            // 1. Native mouse down (AppKit window coordinates)
             if let down = NSEvent.mouseEvent(with: .leftMouseDown, location: fromWin, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1.0) {
                 webView.mouseDown(with: down)
             }
@@ -863,18 +825,11 @@ final class TabAutomationDriver {
                 let factor = CGFloat(i) / CGFloat(steps)
                 let intermediate = CGPoint(x: fromPt.x + (toPt.x - fromPt.x) * factor, y: fromPt.y + (toPt.y - fromPt.y) * factor)
                 let intermediateWin = webView.convert(intermediate, to: nil)
-                let intermediateScreen = webView.window?.convertPoint(toScreen: intermediateWin) ?? intermediateWin
-                let cgIntermediatePos = CGPoint(x: intermediateScreen.x, y: primaryScreenH - intermediateScreen.y)
 
-                if !DinoHeadlessManager.isHeadless {
-                    if let cgDrag = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDragged, mouseCursorPosition: cgIntermediatePos, mouseButton: .left) {
-                        cgDrag.postToPid(ProcessInfo.processInfo.processIdentifier)
-                    }
-                }
                 if let drag = NSEvent.mouseEvent(with: .leftMouseDragged, location: intermediateWin, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1.0) {
                     webView.mouseDragged(with: drag)
                 }
-                _ = try? await webView.evaluateJavaScript("if (window.__dino && window.__dino.updateVirtualCursor) window.__dino.updateVirtualCursor(\(intermediate.x), \(intermediate.y));")
+                await tryEvalIsolated("if (window.__dino && window.__dino.updateVirtualCursor) window.__dino.updateVirtualCursor(\(intermediate.x), \(intermediate.y));")
                 try? await Task.sleep(nanoseconds: 15_000_000)
             }
 
@@ -882,12 +837,9 @@ final class TabAutomationDriver {
             let escapedTarget = (action.target ?? "").replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
             let escapedToTarget = (action.toTarget ?? action.toElementId ?? "").replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
             let dragScript = "JSON.stringify(window.__dino.dispatchHtml5Drag(\"\(escapedTarget)\", \(fromPt.x), \(fromPt.y), \(toPt.x), \(toPt.y), null, \"\(escapedToTarget)\"))"
-            _ = try? await webView.evaluateJavaScript(dragScript)
+            _ = try? await evalIsolated(dragScript)
 
-            // 3. Native mouse up (CoreGraphics & AppKit)
-            if let cgUp = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: cgToPos, mouseButton: .left) {
-                cgUp.postToPid(ProcessInfo.processInfo.processIdentifier)
-            }
+            // 3. Native mouse up (AppKit)
             if let up = NSEvent.mouseEvent(with: .leftMouseUp, location: toWin, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 0.0) {
                 webView.mouseUp(with: up)
             }
@@ -919,7 +871,7 @@ final class TabAutomationDriver {
             // Establish DOM focus on the target element and fail loudly if focus cannot be set
             let escapedTarget = target.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
             let focusScript = "JSON.stringify(window.__dino.focusElement(\"\(escapedTarget)\"))"
-            if let focusStr = try? await webView.evaluateJavaScript(focusScript) as? String,
+            if let focusStr = try? await evalIsolatedString(focusScript),
                let focusData = focusStr.data(using: .utf8),
                let focusRes = try? JSONSerialization.jsonObject(with: focusData) as? [String: Any] {
                 let focused = focusRes["success"] as? Bool ?? false
@@ -934,40 +886,32 @@ final class TabAutomationDriver {
                 }
             }
 
-            // Click target with native CoreGraphics and AppKit events to ensure full window & gesture activation
+            // Click target with native AppKit events to ensure full window & gesture activation
             if let pt = targetPoint {
                 let winPoint = webView.convert(pt, to: nil)
-                let screenPoint = webView.window?.convertPoint(toScreen: winPoint) ?? winPoint
-                let primaryScreenH = NSScreen.screens.first?.frame.height ?? 1080
-                let cgPos = CGPoint(x: screenPoint.x, y: primaryScreenH - screenPoint.y)
-
-                if !DinoHeadlessManager.isHeadless {
-                    if let cgDown = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: cgPos, mouseButton: .left) {
-                        cgDown.postToPid(ProcessInfo.processInfo.processIdentifier)
-                    }
-                }
                 if let down = NSEvent.mouseEvent(with: .leftMouseDown, location: winPoint, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1.0) {
                     webView.mouseDown(with: down)
                 }
                 try? await Task.sleep(nanoseconds: 20_000_000)
-                if !DinoHeadlessManager.isHeadless {
-                    if let cgUp = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: cgPos, mouseButton: .left) {
-                        cgUp.postToPid(ProcessInfo.processInfo.processIdentifier)
-                    }
-                }
                 if let up = NSEvent.mouseEvent(with: .leftMouseUp, location: winPoint, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 0.0) {
                     webView.mouseUp(with: up)
                 }
                 try? await Task.sleep(nanoseconds: 30_000_000)
             }
+
+            // ponytail: Accurately set shift modifier flags for uppercase characters and shifted symbols
+            let shiftedChars: Set<Character> = Set("ABCDEFGHIJKLMNOPQRSTUVWXYZ~!@#$%^&*()_+{}|:\"<>?")
             for char in text {
                 let charStr = String(char)
+                let isShifted = shiftedChars.contains(char)
+                let flags: NSEvent.ModifierFlags = isShifted ? [.shift] : []
                 let keyCode = Self.keyCodeForCharacter(char)
-                if let downKey = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: windowNumber, context: nil, characters: charStr, charactersIgnoringModifiers: charStr, isARepeat: false, keyCode: keyCode) {
+                let unshiftedStr = isShifted ? charStr.lowercased() : charStr
+                if let downKey = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: windowNumber, context: nil, characters: charStr, charactersIgnoringModifiers: unshiftedStr, isARepeat: false, keyCode: keyCode) {
                     webView.keyDown(with: downKey)
                 }
                 try? await Task.sleep(nanoseconds: 12_000_000)
-                if let upKey = NSEvent.keyEvent(with: .keyUp, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: windowNumber, context: nil, characters: charStr, charactersIgnoringModifiers: charStr, isARepeat: false, keyCode: keyCode) {
+                if let upKey = NSEvent.keyEvent(with: .keyUp, location: .zero, modifierFlags: flags, timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: windowNumber, context: nil, characters: charStr, charactersIgnoringModifiers: unshiftedStr, isARepeat: false, keyCode: keyCode) {
                     webView.keyUp(with: upKey)
                 }
                 try? await Task.sleep(nanoseconds: 5_000_000)
@@ -997,7 +941,7 @@ final class TabAutomationDriver {
                     }
                 })()
                 """
-                _ = try? await webView.evaluateJavaScript(focusScript)
+                _ = await tryEvalIsolated(focusScript)
                 try? await Task.sleep(nanoseconds: 15_000_000)
             }
 
@@ -1029,7 +973,7 @@ final class TabAutomationDriver {
                     }
                 })()
                 """
-                _ = try? await webView.evaluateJavaScript(stepScript)
+                _ = await tryEvalIsolated(stepScript)
             }
             return DinoActionResult(success: true, message: "Native keypress '\(rawChord)' dispatched with isTrusted: true", elementId: action.target, code: "SUCCESS", native: true, isTrusted: true)
 
@@ -1060,15 +1004,7 @@ final class TabAutomationDriver {
             let primaryScreenH = NSScreen.screens.first?.frame.height ?? 1080
             let cgPos = CGPoint(x: screenPoint.x, y: primaryScreenH - screenPoint.y)
 
-            // 1. Low-level CoreGraphics HID scroll wheel event for hardware queue (Canvas / WebGL / maps)
-            if !DinoHeadlessManager.isHeadless {
-                if let cgScroll = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2, wheel1: Int32(-rawDeltaY), wheel2: Int32(-rawDeltaX), wheel3: 0) {
-                    cgScroll.location = cgPos
-                    cgScroll.postToPid(ProcessInfo.processInfo.processIdentifier)
-                }
-            }
-
-            // 2. High-fidelity AppKit NSEvent dispatched directly to webView
+            // 1. High-fidelity AppKit scroll dispatched directly to webView
             if let cgScroll = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2, wheel1: Int32(-rawDeltaY), wheel2: Int32(-rawDeltaX), wheel3: 0) {
                 cgScroll.location = cgPos
                 if let nsScroll = NSEvent(cgEvent: cgScroll) {
@@ -1076,7 +1012,7 @@ final class TabAutomationDriver {
                 }
             }
 
-            // 3. Fallback DOM scroll & in-app virtual cursor tracking
+            // 2. Fallback DOM scroll & in-app virtual cursor tracking in isolated world
             let jsScroll = """
             (function() {
                 try {
@@ -1087,7 +1023,7 @@ final class TabAutomationDriver {
                 } catch(e) {}
             })()
             """
-            _ = try? await webView.evaluateJavaScript(jsScroll)
+            _ = await tryEvalIsolated(jsScroll)
             try? await Task.sleep(nanoseconds: 20_000_000)
 
             return DinoActionResult(
@@ -1239,7 +1175,7 @@ final class TabAutomationDriver {
                 return { width: w, height: h };
             })()
             """
-            if let dims = (try? await webView.evaluateJavaScript(dimsScript)) as? [String: Any],
+            if let dims = (try? await evalIsolated(dimsScript)) as? [String: Any],
                let w = (dims["width"] as? NSNumber)?.doubleValue,
                let h = (dims["height"] as? NSNumber)?.doubleValue,
                w > 0 && h > 0 {
@@ -1261,7 +1197,7 @@ final class TabAutomationDriver {
                 return null;
             })()
             """
-            if let dictStr = try? await webView.evaluateJavaScript(somScript) as? String,
+            if let dictStr = try? await evalIsolatedString(somScript),
                let dictData = dictStr.data(using: .utf8),
                let rectDict = try? JSONSerialization.jsonObject(with: dictData) as? [String: Any],
                let x = (rectDict["x"] as? NSNumber)?.doubleValue,
@@ -1344,7 +1280,7 @@ final class TabAutomationDriver {
                 return res;
             })()
             """
-            if let dict = (try? await webView.evaluateJavaScript(rectScript)) as? [String: Any],
+            if let dict = (try? await evalIsolated(rectScript)) as? [String: Any],
                let x = (dict["x"] as? NSNumber)?.doubleValue,
                let y = (dict["y"] as? NSNumber)?.doubleValue,
                let w = (dict["width"] as? NSNumber)?.doubleValue,
@@ -1352,7 +1288,7 @@ final class TabAutomationDriver {
                w > 0 && h > 0 {
                 targetRect = CGRect(x: x, y: y, width: w, height: h)
             } else {
-                _ = try? await webView.evaluateJavaScript("window.__dino && window.__dino.hideBadges && window.__dino.hideBadges();")
+                await tryEvalIsolated("window.__dino && window.__dino.hideBadges && window.__dino.hideBadges();")
                 throw NSError(domain: "DinoAgent", code: -5, userInfo: [NSLocalizedDescriptionKey: "Element '\(elId)' not found or has zero dimensions for screenshot crop"])
             }
         }
@@ -1376,7 +1312,7 @@ final class TabAutomationDriver {
             }
         })()
         """
-        _ = try? await webView.evaluateJavaScript(prepScript)
+        await tryEvalIsolated(prepScript)
 
         let config = WKSnapshotConfiguration()
         if let rect = targetRect {
@@ -1408,12 +1344,12 @@ final class TabAutomationDriver {
                 }
                 if let pdfData = try? await self.generatePDF(configuration: pdfConfig),
                    let fallbackImg = self.renderPDFToImage(pdfData: pdfData) {
-                    _ = try? await webView.evaluateJavaScript("window.__dino && window.__dino.hideBadges && window.__dino.hideBadges();")
+                    await tryEvalIsolated("window.__dino && window.__dino.hideBadges && window.__dino.hideBadges();")
                     return fallbackImg
                 }
             }
 
-            _ = try? await webView.evaluateJavaScript("window.__dino && window.__dino.hideBadges && window.__dino.hideBadges();")
+            await tryEvalIsolated("window.__dino && window.__dino.hideBadges && window.__dino.hideBadges();")
             return image
         } catch {
             // If takeSnapshot failed due to display session absence, fall back to createPDF
@@ -1423,11 +1359,11 @@ final class TabAutomationDriver {
             }
             if let pdfData = try? await self.generatePDF(configuration: pdfConfig),
                let fallbackImg = self.renderPDFToImage(pdfData: pdfData) {
-                _ = try? await webView.evaluateJavaScript("window.__dino && window.__dino.hideBadges && window.__dino.hideBadges();")
+                await tryEvalIsolated("window.__dino && window.__dino.hideBadges && window.__dino.hideBadges();")
                 return fallbackImg
             }
 
-            _ = try? await webView.evaluateJavaScript("window.__dino && window.__dino.hideBadges && window.__dino.hideBadges();")
+            await tryEvalIsolated("window.__dino && window.__dino.hideBadges && window.__dino.hideBadges();")
             throw error
         }
     }

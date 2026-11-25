@@ -754,8 +754,8 @@ enum WebKitPool {
             }
         })();
         """
-        ucc.addUserScript(WKUserScript(source: framePiercerScript, injectionTime: .atDocumentStart, forMainFrameOnly: false))
-        ucc.addUserScript(WKUserScript(source: DinoDOMScript.core, injectionTime: .atDocumentEnd, forMainFrameOnly: false))
+        ucc.addUserScript(WKUserScript(source: framePiercerScript, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .defaultClient))
+        ucc.addUserScript(WKUserScript(source: DinoDOMScript.core, injectionTime: .atDocumentEnd, forMainFrameOnly: false, in: .defaultClient))
 
         return config
     }

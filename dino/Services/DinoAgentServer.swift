@@ -964,7 +964,7 @@ final class DinoAgentServer: ObservableObject {
             return
         }
 
-        if handleTabsRoute(method: method, cleanPath: cleanPath, bodyData: bodyData, queryItem: queryItem, connection: connection, origin: origin) {
+        if await handleTabsRoute(method: method, cleanPath: cleanPath, bodyData: bodyData, queryItem: queryItem, connection: connection, origin: origin) {
             return
         }
         if await handleNavigationRoute(method: method, cleanPath: cleanPath, bodyData: bodyData, queryItem: queryItem, connection: connection, origin: origin) {
