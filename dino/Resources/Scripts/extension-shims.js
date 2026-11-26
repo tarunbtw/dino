@@ -1248,6 +1248,27 @@
       put2("proxy", { settings: setting("proxy.settings"), onProxyError: event() });
       put2("omnibox", { setDefaultSuggestion: () => {}, onInputStarted: event(), onInputChanged: event(),
         onInputEntered: event(), onInputCancelled: event(), onDeleteSuggestion: event() });
+      // Defensive Proxy fallback for optional namespaces if neither WebKit nor shims above defined them.
+      const stubProxy = () => {
+        const children = new Map();
+        return new Proxy(() => {}, {
+          get(_target, prop) {
+            if (prop === "then" || typeof prop === "symbol") return undefined;
+            if (!children.has(prop)) {
+              children.set(prop, /^on[A-Z]/.test(prop) ? event() : stubProxy());
+            }
+            return children.get(prop);
+          },
+          apply(_target, _thisArg, args) {
+            const cb = args.length && typeof args[args.length - 1] === "function" ? args[args.length - 1] : null;
+            if (cb) { cb(); return undefined; }
+            return Promise.resolve();
+          },
+        });
+      };
+      for (const ns of ["system", "privacy", "management", "fontSettings", "power", "tts", "browsingData", "sessions", "topSites"]) {
+        if (!chrome[ns]) put2(ns, stubProxy());
+      }
       // Screen recording (see ExtensionCapture.swift). Chrome's picker is
       // Search's question, then the Mac's own; the stream id it hands back is
       // an id Search gives once, which getUserMedia in the extension's page

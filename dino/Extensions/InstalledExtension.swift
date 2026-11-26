@@ -30,4 +30,47 @@ struct InstalledExtension: Codable, Identifiable, Equatable {
     var popupPath: String?
     /// Relative path to options page HTML (e.g. "options.html") if declared.
     var optionsPath: String?
+    /// Chromium-only APIs declared in manifest.json that WebKit does not support.
+    var compatibilityWarnings: [String] = []
+
+    init(
+        id: String,
+        name: String,
+        version: String,
+        enabled: Bool,
+        fromStore: Bool,
+        pinned: Bool,
+        permissions: [String],
+        sourcePath: String?,
+        popupPath: String?,
+        optionsPath: String?,
+        compatibilityWarnings: [String] = []
+    ) {
+        self.id = id
+        self.name = name
+        self.version = version
+        self.enabled = enabled
+        self.fromStore = fromStore
+        self.pinned = pinned
+        self.permissions = permissions
+        self.sourcePath = sourcePath
+        self.popupPath = popupPath
+        self.optionsPath = optionsPath
+        self.compatibilityWarnings = compatibilityWarnings
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        version = try c.decode(String.self, forKey: .version)
+        enabled = try c.decode(Bool.self, forKey: .enabled)
+        fromStore = try c.decode(Bool.self, forKey: .fromStore)
+        pinned = try c.decode(Bool.self, forKey: .pinned)
+        permissions = try c.decode([String].self, forKey: .permissions)
+        sourcePath = try c.decodeIfPresent(String.self, forKey: .sourcePath)
+        popupPath = try c.decodeIfPresent(String.self, forKey: .popupPath)
+        optionsPath = try c.decodeIfPresent(String.self, forKey: .optionsPath)
+        compatibilityWarnings = try c.decodeIfPresent([String].self, forKey: .compatibilityWarnings) ?? []
+    }
 }

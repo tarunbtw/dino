@@ -117,10 +117,38 @@ final class ExtensionManager: NSObject, ObservableObject {
         }
     }
 
+    /// Chromium-only permission APIs not supported by WebKit.
+    private static let unsupportedAPIs: Set<String> = [
+        "debugger", "tabCapture", "desktopCapture", "cast",
+        "enterprise.platformKeys", "enterprise.deviceAttributes",
+        "vpnProvider", "printing", "ttsEngine"
+    ]
+
+    /// Inspects manifest.json for Chromium-only APIs in `permissions` and `optional_permissions`.
+    static func compatibilityWarnings(in folder: URL) -> [String] {
+        let manifestURL = folder.appendingPathComponent("manifest.json")
+        guard let data = try? Data(contentsOf: manifestURL),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return []
+        }
+        let declared = (json["permissions"] as? [String] ?? []) + (json["optional_permissions"] as? [String] ?? [])
+        var seen = Set<String>()
+        return declared.filter { unsupportedAPIs.contains($0) && seen.insert($0).inserted }
+    }
+
     /// Loads an individual extension into WebKit.
     func load(_ item: InstalledExtension) async -> Bool {
         let folder = ExtensionManager.extensionsFolder.appendingPathComponent(item.id, isDirectory: true)
         guard FileManager.default.fileExists(atPath: folder.path) else { return false }
+
+        let warnings = ExtensionManager.compatibilityWarnings(in: folder)
+        if !warnings.isEmpty {
+            NSLog("[dino-ext] %@ (%@) declares unsupported Chromium-only APIs: %@", item.name, item.id, warnings.joined(separator: ", "))
+        }
+        if let idx = installed.firstIndex(where: { $0.id == item.id }), installed[idx].compatibilityWarnings != warnings {
+            installed[idx].compatibilityWarnings = warnings
+            save()
+        }
 
         // Inject Dino Chrome API polyfills/shims before WebKit reads the package
         try? await Task.detached(priority: .userInitiated) {
@@ -201,7 +229,8 @@ final class ExtensionManager: NSObject, ObservableObject {
         defer { busy = nil }
 
         let targetFolder = ExtensionManager.extensionsFolder.appendingPathComponent(id, isDirectory: true)
-        let installedExt = try await CrxDownloader.downloadAndUnpack(id: id, destinationFolder: targetFolder)
+        var installedExt = try await CrxDownloader.downloadAndUnpack(id: id, destinationFolder: targetFolder)
+        installedExt.compatibilityWarnings = ExtensionManager.compatibilityWarnings(in: targetFolder)
 
         // Remove existing entry if re-installing/updating
         installed.removeAll(where: { $0.id == id })
@@ -216,7 +245,9 @@ final class ExtensionManager: NSObject, ObservableObject {
         busy = "Loading..."
         defer { busy = nil }
 
-        let installedExt = try await CrxDownloader.installUnpacked(folderURL: folderURL, destinationFolder: ExtensionManager.extensionsFolder)
+        var installedExt = try await CrxDownloader.installUnpacked(folderURL: folderURL, destinationFolder: ExtensionManager.extensionsFolder)
+        let targetDir = ExtensionManager.extensionsFolder.appendingPathComponent(installedExt.id, isDirectory: true)
+        installedExt.compatibilityWarnings = ExtensionManager.compatibilityWarnings(in: targetDir)
 
         installed.removeAll(where: { $0.id == installedExt.id })
         installed.append(installedExt)
