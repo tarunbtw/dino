@@ -12,12 +12,37 @@ nonisolated enum ScriptLoader {
     private static var cache: [String: String] = [:]
     private static let lock = NSLock()
 
+    private static let modularScripts: [String: [String]] = [
+        "dino-dom-core": [
+            "dino-dom-01-utils",
+            "dino-dom-02-tree",
+            "dino-dom-03-actions",
+            "dino-dom-04-perception"
+        ]
+    ]
+
     /// Loads the specified JavaScript file by name (without .js extension).
     /// Searches Bundle.main resources, bundle subdirectories, and development fallbacks.
     nonisolated static func load(named name: String) -> String {
         lock.lock()
         defer { lock.unlock() }
 
+        if let cached = cache[name] {
+            return cached
+        }
+
+        if let parts = modularScripts[name] {
+            let joined = parts.map { loadSingleLocked(named: $0) }.joined(separator: "\n")
+            if !joined.isEmpty {
+                cache[name] = joined
+            }
+            return joined
+        }
+
+        return loadSingleLocked(named: name)
+    }
+
+    private nonisolated static func loadSingleLocked(named name: String) -> String {
         if let cached = cache[name] {
             return cached
         }
