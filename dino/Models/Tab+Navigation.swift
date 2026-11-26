@@ -353,7 +353,21 @@ extension Tab: WKNavigationDelegate {
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         self.isLoading = false
-        print("Tab WebContent process terminated, automatically reloading...")
+        let now = Date()
+        recentCrashTimestamps = recentCrashTimestamps.filter { now.timeIntervalSince($0) < 30.0 }
+        recentCrashTimestamps.append(now)
+
+        if recentCrashTimestamps.count > 3 {
+            self.title = "Page Crashed (Out of Memory or GPU Failure)"
+            DinoAgentServer.shared.broadcastEvent(name: "webContentCrashed", payload: [
+                "tabId": self.id.uuidString,
+                "error": "WebContent process terminated \(recentCrashTimestamps.count) times within 30s. Halting automatic reload."
+            ])
+            print("Tab WebContent process crashed repeatedly (\(recentCrashTimestamps.count)x in 30s), halting auto-reload.")
+            return
+        }
+
+        print("Tab WebContent process terminated, automatically reloading (attempt \(recentCrashTimestamps.count))...")
         webView.reload()
     }
 

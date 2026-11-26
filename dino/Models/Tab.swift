@@ -71,6 +71,31 @@ struct NetworkEntry: Identifiable, Sendable {
     }
 }
 
+/// Serializes automation actions per tab in strict FIFO arrival order to prevent focus collisions.
+actor TabActionQueue {
+    private var isExecuting = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func acquire() async {
+        if !isExecuting {
+            isExecuting = true
+            return
+        }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func release() {
+        if !waiters.isEmpty {
+            let next = waiters.removeFirst()
+            next.resume()
+        } else {
+            isExecuting = false
+        }
+    }
+}
+
 /// Lifecycle execution tier for tabs under the memory governor.
 enum TabTier: String, Codable, Sendable {
     case hot   // Active or recently focused tab: full GPU compositing, unrestricted timers
@@ -95,6 +120,8 @@ final class Tab: NSObject, Identifiable, ObservableObject {
     @Published var isIncognito: Bool = false
     @Published var tier: TabTier = .hot
     var lastActiveTime: Date = Date()
+    let actionQueue = TabActionQueue()
+    var recentCrashTimestamps: [Date] = []
 
     // MARK: - Navigation History Stacks
     private var historyBackStack: [URL?] = []

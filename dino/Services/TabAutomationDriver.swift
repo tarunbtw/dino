@@ -25,6 +25,23 @@ final class TabAutomationDriver {
     // MARK: - Isolated Content World Execution Helpers (Ponytail: immune to in-page tampering and bot detection)
 
     @discardableResult
+    func callAsyncIsolated(_ script: String, arguments: [String: Any] = [:]) async throws -> Any? {
+        try await withCheckedThrowingContinuation { continuation in
+            webView.callAsyncJavaScript(script, arguments: arguments, in: nil, in: .defaultClient) { result in
+                switch result {
+                case .success(let val): continuation.resume(returning: val)
+                case .failure(let err): continuation.resume(throwing: err)
+                }
+            }
+        }
+    }
+
+    @discardableResult
+    func tryCallAsyncIsolated(_ script: String, arguments: [String: Any] = [:]) async -> Any? {
+        try? await callAsyncIsolated(script, arguments: arguments)
+    }
+
+    @discardableResult
     func evalIsolated(_ script: String) async throws -> Any? {
         try await withCheckedThrowingContinuation { continuation in
             webView.evaluateJavaScript(script, in: nil, in: .defaultClient) { result in
@@ -213,7 +230,20 @@ final class TabAutomationDriver {
     // MARK: - Action Dispatch
 
     /// Dispatches a browser action (click, hover, type, clear, scroll, keypress, select, highlight) on the active page.
+    /// Actions on the same tab are serialized through `tab.actionQueue` to prevent focus/input collisions.
     func performAction(_ action: DinoAction) async throws -> DinoActionResult {
+        await tab.actionQueue.acquire()
+        do {
+            let result = try await executeAction(action)
+            await tab.actionQueue.release()
+            return result
+        } catch {
+            await tab.actionQueue.release()
+            throw error
+        }
+    }
+
+    private func executeAction(_ action: DinoAction) async throws -> DinoActionResult {
         tab.lastActionTime = Date()
         if let dp = action.dialogPolicy {
             tab.dialogPolicy = dp
@@ -375,7 +405,7 @@ final class TabAutomationDriver {
                             var fallbackAction = action
                             fallbackAction.target = fallbackSelector
                             fallbackAction.selector = nil
-                            if let fallbackRes = try? await self.performAction(fallbackAction), fallbackRes.success {
+                            if let fallbackRes = try? await self.executeAction(fallbackAction), fallbackRes.success {
                                 safeResume(fallbackRes)
                                 return
                             }
@@ -488,11 +518,10 @@ final class TabAutomationDriver {
         let hasTarget = action.target.map { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? false
 
         if let target = action.target, hasTarget {
-            let escaped = target.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
-            let script = "JSON.stringify(window.__dino.getElementViewportRect(\"\(escaped)\"))"
-            if let rectStr = try? await evalIsolatedString(script),
-               let rectData = rectStr.data(using: .utf8),
-               let rect = try? JSONSerialization.jsonObject(with: rectData) as? [String: Any],
+            if let rect = (try? await callAsyncIsolated(
+                "return window.__dino.getElementViewportRect(target);",
+                arguments: ["target": target]
+            )) as? [String: Any],
                let x = (rect["left"] as? NSNumber)?.doubleValue,
                let y = (rect["top"] as? NSNumber)?.doubleValue,
                let w = (rect["width"] as? NSNumber)?.doubleValue,
@@ -506,7 +535,10 @@ final class TabAutomationDriver {
                 isTargetEditable = rect["isEditable"] as? Bool ?? false
                 targetTagName = (rect["tagName"] as? String ?? "").lowercased()
             } else {
-                let hasSignature = ((try? await evalIsolated("Boolean(window.__dino && window.__dino.elementSignatures && window.__dino.elementSignatures[\"\(escaped)\"])")) as? Bool) ?? false
+                let hasSignature = ((try? await callAsyncIsolated(
+                    "return Boolean(window.__dino && window.__dino.elementSignatures && window.__dino.elementSignatures[target]);",
+                    arguments: ["target": target]
+                )) as? Bool) ?? false
                 let isRef = (target.range(of: "^(f[0-9]+:)?[e][0-9]+$", options: .regularExpression) != nil)
                 let isExplicitSelector = (action.selector != nil)
                 let code: String
@@ -843,10 +875,17 @@ final class TabAutomationDriver {
             }
 
             // 2. Dispatch HTML5 Drag & Drop pipeline (dragstart -> dragenter -> dragover -> drop -> dragend)
-            let escapedTarget = (action.target ?? "").replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
-            let escapedToTarget = (action.toTarget ?? action.toElementId ?? "").replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
-            let dragScript = "JSON.stringify(window.__dino.dispatchHtml5Drag(\"\(escapedTarget)\", \(fromPt.x), \(fromPt.y), \(toPt.x), \(toPt.y), null, \"\(escapedToTarget)\"))"
-            _ = try? await evalIsolated(dragScript)
+            _ = await tryCallAsyncIsolated(
+                "return window.__dino.dispatchHtml5Drag(fromTarget, fromX, fromY, toX, toY, null, toTarget);",
+                arguments: [
+                    "fromTarget": action.target ?? "",
+                    "fromX": fromPt.x,
+                    "fromY": fromPt.y,
+                    "toX": toPt.x,
+                    "toY": toPt.y,
+                    "toTarget": action.toTarget ?? action.toElementId ?? ""
+                ]
+            )
 
             // 3. Native mouse up (AppKit)
             if let up = NSEvent.mouseEvent(with: .leftMouseUp, location: toWin, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 0.0) {
@@ -878,11 +917,10 @@ final class TabAutomationDriver {
             }
 
             // Establish DOM focus on the target element and fail loudly if focus cannot be set
-            let escapedTarget = target.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
-            let focusScript = "JSON.stringify(window.__dino.focusElement(\"\(escapedTarget)\"))"
-            if let focusStr = try? await evalIsolatedString(focusScript),
-               let focusData = focusStr.data(using: .utf8),
-               let focusRes = try? JSONSerialization.jsonObject(with: focusData) as? [String: Any] {
+            if let focusRes = (try? await callAsyncIsolated(
+                "return window.__dino.focusElement(target);",
+                arguments: ["target": target]
+            )) as? [String: Any] {
                 let focused = focusRes["success"] as? Bool ?? false
                 if !focused {
                     let msg = focusRes["message"] as? String ?? "Failed to establish focus on target element '\(target)'"
@@ -908,20 +946,31 @@ final class TabAutomationDriver {
                 try? await Task.sleep(nanoseconds: 30_000_000)
             }
 
-            // ponytail: Accurately set shift modifier flags for uppercase characters and shifted symbols
+            // ponytail: Use NSEvent keyDown/keyUp for standard ASCII keys, and NSTextInputClient.insertText for non-ASCII/Unicode/CJK/emoji.
             let shiftedChars: Set<Character> = Set("ABCDEFGHIJKLMNOPQRSTUVWXYZ~!@#$%^&*()_+{}|:\"<>?")
             for char in text {
                 let charStr = String(char)
-                let isShifted = shiftedChars.contains(char)
-                let flags: NSEvent.ModifierFlags = isShifted ? [.shift] : []
                 let keyCode = Self.keyCodeForCharacter(char)
-                let unshiftedStr = isShifted ? charStr.lowercased() : charStr
-                if let downKey = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: windowNumber, context: nil, characters: charStr, charactersIgnoringModifiers: unshiftedStr, isARepeat: false, keyCode: keyCode) {
-                    webView.keyDown(with: downKey)
-                }
-                try? await Task.sleep(nanoseconds: 12_000_000)
-                if let upKey = NSEvent.keyEvent(with: .keyUp, location: .zero, modifierFlags: flags, timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: windowNumber, context: nil, characters: charStr, charactersIgnoringModifiers: unshiftedStr, isARepeat: false, keyCode: keyCode) {
-                    webView.keyUp(with: upKey)
+                let isSupportedAsciiKey = char.isASCII && (keyCode != 0 || char == "a" || char == "A")
+
+                if isSupportedAsciiKey {
+                    let isShifted = shiftedChars.contains(char)
+                    let flags: NSEvent.ModifierFlags = isShifted ? [.shift] : []
+                    let unshiftedStr = isShifted ? charStr.lowercased() : charStr
+                    if let downKey = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: windowNumber, context: nil, characters: charStr, charactersIgnoringModifiers: unshiftedStr, isARepeat: false, keyCode: keyCode) {
+                        webView.keyDown(with: downKey)
+                    }
+                    try? await Task.sleep(nanoseconds: 12_000_000)
+                    if let upKey = NSEvent.keyEvent(with: .keyUp, location: .zero, modifierFlags: flags, timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: windowNumber, context: nil, characters: charStr, charactersIgnoringModifiers: unshiftedStr, isARepeat: false, keyCode: keyCode) {
+                        webView.keyUp(with: upKey)
+                    }
+                } else if let textClient = (webView.window?.firstResponder as? NSTextInputClient) ?? (webView as? NSTextInputClient) {
+                    textClient.insertText(charStr, replacementRange: NSRange(location: NSNotFound, length: 0))
+                } else {
+                    await tryCallAsyncIsolated(
+                        "document.execCommand('insertText', false, text);",
+                        arguments: ["text": charStr]
+                    )
                 }
                 try? await Task.sleep(nanoseconds: 5_000_000)
             }
@@ -1010,7 +1059,7 @@ final class TabAutomationDriver {
             let pt = targetPoint ?? CGPoint(x: webView.bounds.midX, y: webView.bounds.midY)
             let winPoint = webView.convert(pt, to: nil)
             let screenPoint = webView.window?.convertPoint(toScreen: winPoint) ?? winPoint
-            let primaryScreenH = NSScreen.screens.first?.frame.height ?? 1080
+            let primaryScreenH = NSScreen.screens.first?.frame.height ?? webView.window?.screen?.frame.height ?? webView.bounds.height
             let cgPos = CGPoint(x: screenPoint.x, y: primaryScreenH - screenPoint.y)
 
             // 1. High-fidelity AppKit scroll dispatched directly to webView
