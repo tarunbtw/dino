@@ -733,7 +733,7 @@
 
                 // 2. Table Mode
                 var targetTable = null;
-                if (selector) {
+                if (selector && selector.trim().toLowerCase() !== 'table') {
                     try {
                         var selEl = document.querySelector(selector);
                         if (selEl) {
@@ -745,12 +745,37 @@
                         }
                     } catch(e) {}
                 }
-                if (!targetTable && mode === 'table') {
-                    targetTable = document.querySelector('table');
+                function pickBestDataTable() {
+                    var tables = document.querySelectorAll('table');
+                    var best = null, bestScore = -1;
+                    for (var i = 0; i < tables.length; i++) {
+                        var t = tables[i];
+                        var rect = t.getBoundingClientRect();
+                        if (rect.width === 0 || rect.height === 0) continue;
+                        var rowCount = t.rows ? t.rows.length : 0;
+                        if (rowCount === 0) continue;
+                        var cellCount = 0;
+                        var hasHeaders = Boolean(t.tHead);
+                        for (var r = 0; r < rowCount; r++) {
+                            var row = t.rows[r];
+                            cellCount += row.cells ? row.cells.length : 0;
+                            if (!hasHeaders && row.querySelector('th')) hasHeaders = true;
+                        }
+                        if (cellCount === 0) continue;
+                        var score = rowCount * cellCount * (hasHeaders ? 3 : 1);
+                        if (rowCount < 2) score = Math.floor(score * 0.2);
+                        if (score > bestScore) { bestScore = score; best = t; }
+                    }
+                    return best || tables[0] || null;
+                }
+
+                var isGenericTable = Boolean(selector && selector.trim().toLowerCase() === 'table');
+                if (!targetTable && (mode === 'table' || isGenericTable)) {
+                    targetTable = pickBestDataTable();
                 }
 
                 if (targetTable || (mode === 'auto' && !selector && document.querySelector('table'))) {
-                    if (!targetTable) targetTable = document.querySelector('table');
+                    if (!targetTable) targetTable = pickBestDataTable();
                     if (targetTable) {
                         var headers = [];
                         var ths = targetTable.querySelectorAll('thead th, tr:first-child th, tr:first-child td');

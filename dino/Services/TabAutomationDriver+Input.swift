@@ -57,8 +57,13 @@ extension TabAutomationDriver {
                     code = "ELEMENT_UNMOUNTED"
                     message = "Target element '\(target)' was unmounted or scrolled offscreen (virtual list). Use 'dino scroll to \(target)' or 'dino snap -v' to refresh viewport."
                 } else if isRef {
+                    let hasAnyRefs = ((try? await callAsyncIsolated(
+                        "return Boolean(window.__dino && window.__dino.elements && Object.keys(window.__dino.elements).length > 0);"
+                    )) as? Bool) ?? true
                     code = "STALE_REF"
-                    message = "Target element '\(target)' not found. Please re-snapshot."
+                    message = hasAnyRefs
+                        ? "Target element '\(target)' not found. Please re-snapshot."
+                        : "No element refs indexed on this page yet (target '\(target)'). Run 'dino snap -v' or 'dino goto <url> -s' first, or use a CSS selector."
                 } else if isExplicitSelector {
                     code = "SELECTOR_NOT_FOUND"
                     message = "Target element matching selector '\(target)' not found in DOM."

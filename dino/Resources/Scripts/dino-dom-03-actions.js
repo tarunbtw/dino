@@ -134,11 +134,14 @@
                         };
                     }
                     if (isRefPattern) {
+                        var hasAnyRefs = this.elements && Object.keys(this.elements).length > 0;
                         return {
                             success: false,
                             staleRef: true,
                             code: 'STALE_REF',
-                            message: "Target element '" + targetId + "' not found or no longer in DOM. Please re-snapshot the page.",
+                            message: hasAnyRefs
+                                ? "Target element '" + targetId + "' not found or no longer in DOM. Please re-snapshot the page."
+                                : "No element refs indexed on this page yet (target '" + targetId + "'). Run 'dino snap -v' or 'dino goto <url> -s' first, or use a CSS selector.",
                             elementId: targetId
                         };
                     }
