@@ -12,11 +12,11 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 
-const DINO_VERSION = '0.66';
+const DINO_VERSION = '0.67';
 const GITHUB_REPO = 'tarunbtw/dino';
 
 // Known release archive SHA-256 checksums to guard against unverified execution (CWE-494)
-const RELEASE_CHECKSUMS = {
+const RELEASE_CHECKSUMS = {\n  '0.67': 'de54e53ddb226643f67b18cc66cb1b26e7621992ac721d5c4c19fefe1b328782',
   '0.66': 'ba1c860a4cd1280b47fb2bd73b05280b6cb966c2df054bd399f04ab905272591'
 };
 
