@@ -41,11 +41,14 @@ func cdpTargetInfo(for tab: Tab?, serverPort: UInt16) -> [String: Any] {
 }
 
 @MainActor
-func cdpTargetJSON(for tab: Tab, serverPort: UInt16) -> [String: Any] {
+func cdpTargetJSON(for tab: Tab, serverPort: UInt16, token: String? = nil) -> [String: Any] {
     let tabId = tab.id.uuidString
     let title = (tab.webView.title?.isEmpty == false ? tab.webView.title : tab.title) ?? ""
     let urlStr = (tab.webView.url?.absoluteString ?? tab.url?.absoluteString) ?? "about:blank"
-    let wsUrl = "ws://127.0.0.1:\(serverPort)/devtools/page/\(tabId)"
+    var wsUrl = "ws://127.0.0.1:\(serverPort)/devtools/page/\(tabId)"
+    if let tok = token, !tok.isEmpty {
+        wsUrl += "?token=\(tok)"
+    }
     let devtoolsFrontendUrl = "/devtools/inspector.html?ws=127.0.0.1:\(serverPort)/devtools/page/\(tabId)"
     return [
         "description": "",
@@ -478,10 +481,27 @@ final class DinoCDPWebSocketSession {
                 return
             }
             let urlStr = params["url"] as? String ?? ""
-            let url = URL(string: urlStr) ?? URL(string: "https://" + urlStr)
-            if let u = url {
-                tab.load(url: u)
+            guard let url = URL(string: urlStr) ?? URL(string: "https://" + urlStr),
+                  let scheme = url.scheme?.lowercased() else {
+                sendError(id: id, code: -32000, message: "Invalid URL", sessionId: sessionId)
+                return
             }
+            if scheme == "javascript" {
+                sendError(id: id, code: -32000, message: "javascript: URLs are not permitted", sessionId: sessionId)
+                return
+            }
+            if scheme == "file" {
+                let filePath = url.path
+                if DinoAgentServer.isSensitivePath(filePath) {
+                    sendError(id: id, code: -32000, message: "Access to sensitive file or directory is blocked by Dino security policy", sessionId: sessionId)
+                    return
+                }
+            }
+            if let host = url.host, !host.isEmpty, !DinoAgentServer.shared.isDomainAllowed(host) {
+                sendError(id: id, code: -32000, message: "Navigation to domain '\(host)' blocked by policy", sessionId: sessionId)
+                return
+            }
+            tab.load(url: url)
             let frameId = tab.id.uuidString
             let loaderId = UUID().uuidString
             sendResult(id: id, result: ["frameId": frameId, "loaderId": loaderId], sessionId: sessionId)
@@ -490,7 +510,7 @@ final class DinoCDPWebSocketSession {
                     "id": frameId,
                     "loaderId": loaderId,
                     "url": urlStr,
-                    "securityOrigin": url?.host ?? "",
+                    "securityOrigin": url.host ?? "",
                     "mimeType": "text/html"
                 ]
             ], sessionId: sessionId)
@@ -689,11 +709,25 @@ extension DinoAgentServer {
             return
         }
 
+        // Validate Origin header to protect against Cross-Site WebSocket Hijacking (CSWSH)
+        if let origin = headers["origin"], !origin.isEmpty, !Self.isAllowedOrigin(origin) {
+            sendResponse(connection: connection, status: "403 Forbidden", body: "{\"error\":\"Forbidden Origin: Cross-origin WebSocket access is disallowed\",\"code\":\"FORBIDDEN\",\"success\":false}")
+            return
+        }
+
         let magic = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
         let digest = Insecure.SHA1.hash(data: Data((key + magic).utf8))
         let acceptKey = Data(digest).base64EncodedString()
 
-        let response = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: \(acceptKey)\r\n\r\n"
+        var protoHeader = ""
+        if let proto = headers["sec-websocket-protocol"] {
+            let firstProto = proto.components(separatedBy: ",").first?.trimmingCharacters(in: .whitespaces) ?? ""
+            if !firstProto.isEmpty {
+                protoHeader = "Sec-WebSocket-Protocol: \(firstProto)\r\n"
+            }
+        }
+
+        let response = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: \(acceptKey)\r\n\(protoHeader)\r\n"
         let responseData = Data(response.utf8)
 
         connection.send(content: responseData, completion: .contentProcessed { [weak self] error in
@@ -717,7 +751,7 @@ extension DinoAgentServer {
         switch (method, cleanPath) {
         case ("GET", "/json/version"), ("GET", "/devtools/version"):
             let browserId = "00000000-0000-0000-0000-000000000000"
-            let wsUrl = "ws://127.0.0.1:\(self.port)/devtools/browser/\(browserId)"
+            let wsUrl = "ws://127.0.0.1:\(self.port)/devtools/browser/\(browserId)?token=\(self.token)"
             let versionObj: [String: Any] = [
                 "Browser": "Dino/\(Updater.currentVersion)",
                 "Protocol-Version": "1.3",
@@ -731,7 +765,7 @@ extension DinoAgentServer {
 
         case ("GET", "/json"), ("GET", "/json/list"):
             let targets = store.tabs.map { tab -> [String: Any] in
-                cdpTargetJSON(for: tab, serverPort: self.port)
+                cdpTargetJSON(for: tab, serverPort: self.port, token: self.token)
             }
             sendJSON(connection: connection, object: targets, origin: origin)
             return true

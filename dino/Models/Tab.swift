@@ -574,8 +574,15 @@ final class Tab: NSObject, Identifiable, ObservableObject {
             webView.stopLoading()
         }
         if url.isFileURL {
-            self.allowNextFileNavigation = true
             let resolved = url.standardizedFileURL.resolvingSymlinksInPath()
+            if DinoAgentServer.isSensitivePath(resolved.path) {
+                print("[dino] Blocked attempt to navigate to sensitive file: \(resolved.path)")
+                DinoAgentServer.shared.recordSecurityAudit(type: "sensitive_file_blocked", message: "Navigation to sensitive file blocked: \(resolved.path)", isBlocked: true)
+                self.isLoading = false
+                self.title = "Access Denied"
+                return
+            }
+            self.allowNextFileNavigation = true
             let ext = resolved.pathExtension.lowercased()
             let isWebDocument = ["html", "htm", "xhtml", "svg", "pdf"].contains(ext)
             let readDir = resolved.pathComponents.count > 2 ? resolved.deletingLastPathComponent() : URL(fileURLWithPath: "/")

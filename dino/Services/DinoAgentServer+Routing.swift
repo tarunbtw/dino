@@ -44,19 +44,6 @@ extension DinoAgentServer {
 
         let cleanPath = (path.count > 1 && path.hasSuffix("/")) ? String(path.dropLast()) : path
 
-        // Handle WebSocket Upgrade (CDP /devtools/page/*, /devtools/browser/*, or /cdp)
-        if headers["upgrade"]?.lowercased() == "websocket" {
-            handleCDPWebSocketUpgrade(path: cleanPath, headers: headers, connection: connection)
-            return
-        }
-
-        // Handle CDP HTTP Discovery Endpoints (/json/version, /json/list, /json/new, etc.)
-        if cleanPath.hasPrefix("/json") || cleanPath == "/devtools/version" {
-            if handleCDPDiscoveryRoute(method: method, cleanPath: cleanPath, queryString: queryString, bodyData: bodyData, queryItem: queryItem, connection: connection, origin: origin) {
-                return
-            }
-        }
-
         // Token Auth check (bypassed if DINO_DISABLE_AUTH=1 in environment)
         let authDisabled = ProcessInfo.processInfo.environment["DINO_DISABLE_AUTH"] == "1"
         var isAuthenticated = authDisabled
@@ -69,6 +56,13 @@ extension DinoAgentServer {
                 providedToken = customHeader.trimmingCharacters(in: .whitespaces)
             } else if let urlToken = queryItem("token") {
                 providedToken = urlToken.trimmingCharacters(in: .whitespaces)
+            } else if let proto = headers["sec-websocket-protocol"] {
+                let parts = proto.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+                if parts.count >= 2 && parts[0].lowercased() == "token" {
+                    providedToken = parts[1]
+                } else if parts.count == 1 && !parts[0].isEmpty {
+                    providedToken = parts[0]
+                }
             }
 
             if let tok = providedToken, Self.constantTimeEquals(tok, self.token) {
@@ -76,33 +70,46 @@ extension DinoAgentServer {
             }
         }
 
-        // Unauthenticated access is strictly limited to health check probe and local live stream viewer
-        let isPublicHealthCheck = ((method == "GET" || method == "HEAD") && (path == "/" || path == "/status" || cleanPath == "/" || cleanPath == "/status" || cleanPath == "/health" || cleanPath == "/version" || cleanPath == "/capabilities" || cleanPath == "/daemon" || cleanPath == "/headless" || cleanPath == "/socket" || cleanPath == "/view" || cleanPath == "/stream")) || ((method == "POST" || method == "DELETE") && (cleanPath == "/socket" || cleanPath == "/daemon"))
+        // Unauthenticated access is strictly limited to public read-only health checks
+        let isPublicHealthCheck = (method == "GET" || method == "HEAD") && (
+            cleanPath == "/" || cleanPath == "/status" || cleanPath == "/health" ||
+            cleanPath == "/version" || cleanPath == "/capabilities" ||
+            cleanPath == "/daemon" || cleanPath == "/headless" || cleanPath == "/socket"
+        )
         if !isAuthenticated {
             if isPublicHealthCheck {
-                if cleanPath == "/view" || cleanPath == "/stream" {
-                    // Allow local loopback live view and streaming to proceed to perception router
-                } else if !((method == "POST" || method == "DELETE") && (cleanPath == "/socket" || cleanPath == "/daemon")) {
-                    let publicStatusObj: [String: Any] = [
-                        "success": true,
-                        "dino": "active",
-                        "status": "healthy",
-                        "version": Updater.currentVersion,
-                        "build": Updater.currentBuild,
-                        "authRequired": true
-                    ]
-                    sendJSON(connection: connection, object: publicStatusObj, origin: origin)
-                    return
-                }
+                let publicStatusObj: [String: Any] = [
+                    "success": true,
+                    "dino": "active",
+                    "status": "healthy",
+                    "version": Updater.currentVersion,
+                    "build": Updater.currentBuild,
+                    "authRequired": true
+                ]
+                sendJSON(connection: connection, object: publicStatusObj, origin: origin)
+                return
             } else {
                 let authErrorObj: [String: Any] = [
-                    "error": "Unauthorized: valid Bearer token required in 'Authorization: Bearer <token>' or 'X-Dino-Token: <token>' header.",
+                    "error": "Unauthorized: valid Bearer token required in 'Authorization: Bearer <token>', 'X-Dino-Token: <token>', or '?token=' query parameter.",
                     "code": "UNAUTHORIZED",
                     "success": false,
                     "tokenPath": "~/.dino/agent-token",
                     "hint": "Read token from ~/.dino/agent-token, run 'dino token --header' via CLI, or set DINO_DISABLE_AUTH=1 in your environment for local development."
                 ]
                 sendJSON(connection: connection, status: "401 Unauthorized", object: authErrorObj, origin: origin)
+                return
+            }
+        }
+
+        // Handle WebSocket Upgrade (CDP /devtools/page/*, /devtools/browser/*, or /cdp) - requires authentication
+        if headers["upgrade"]?.lowercased() == "websocket" {
+            handleCDPWebSocketUpgrade(path: cleanPath, headers: headers, connection: connection)
+            return
+        }
+
+        // Handle CDP HTTP Discovery Endpoints (/json/version, /json/list, /json/new, etc.) - requires authentication
+        if cleanPath.hasPrefix("/json") || cleanPath == "/devtools/version" {
+            if handleCDPDiscoveryRoute(method: method, cleanPath: cleanPath, queryString: queryString, bodyData: bodyData, queryItem: queryItem, connection: connection, origin: origin) {
                 return
             }
         }
@@ -173,6 +180,11 @@ extension DinoAgentServer {
                 } else {
                     requestedPath = queryItem("socketPath") ?? queryItem("path")
                 }
+            }
+
+            if let targetPath = requestedPath, !DinoUnixSocketBridge.isSafeSocketPath(targetPath) {
+                sendResponse(connection: connection, status: "403 Forbidden", body: "{\"error\":\"Access denied: socket path must reside within ~/.dino or temporary directory\",\"code\":\"ACCESS_DENIED\",\"success\":false}", origin: origin)
+                return
             }
 
             if isUnbind {

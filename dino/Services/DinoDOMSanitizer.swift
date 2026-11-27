@@ -44,11 +44,28 @@ enum DinoDOMSanitizer {
         return clean
     }
 
+    private static func escapeXMLAttribute(_ text: String) -> String {
+        return text
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+    }
+
     /// Fences untrusted webpage content inside clear structural XML delimiters.
     static func frameUntrustedContent(domTree: String, url: URL?, title: String) -> String {
-        let safeURL = url?.absoluteString ?? "about:blank"
-        let safeTitle = sanitize(text: title)
-        let safeDOM = sanitize(text: domTree)
+        let rawURL = url?.absoluteString ?? "about:blank"
+        let safeURL = escapeXMLAttribute(rawURL)
+        let sanitizedTitle = sanitize(text: title)
+        let safeTitle = escapeXMLAttribute(sanitizedTitle)
+
+        var safeDOM = sanitize(text: domTree)
+        // Defend against delimiter breakout: escape closing tag case-insensitively
+        safeDOM = safeDOM.replacingOccurrences(
+            of: #"</\s*untrusted_web_page\s*>"#,
+            with: "&lt;/untrusted_web_page&gt;",
+            options: .regularExpression
+        )
 
         return """
         <untrusted_web_page url="\(safeURL)" title="\(safeTitle)">

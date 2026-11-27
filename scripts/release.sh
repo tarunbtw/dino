@@ -180,8 +180,10 @@ cp "$STAGING_DIR/Dino.app/Contents/MacOS/Dino" "$STAGING_DIR/Dino.app/Contents/M
 # Strip quarantine and AppleDouble metadata
 xattr -cr "$STAGING_DIR/Dino.app" 2>/dev/null || true
 
-# Codesign bundle with entitlements
-codesign --force --deep --sign - --entitlements dino/dino.entitlements "$STAGING_DIR/Dino.app" >/dev/null 2>&1
+# Codesign bundle with entitlements and verify code signature integrity
+codesign --force --deep --sign - --entitlements dino/dino.entitlements "$STAGING_DIR/Dino.app"
+codesign --verify --deep --strict "$STAGING_DIR/Dino.app"
+echo "==> Code signature verified successfully."
 
 # 6. Archive Creation with ditto (immune to AppleDouble resource forks)
 echo "==> Packaging archive with ditto..."
@@ -200,10 +202,35 @@ echo "==> Computed SHA-256: ${SHA256}"
 echo "==> Unregistering intermediate build artifacts and deleting build directories..."
 cleanup_build_artifacts
 
-# 9. Update Checksums in Casks & Sync appcast.json
+# 9. Update Checksums in Casks, Sync appcast.json & Pin SDK Checksum
 echo "==> Updating checksum in packaging/homebrew/dino.rb and tap..."
-sed -i '' -E "s/sha256 \"[a-f0-9]{64}\"/sha256 \"${SHA256}\"/g" packaging/homebrew/dino.rb
-sed -i '' -E "s/sha256 \"[a-f0-9]{64}\"/sha256 \"${SHA256}\"/g" "$TAP_DIR/Casks/dino.rb"
+sed -i '' -E "s/sha256 .*/sha256 \"${SHA256}\"/g" packaging/homebrew/dino.rb
+sed -i '' -E "s/sha256 .*/sha256 \"${SHA256}\"/g" "$TAP_DIR/Casks/dino.rb"
+
+# Strict verification: Ensure neither cask uses :no_check and both match exact SHA-256
+for cask_file in "packaging/homebrew/dino.rb" "$TAP_DIR/Casks/dino.rb"; do
+  if grep -q ":no_check" "$cask_file"; then
+    echo "❌ Security Error: ':no_check' found in $cask_file. Releases must have pinned cryptographic hashes." >&2
+    exit 1
+  fi
+  if ! grep -q "sha256 \"${SHA256}\"" "$cask_file"; then
+    echo "❌ Security Error: Failed to update sha256 in $cask_file (expected ${SHA256})" >&2
+    exit 1
+  fi
+done
+
+echo "==> Pinning SHA-256 checksum in TypeScript SDK..."
+node -e "
+  const fs = require('fs');
+  const p = 'sdks/typescript/bin/dino.js';
+  let content = fs.readFileSync(p, 'utf8');
+  if (content.includes(\"'${NEW_VERSION}':\")) {
+    content = content.replace(new RegExp(\"'\" + '${NEW_VERSION}' + \"': '[a-f0-9]{64}'\"), \"'${NEW_VERSION}': '${SHA256}'\");
+  } else {
+    content = content.replace(/const RELEASE_CHECKSUMS = \\{/, \`const RELEASE_CHECKSUMS = {\\\\n  '${NEW_VERSION}': '${SHA256}',\`);
+  }
+  fs.writeFileSync(p, content);
+"
 
 echo "==> Updating appcast.json for auto-updater..."
 cat <<EOF > "$PROJECT_ROOT/appcast.json"

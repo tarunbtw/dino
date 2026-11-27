@@ -125,6 +125,15 @@ extension DinoAgentServer {
             }
         }
 
+        // Validate Host header to protect against DNS rebinding attacks on loopback
+        if let hostHeader = headers["host"]?.lowercased().trimmingCharacters(in: .whitespaces), !hostHeader.isEmpty {
+            let hostClean = hostHeader.hasPrefix("[") ? (hostHeader.components(separatedBy: "]").first ?? "") + "]" : (hostHeader.components(separatedBy: ":").first ?? hostHeader)
+            guard ["127.0.0.1", "localhost", "::1", "[::1]"].contains(hostClean) else {
+                sendResponse(connection: connection, status: "400 Bad Request", body: "{\"error\":\"Invalid Host header: '\(hostClean)'\",\"code\":\"INVALID_HOST\",\"success\":false}")
+                return
+            }
+        }
+
         Task { @MainActor in
             self.requestCount += 1
             await self.routeRequest(method: method, path: path, queryString: queryString, headers: headers, bodyData: bodyData, connection: connection)

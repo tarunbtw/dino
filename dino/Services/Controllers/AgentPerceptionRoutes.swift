@@ -576,6 +576,7 @@ extension DinoAgentServer {
             return true
 
         case ("GET", "/view"), ("HEAD", "/view"):
+            let tokenParam = self.token.isEmpty ? "" : "?token=\(self.token)"
             let html = """
             <!DOCTYPE html>
             <html lang="en">
@@ -595,7 +596,7 @@ extension DinoAgentServer {
             <body>
               <div class="badge"><div class="pulse"></div> Dino Live Observability (15 FPS)</div>
               <div class="screen">
-                <img src="/stream" alt="Live View Stream" />
+                <img src="/stream\(tokenParam)" alt="Live View Stream" />
               </div>
             </body>
             </html>
@@ -605,12 +606,16 @@ extension DinoAgentServer {
 
         case ("GET", "/stream"), ("HEAD", "/stream"):
             guard let activeTab = requireTab(id: queryItem("tabId"), connection: connection, origin: origin) else { return true }
+            var corsHeader = ""
+            if let origin = origin, !origin.isEmpty, Self.isAllowedOrigin(origin) {
+                corsHeader = "Access-Control-Allow-Origin: \(origin)\r\n"
+            }
             let initialHeaders = """
             HTTP/1.1 200 OK\r
             Content-Type: multipart/x-mixed-replace; boundary=--frame\r
             Cache-Control: no-cache, no-store, must-revalidate\r
             Connection: close\r
-            Access-Control-Allow-Origin: *\r\n\r\n
+            \(corsHeader)\r\n
             """
             if method == "HEAD" {
                 connection.send(content: Data(initialHeaders.utf8), completion: .contentProcessed { _ in

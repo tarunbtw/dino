@@ -51,11 +51,42 @@ final class DinoUnixSocketBridge: @unchecked Sendable {
         return (cwd as NSString).appendingPathComponent(expanded)
     }
 
+    /// Checks if a socket path is within approved directories (~/.dino or temporary directories) and not a sensitive OS file.
+    static func isSafeSocketPath(_ raw: String) -> Bool {
+        let expanded = resolvePath(raw)
+        let dinoDir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".dino").standardizedFileURL.path
+        let tmpDir = URL(fileURLWithPath: NSTemporaryDirectory()).standardizedFileURL.path
+        let canonical = URL(fileURLWithPath: expanded).standardizedFileURL.resolvingSymlinksInPath().path
+        if canonical.hasPrefix(dinoDir + "/") || canonical == dinoDir {
+            return !DinoAgentServer.isSensitivePath(canonical)
+        }
+        if canonical.hasPrefix(tmpDir + "/") || canonical.hasPrefix("/tmp/dino-") || canonical.hasPrefix("/private/tmp/dino-") {
+            return !DinoAgentServer.isSensitivePath(canonical)
+        }
+        return false
+    }
+
+    /// Safely unlinks a path ONLY if it is an existing UNIX domain socket (S_IFSOCK), never unlinking regular files or directories.
+    static func safeUnlinkSocket(_ path: String) {
+        var statBuf = stat()
+        if lstat(path, &statBuf) == 0 {
+            guard (statBuf.st_mode & S_IFMT) == S_IFSOCK else {
+                print("[dino] Refusing to unlink non-socket inode at: \(path)")
+                return
+            }
+            unlink(path)
+        }
+    }
+
     private init() {}
 
     func start(port: UInt16, token: String, socketPath: String? = nil) {
         if let socketPath = socketPath, !socketPath.isEmpty {
-            Self.configuredSocketPath = socketPath
+            if Self.isSafeSocketPath(socketPath) {
+                Self.configuredSocketPath = socketPath
+            } else {
+                print("[dino] Warning: Ignoring unsafe socket path: \(socketPath)")
+            }
         }
         queue.async { [weak self] in
             self?.startSync(port: port, token: token)
@@ -77,7 +108,7 @@ final class DinoUnixSocketBridge: @unchecked Sendable {
             }
             let oldPath = Self.defaultSocketPath
             self.stopSync()
-            unlink(oldPath)
+            Self.safeUnlinkSocket(oldPath)
             Self.configuredSocketPath = nil
             completion?(true)
         }
@@ -86,6 +117,10 @@ final class DinoUnixSocketBridge: @unchecked Sendable {
     /// Rebinds the unix domain socket to a new path (or restarts on existing path) dynamically at runtime.
     func rebind(newPath: String? = nil, completion: (@Sendable (Bool, String?) -> Void)? = nil) {
         if let newPath = newPath, !newPath.isEmpty {
+            guard Self.isSafeSocketPath(newPath) else {
+                completion?(false, "Disallowed socket path: must reside within ~/.dino or temporary directory")
+                return
+            }
             Self.configuredSocketPath = newPath
         }
         queue.async { [weak self] in
@@ -120,7 +155,7 @@ final class DinoUnixSocketBridge: @unchecked Sendable {
         ])
 
         // Clean up any stale socket file
-        unlink(socketPath)
+        Self.safeUnlinkSocket(socketPath)
 
         let fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else {
@@ -187,7 +222,7 @@ final class DinoUnixSocketBridge: @unchecked Sendable {
             lastError = "listen failed: \(err) (\(errStr))"
             stateLock.unlock()
             Darwin.close(fd)
-            unlink(socketPath)
+            Self.safeUnlinkSocket(socketPath)
             return
         }
 
@@ -203,7 +238,7 @@ final class DinoUnixSocketBridge: @unchecked Sendable {
         }
         readSource.setCancelHandler {
             Darwin.close(fd)
-            unlink(socketPath)
+            DinoUnixSocketBridge.safeUnlinkSocket(socketPath)
         }
         self.source = readSource
         readSource.resume()
@@ -223,7 +258,7 @@ final class DinoUnixSocketBridge: @unchecked Sendable {
 
         source?.cancel()
         source = nil
-        unlink(Self.defaultSocketPath)
+        Self.safeUnlinkSocket(Self.defaultSocketPath)
         print("[dino] IPC socket closed")
     }
 
